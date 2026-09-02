@@ -145,6 +145,11 @@
 
 **C-69【必须】** `NOT_ATTEMPTED` 当且仅当 `agent_started_at IS NULL`。
 
+**C-77【必须】** `agent_started_at` 的置位时刻定义为：**Agent 容器成功启动、且任务输入已写入其标准输入的那一刻**。
+
+> 为什么要定这么死：整张合法组合表都靠这个字段来区分"没给 AI 机会"和"给了机会但我们没拿到结论"。
+> 举个会分歧的例子：鉴权失败（`AGENT_AUTH_ERROR`）——如果是 probe 阶段就发现密钥无效，容器还没起，算未启动；如果是容器跑起来、AI 调 API 才拿到 401，算已启动。按上面的定义，这两种情况分得清。
+
 > 为什么要分"从未启动"和"启动后平台故障"：前者对 AI 完全没有信息量；后者说明 AI 已经消耗了时间和 token（成本要计入），只是我们没能拿到结论。两者混用会让成本统计对不上。
 
 > v1.0/v1.1 修正记录：原 C-09 规定 `FAILED` 时 `agent_outcome` 必为 `NULL`，但故障映射表（C-18）把平台故障全部映射成 `NOT_ATTEMPTED`（非空）。两条直接矛盾。现用 C-68 的组合表统一。
@@ -248,15 +253,18 @@
 | `AGENT_TIMEOUT` | **AI** | `UNRESOLVED` | **否** | 0 |
 | `AGENT_RUNTIME_ERROR` | **AI** | `UNRESOLVED` | **否** | 1 |
 | `PATCH_APPLY_FAILED` | **AI** | `INVALID_PATCH` | **否** | 0 |
-| `ENV_BUILD_FAILED` | 平台/题目 | `NOT_ATTEMPTED` | **是** | 1 |
-| `WORKSPACE_ERROR` | 平台 | `NOT_ATTEMPTED` | **是** | 1 |
-| `SANDBOX_ERROR` | 平台 | `NOT_ATTEMPTED` | **是** | 2 |
-| `OOM_KILLED` | 平台/题目 | `NOT_ATTEMPTED` | **是** | 1（降配后） |
-| `TEST_DISCOVERY_ERROR` | 题目/平台 | `NOT_ATTEMPTED` | **是** | 1 |
-| `HARNESS_ERROR` | 平台 | `NOT_ATTEMPTED` | **是** | 1 |
-| `AGENT_AUTH_ERROR` | 外部服务 | `NOT_ATTEMPTED` | **是** | 3（带退避） |
+| `ENV_BUILD_FAILED` | 平台/题目 | `NOT_ATTEMPTED`（必然未启动） | **是** | 1 |
+| `WORKSPACE_ERROR` | 平台 | `NOT_ATTEMPTED`（必然未启动） | **是** | 1 |
+| `SANDBOX_ERROR` | 平台 | 按 C-69 定 | **是** | 2 |
+| `OOM_KILLED` | 平台/题目 | `NULL`（必然已启动） | **是** | 1（降配后） |
+| `TEST_DISCOVERY_ERROR` | 题目/平台 | `NULL`（必然已启动） | **是** | 1 |
+| `HARNESS_ERROR` | 平台 | 按 C-69 定 | **是** | 1 |
+| `AGENT_AUTH_ERROR` | 外部服务 | 按 C-69 定 | **是** | 3（带退避） |
 | `TEST_TIMEOUT` | 见 C-20 | 见 C-20 | 见 C-20 | 1 |
 | `CANCELLED` | 人工 | `NULL` | 否 | 0 |
+
+> **v1.2 修正记录**：原表把所有平台故障一律映射成 `NOT_ATTEMPTED`，与 C-69（`NOT_ATTEMPTED` 当且仅当 `agent_started_at IS NULL`）矛盾。
+> `OOM_KILLED` 只可能发生在容器跑起来之后，`TEST_DISCOVERY_ERROR` 只可能发生在判定阶段——这两种情况 AI 早就启动过了，按 C-69 必须是 `NULL`。这个矛盾是 §4.3 的穷举检查发现的。
 
 **C-20【必须】** `TEST_TIMEOUT` 的归属按下面这个固定流程判定，**不允许凭经验直接下结论**：
 
@@ -422,6 +430,63 @@ QUEUED → PREPARING → AGENT_RUNNING → PATCH_CAPTURED → TESTING → JUDGIN
 
 ---
 
+## 4.3 合法组合真值表（机器穷举，冻结前的最后一道检查）
+
+把 `lifecycle_status`（10 个取值）× `infra_outcome`（13 个）× `agent_outcome`（6 个）全部 **780 种组合**跑一遍，逐格判定合法性。
+
+由 `docs/_protocol_truth_table.py` 生成，**不是手写的**。改动协议后重跑一次即可确认没有引入新的空洞或重叠。
+
+```
+穷举组合总数：780
+  合法 110 · 非法 520 · 不可能 150
+
+空洞检查（每个取值是否都能到达）
+  lifecycle 终态: ✅ 全部可达
+  infra_outcome: ✅ 全部可达
+  agent_outcome: ✅ 全部可达
+
+重叠检查（同一 lifecycle+infra 是否有多个 agent_outcome 且缺少区分条件）
+  ✅ 无未区分的重叠
+  以下 4 处是设计上就靠附加条件区分的，不是问题：
+    COMPLETED + SUCCESS            → RESOLVED / UNRESOLVED / EMPTY_PATCH
+    FAILED + AGENT_AUTH_ERROR      → NOT_ATTEMPTED / NULL
+    FAILED + SANDBOX_ERROR         → NOT_ATTEMPTED / NULL
+    FAILED + HARNESS_ERROR         → NOT_ATTEMPTED / NULL
+```
+
+### 全部合法组合（共 20 类）
+
+| `lifecycle_status` | `infra_outcome` | `agent_outcome` | 区分条件 |
+|:---|:---|:---|:---|
+| 全部非终态 | 任意 | `NULL` | 非终态一律为空（C-09） |
+| `COMPLETED` | `SUCCESS` | `RESOLVED` | F2P 全过且 P2P 全过 |
+| `COMPLETED` | `SUCCESS` | `UNRESOLVED` | 补丁非空但没同时满足两个条件 |
+| `COMPLETED` | `SUCCESS` | `EMPTY_PATCH` | AI 正常退出且过滤后补丁为空 |
+| `COMPLETED` | `AGENT_TIMEOUT` | `UNRESOLVED` | 补丁可为空（C-08 例外） |
+| `COMPLETED` | `AGENT_RUNTIME_ERROR` | `UNRESOLVED` | 每个 attempt 各自定性，与是否还会重试无关 |
+| `COMPLETED` | `PATCH_APPLY_FAILED` | `INVALID_PATCH` | — |
+| `COMPLETED` | `TEST_TIMEOUT` | `UNRESOLVED` | 对照组正常，只有打了补丁才超时 → AI 的问题（C-20 第 4 步） |
+| `FAILED` | `AGENT_AUTH_ERROR` | `NOT_ATTEMPTED` | agent_started_at IS NULL（容器启动前就鉴权失败） |
+| `FAILED` | `AGENT_AUTH_ERROR` | `NULL` | agent_started_at IS NOT NULL（跑起来后才 401） |
+| `FAILED` | `ENV_BUILD_FAILED` | `NOT_ATTEMPTED` | 只可能发生在 PREPARING，AI 必然未启动 |
+| `FAILED` | `WORKSPACE_ERROR` | `NOT_ATTEMPTED` | 只可能发生在 PREPARING，AI 必然未启动 |
+| `FAILED` | `SANDBOX_ERROR` | `NOT_ATTEMPTED` | agent_started_at IS NULL（建 Agent 容器就失败） |
+| `FAILED` | `SANDBOX_ERROR` | `NULL` | agent_started_at IS NOT NULL（建测试容器时失败） |
+| `FAILED` | `OOM_KILLED` | `NULL` | 只可能发生在 AGENT_RUNNING 或 TESTING，AI 必然已启动 |
+| `FAILED` | `TEST_TIMEOUT` | `NULL` | 对照组也超时 → 环境问题（C-20 第 5 步） |
+| `FAILED` | `TEST_DISCOVERY_ERROR` | `NULL` | 只可能发生在 JUDGING，AI 必然已启动 |
+| `FAILED` | `HARNESS_ERROR` | `NOT_ATTEMPTED` | agent_started_at IS NULL |
+| `FAILED` | `HARNESS_ERROR` | `NULL` | agent_started_at IS NOT NULL |
+| `CANCELLED` | `CANCELLED` | `NULL` | — |
+
+**C-78【必须】** 上表之外的任何组合都视为程序错误，必须在写库前拦下并抛异常，**禁止**静默落库。
+
+**C-79【必须】** 本表由脚本生成。协议中任何影响状态取值的改动，都要重跑 `docs/_protocol_truth_table.py` 并把输出同步回本节。
+
+> 这条检查在 v1.2 起草时就抓到了一个矛盾：C-18 原本把所有平台故障一律映射成 `NOT_ATTEMPTED`，但 `OOM_KILLED` 和 `TEST_DISCOVERY_ERROR` 必然发生在 AI 启动之后，按 C-69 只能是 `NULL`。人工逐条看两遍都没发现，穷举一跑就出来了。
+
+---
+
 ## 5 确定性要求
 
 **C-34【必须】** **判定逻辑本身必须完全确定。** 给定完全相同的逐条用例状态，判定函数必须返回完全相同的 `agent_outcome`。这是一个纯函数，不允许有任何随机性。
@@ -563,6 +628,7 @@ tox.ini             setup.cfg       pyproject.toml
 | 编号 | 断言 |
 |:---|:---|
 | T-1 | 判定真值表：F2P 全过 + P2P 全过 → `RESOLVED`；其余组合 → `UNRESOLVED` |
+| T-1a | **组合合法性**：遍历 §4.3 的 780 种组合，合法的能写库、非法的抛异常（C-78）。测试数据直接由 `docs/_protocol_truth_table.py` 生成 |
 | T-2 | F2P 中有 `MISSING` → 按 C-13 的三分支处理；解析器问题走 `FAILED`，不罚 AI |
 | T-3 | 空补丁 → `EMPTY_PATCH` |
 | T-4 | 补丁打不上 → `INVALID_PATCH` |
@@ -583,6 +649,8 @@ tox.ini             setup.cfg       pyproject.toml
 | T-18 | `gold_patch` 命中受保护路径 → 题目验证判无效（C-64） |
 | T-19 | 只改受保护文件的 AI → `EMPTY_PATCH` 且 `protected_path_edit_attempted = true`（C-08a、C-08b） |
 | T-20 | `infra_outcome ≠ SUCCESS` 时 `agent_outcome` 不能是 `EMPTY_PATCH`（C-30） |
+| T-22 | `NOT_ATTEMPTED` 出现时 `agent_started_at` 必为空，反之亦然（C-69、C-77） |
+| T-23 | `OOM_KILLED` / `TEST_DISCOVERY_ERROR` 永远不会得到 `NOT_ATTEMPTED`（C-18 修正项） |
 | T-21 | 成本与 Token 累计全部 attempt，解决率只看 canonical attempt（C-56） |
 
 **C-50【必须】** T-7 和 T-8 作为题库发布的门槛，不通过不许发布。
@@ -609,6 +677,7 @@ tox.ini             setup.cfg       pyproject.toml
 | v1.0-draft | 2026-09-02 | 起草 | — |
 | v1.1-draft | 2026-09-02 | 第一轮评审结论落地 | 评审 |
 | v1.2-draft | 2026-09-02 | 第二轮评审：Q7~Q9 定案 + 修掉 7 组内部问题 | 评审 |
+| v1.2-draft | 2026-09-02 | 追加 §4.3 机器穷举真值表；据此修掉 C-18 的第 8 组矛盾 | 穷举检查 |
 
 **v1.2-draft 改动清单**
 
@@ -695,7 +764,8 @@ Q7~Q9 定案：Q7 维持不做影子判定（改为离线分析，C-09b、C-09c�
 | 评审日期 | 2026-09-02 | |
 | 参与人 | | |
 | 全部条款逐条过完 | ☐ | ☐ |
-| §10.2 的 Q7~Q9 有结论 | — | ☐ |
-| 复查改动未引入新矛盾 | — | ☐ |
+| §10.2 的 Q7~Q9 有结论 | — | ✅ 已定（第二轮）|
+| 复查改动未引入新矛盾 | — | ✅ §4.3 穷举通过（780 组合，0 空洞 0 重叠）|
+| C-18 与 C-69 的矛盾已修 | — | ✅ |
 | 冻结版本号 | — | v1.1 |
 | 状态变更为 FROZEN | ☐ 否 | ☐ |
