@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -155,6 +156,15 @@ def ensure_labels(tasks: list[Task]) -> None:
         )
 
 
+#: 两次创建之间的间隔（秒）。
+#:
+#: GitHub 有个不写在文档里的"二级限流"：短时间内连续创建内容会被拦，
+#: 报错是 "You have exceeded a secondary rate limit"。实测阈值大约每分钟 20 次。
+#: 57 个 Issue 不加间隔一定会撞上，而且撞上之后已经建了一半，
+#: 重跑虽然幂等但很难看清断在哪。3.5 秒一个约等于每分钟 17 个，稳。
+DEFAULT_SLEEP_SECONDS = 3.5
+
+
 def create_issue(task: Task) -> None:
     subprocess.run(
         [
@@ -177,6 +187,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--apply", action="store_true", help="真的创建 Issue（默认只预览）")
     parser.add_argument("--epic", help="只处理某个 Epic，如 E2")
     parser.add_argument("--include-done", action="store_true", help="连已完成的任务也建")
+    parser.add_argument(
+        "--sleep",
+        type=float,
+        default=DEFAULT_SLEEP_SECONDS,
+        help=f"两次创建之间等几秒，防 GitHub 二级限流（默认 {DEFAULT_SLEEP_SECONDS}）",
+    )
     args = parser.parse_args(argv)
 
     tasks = parse_tasks(TASKS_DOC.read_text(encoding="utf-8"))
@@ -190,7 +206,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if not args.apply:
-        print(f"预览：会创建 {len(tasks)} 个 Issue（加 --apply 才会真的建）\n")
+        minutes = len(tasks) * args.sleep / 60
+        print(
+            f"预览：会创建 {len(tasks)} 个 Issue，约 {minutes:.0f} 分钟（加 --apply 才会真的建）\n"
+        )
         for task in tasks:
             print(f"  {task.issue_title}")
             effort = f" · 预估 {task.effort}" if task.effort else ""
@@ -203,14 +222,21 @@ def main(argv: list[str] | None = None) -> int:
 
     ensure_labels(tasks)
     existing = existing_issue_titles()
-    created = skipped = 0
-    for task in tasks:
-        if task.issue_title in existing:
-            print(f"  跳过（已存在）：{task.issue_title}")
-            skipped += 1
-            continue
+    todo = [t for t in tasks if t.issue_title not in existing]
+    skipped = len(tasks) - len(todo)
+    if skipped:
+        print(f"跳过 {skipped} 个已存在的 Issue")
+    if todo:
+        minutes = len(todo) * args.sleep / 60
+        print(f"要建 {len(todo)} 个，每个间隔 {args.sleep} 秒，大约 {minutes:.0f} 分钟。\n")
+
+    created = 0
+    for index, task in enumerate(todo, 1):
+        print(f"  [{index}/{len(todo)}] {task.issue_title}")
         create_issue(task)
         created += 1
+        if index < len(todo):
+            time.sleep(args.sleep)
 
     print(f"\n完成：新建 {created} 个，跳过 {skipped} 个")
     print("看板需要在网页上建（Projects → New project → 关联本仓库），gh 建不了带字段的看板。")
