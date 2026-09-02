@@ -1,0 +1,46 @@
+# 提交前自动检查。安装：pre-commit install && pre-commit install --hook-type commit-msg
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=512"]     # 大文件走制品存储，不进仓库（AGENTS.md 第 7 节）
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: local
+    hooks:
+      - id: check-secrets
+        name: 扫描密钥
+        entry: python3 scripts/check_secrets.py
+        language: system
+        pass_filenames: true
+
+      - id: check-commit-msg
+        name: 检查提交信息格式
+        entry: python3 scripts/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
+
+      - id: ruff-check
+        name: ruff 代码检查
+        entry: bash -c 'cd backend && uv run ruff check --fix .'
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: ruff-format
+        name: ruff 格式化
+        entry: bash -c 'cd backend && uv run ruff format .'
+        language: system
+        types: [python]
+        pass_filenames: false
