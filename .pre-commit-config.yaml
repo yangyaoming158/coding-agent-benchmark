@@ -33,14 +33,14 @@ repos:
 
       - id: ruff-check
         name: ruff 代码检查
-        entry: bash -c 'cd backend && uv run ruff check --fix .'
+        entry: bash -c 'cd backend && uv run ruff check --fix . ../scripts ../docs'
         language: system
         types: [python]
         pass_filenames: false
 
       - id: ruff-format
         name: ruff 格式化
-        entry: bash -c 'cd backend && uv run ruff format .'
+        entry: bash -c 'cd backend && uv run ruff format . ../scripts ../docs'
         language: system
         types: [python]
         pass_filenames: false

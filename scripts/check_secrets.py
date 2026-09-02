@@ -3,6 +3,7 @@
 
 对应 AGENTS.md 第 7 节：这个项目要接好几个大模型服务商，密钥泄漏风险高。
 """
+
 from __future__ import annotations
 
 import re

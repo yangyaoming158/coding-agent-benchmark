@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """穷举 lifecycle_status × infra_outcome × agent_outcome 的全部组合，
 逐格判定合法性，并检查有没有空洞（某个取值到不了）或重叠（同一情况有两种解释）。
 
@@ -7,16 +6,36 @@
 
 用法：python3 docs/_protocol_truth_table.py
 """
+
 from itertools import product
 
-NON_TERMINAL = ["QUEUED", "PREPARING", "AGENT_RUNNING", "PATCH_CAPTURED",
-                "TESTING", "JUDGING", "ANALYZING"]
+NON_TERMINAL = [
+    "QUEUED",
+    "PREPARING",
+    "AGENT_RUNNING",
+    "PATCH_CAPTURED",
+    "TESTING",
+    "JUDGING",
+    "ANALYZING",
+]
 TERMINAL = ["COMPLETED", "FAILED", "CANCELLED"]
 LIFECYCLE = NON_TERMINAL + TERMINAL
 
-INFRA = ["SUCCESS", "AGENT_TIMEOUT", "AGENT_RUNTIME_ERROR", "PATCH_APPLY_FAILED",
-         "AGENT_AUTH_ERROR", "ENV_BUILD_FAILED", "WORKSPACE_ERROR", "SANDBOX_ERROR",
-         "OOM_KILLED", "TEST_TIMEOUT", "TEST_DISCOVERY_ERROR", "HARNESS_ERROR", "CANCELLED"]
+INFRA = [
+    "SUCCESS",
+    "AGENT_TIMEOUT",
+    "AGENT_RUNTIME_ERROR",
+    "PATCH_APPLY_FAILED",
+    "AGENT_AUTH_ERROR",
+    "ENV_BUILD_FAILED",
+    "WORKSPACE_ERROR",
+    "SANDBOX_ERROR",
+    "OOM_KILLED",
+    "TEST_TIMEOUT",
+    "TEST_DISCOVERY_ERROR",
+    "HARNESS_ERROR",
+    "CANCELLED",
+]
 
 AGENT = ["RESOLVED", "UNRESOLVED", "EMPTY_PATCH", "INVALID_PATCH", "NOT_ATTEMPTED", "NULL"]
 
@@ -24,8 +43,8 @@ AGENT = ["RESOLVED", "UNRESOLVED", "EMPTY_PATCH", "INVALID_PATCH", "NOT_ATTEMPTE
 # 条件为 "" 表示无附加条件
 LEGAL = {
     "SUCCESS": [
-        ("COMPLETED", "RESOLVED",    "F2P 全过且 P2P 全过"),
-        ("COMPLETED", "UNRESOLVED",  "补丁非空但没同时满足两个条件"),
+        ("COMPLETED", "RESOLVED", "F2P 全过且 P2P 全过"),
+        ("COMPLETED", "UNRESOLVED", "补丁非空但没同时满足两个条件"),
         ("COMPLETED", "EMPTY_PATCH", "AI 正常退出且过滤后补丁为空"),
     ],
     "AGENT_TIMEOUT": [
@@ -39,7 +58,7 @@ LEGAL = {
     ],
     "AGENT_AUTH_ERROR": [
         ("FAILED", "NOT_ATTEMPTED", "agent_started_at IS NULL（容器启动前就鉴权失败）"),
-        ("FAILED", "NULL",          "agent_started_at IS NOT NULL（跑起来后才 401）"),
+        ("FAILED", "NULL", "agent_started_at IS NOT NULL（跑起来后才 401）"),
     ],
     "ENV_BUILD_FAILED": [
         ("FAILED", "NOT_ATTEMPTED", "只可能发生在 PREPARING，AI 必然未启动"),
@@ -49,26 +68,27 @@ LEGAL = {
     ],
     "SANDBOX_ERROR": [
         ("FAILED", "NOT_ATTEMPTED", "agent_started_at IS NULL（建 Agent 容器就失败）"),
-        ("FAILED", "NULL",          "agent_started_at IS NOT NULL（建测试容器时失败）"),
+        ("FAILED", "NULL", "agent_started_at IS NOT NULL（建测试容器时失败）"),
     ],
     "OOM_KILLED": [
         ("FAILED", "NULL", "只可能发生在 AGENT_RUNNING 或 TESTING，AI 必然已启动"),
     ],
     "TEST_TIMEOUT": [
         ("COMPLETED", "UNRESOLVED", "对照组正常，只有打了补丁才超时 → AI 的问题（C-20 第 4 步）"),
-        ("FAILED",    "NULL",       "对照组也超时 → 环境问题（C-20 第 5 步）"),
+        ("FAILED", "NULL", "对照组也超时 → 环境问题（C-20 第 5 步）"),
     ],
     "TEST_DISCOVERY_ERROR": [
         ("FAILED", "NULL", "只可能发生在 JUDGING，AI 必然已启动"),
     ],
     "HARNESS_ERROR": [
         ("FAILED", "NOT_ATTEMPTED", "agent_started_at IS NULL"),
-        ("FAILED", "NULL",          "agent_started_at IS NOT NULL"),
+        ("FAILED", "NULL", "agent_started_at IS NOT NULL"),
     ],
     "CANCELLED": [
         ("CANCELLED", "NULL", ""),
     ],
 }
+
 
 def classify(life, infra, agent):
     """返回 (标记, 说明)。标记 ∈ {合法, 非法, 不可能}"""
@@ -76,38 +96,56 @@ def classify(life, infra, agent):
         if agent == "NULL":
             return "合法", "非终态，agent_outcome 必为 NULL（C-09）"
         return "非法", "非终态不允许有 agent_outcome（C-09）"
-    for (l, a, cond) in LEGAL.get(infra, []):
-        if l == life and a == agent:
+    for legal_life, legal_agent, cond in LEGAL.get(infra, []):
+        if legal_life == life and legal_agent == agent:
             return "合法", cond
     # 终态但不在合法表里
-    if any(l == life for (l, _, _) in LEGAL.get(infra, [])):
+    if any(legal_life == life for (legal_life, _, _) in LEGAL.get(infra, [])):
         return "非法", f"{infra} 在 {life} 下不允许取 {agent}"
     return "不可能", f"{infra} 不会以 {life} 结束"
 
+
 def main():
-    rows = [(l, i, a) + classify(l, i, a) for l, i, a in product(LIFECYCLE, INFRA, AGENT)]
+    rows = [
+        (life, infra, agent, *classify(life, infra, agent))
+        for life, infra, agent in product(LIFECYCLE, INFRA, AGENT)
+    ]
     legal = [r for r in rows if r[3] == "合法"]
     print(f"穷举组合总数：{len(rows)}")
-    print(f"  合法 {len(legal)} · 非法 {sum(1 for r in rows if r[3]=='非法')} "
-          f"· 不可能 {sum(1 for r in rows if r[3]=='不可能')}")
+    print(
+        f"  合法 {len(legal)} · 非法 {sum(1 for r in rows if r[3] == '非法')} "
+        f"· 不可能 {sum(1 for r in rows if r[3] == '不可能')}"
+    )
 
     print("\n── 空洞检查（每个取值是否都能到达）──")
     ok = True
-    for name, pool, idx in [("lifecycle 终态", TERMINAL, 0), ("infra_outcome", INFRA, 1), ("agent_outcome", AGENT, 2)]:
+    checks = [
+        ("lifecycle 终态", TERMINAL, 0),
+        ("infra_outcome", INFRA, 1),
+        ("agent_outcome", AGENT, 2),
+    ]
+    for name, pool, idx in checks:
         unreachable = [v for v in pool if not any(r[idx] == v for r in legal)]
-        print(f"  {name}: {'✅ 全部可达' if not unreachable else '❌ 到不了 → ' + str(unreachable)}")
+        print(
+            f"  {name}: {'✅ 全部可达' if not unreachable else '❌ 到不了 → ' + str(unreachable)}"
+        )
         ok &= not unreachable
 
     print("\n── 重叠检查（同一 lifecycle+infra 是否有多个 agent_outcome 且缺少区分条件）──")
     for infra in INFRA:
         for life in TERMINAL:
-            hits = [(a, c) for (l, a, c) in LEGAL.get(infra, []) if l == life]
+            hits = [
+                (legal_agent, cond)
+                for (legal_life, legal_agent, cond) in LEGAL.get(infra, [])
+                if legal_life == life
+            ]
             if len(hits) > 1:
                 if any(not c for _, c in hits):
                     print(f"  ❌ {life} + {infra}: 多个取值但有一个没写区分条件 → {hits}")
                     ok = False
                 else:
-                    print(f"  ⚠️  {life} + {infra}: {len(hits)} 个取值，靠条件区分 → {[a for a, _ in hits]}")
+                    names = [agent for agent, _ in hits]
+                    print(f"  ⚠️  {life} + {infra}: {len(hits)} 个取值，靠条件区分 → {names}")
     print("  （标 ⚠️ 的是设计上就需要靠附加条件区分的，不是问题）")
 
     print("\n── 合法组合明细（可直接嵌入协议）──\n")
@@ -116,12 +154,13 @@ def main():
     print("| 全部非终态 | 任意 | `NULL` | 非终态一律为空（C-09） |")
     for life in TERMINAL:
         for infra in INFRA:
-            for (l, a, c) in LEGAL.get(infra, []):
-                if l == life:
-                    print(f"| `{life}` | `{infra}` | `{a}` | {c or '—'} |")
+            for legal_life, legal_agent, cond in LEGAL.get(infra, []):
+                if legal_life == life:
+                    print(f"| `{life}` | `{infra}` | `{legal_agent}` | {cond or '—'} |")
 
     print(f"\n结论：{'✅ 无空洞、无未区分的重叠' if ok else '❌ 存在问题，见上'}")
     return 0 if ok else 1
+
 
 if __name__ == "__main__":
     raise SystemExit(main())

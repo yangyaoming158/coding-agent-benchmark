@@ -332,6 +332,17 @@ make migrate-check   # 检查模型和迁移有没有对不上
 make seed            # 写入三个哨兵 Agent 的种子数据
 make db-psql         # 连进去看
 make db-reset        # 删掉容器和数据重来
+
+# 前后端一起起
+make dev             # 后端 :8000 + 前端 :3000，Ctrl-C 一次停掉两个
+make dev-api         # 只起后端
+make dev-web         # 只起前端
+
+# 前端
+make web-lint        # eslint + tsc
+make web-build       # 生产构建
+make gen-api         # 从后端 OpenAPI 生成前端类型（需要后端在跑）
 ```
 
-前端命令等前端脚手架建好后补充。
+**前端类型不要手写。** 改完后端接口跑一次 `make gen-api`，
+用错字段的地方会直接编译不过。手写的类型漂移了不会报错，只会在运行时拿到 undefined。

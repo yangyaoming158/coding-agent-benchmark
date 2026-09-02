@@ -238,7 +238,7 @@ LLM 提供方 429 是长跑实验的头号杀手。设计一个 `RateLimiter`（
 # 16 Frontend Architecture
 
 ## 16.1 技术选型
-Next.js 15（App Router）· React 19 · TypeScript · Tailwind CSS · shadcn/ui · TanStack Query（服务端状态）· Recharts（图表）· `diff2html` 或自研轻量 diff 渲染。
+Next.js 16（App Router）· React 19 · TypeScript · Tailwind CSS · shadcn/ui · TanStack Query（服务端状态）· Recharts（图表）· `diff2html` 或自研轻量 diff 渲染。
 API 类型：从 FastAPI 的 OpenAPI 用 `openapi-typescript` 生成，避免手写类型漂移。
 
 **实时性策略**：P0 用 **轮询**（TanStack Query `refetchInterval`：Run Detail 3s、Dashboard 10s）。理由：实现成本≈0、无连接管理、足够满足"看进度"的需求。WebSocket/SSE 归入 P2（§29）。

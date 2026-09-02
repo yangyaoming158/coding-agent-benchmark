@@ -1,0 +1,9 @@
+# 仓库根目录的 ruff 配置。
+#
+# 为什么需要它：CI 原来只在 backend/ 目录里跑 ruff，`scripts/` 和 `docs/` 下的
+# Python 脚本从来没被检查过。中文标识符能在 scripts/check_commit_msg.py 里活到
+# 现在（明明 AGENTS.md 第 8 节禁止），就是因为这个盲区。
+#
+# 规则本体不在这里，`extend` 指向 backend/pyproject.toml —— 一份规则两个文件
+# 迟早会分家。
+extend = "backend/pyproject.toml"

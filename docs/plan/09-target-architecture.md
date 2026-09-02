@@ -16,7 +16,7 @@ flowchart TB
     end
 
     subgraph SYS["AI Coding Agent 评测基准平台"]
-        WEB["Web 前端<br/>Next.js 15"]
+        WEB["Web 前端<br/>Next.js 16"]
         API["API 服务<br/>FastAPI"]
         WK["评测 Worker<br/>×N 进程"]
         DB[("PostgreSQL")]

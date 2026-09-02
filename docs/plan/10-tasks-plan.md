@@ -22,13 +22,19 @@
 - **剩余待办**：把手工验证固化为 `scripts/check_env.py`（并入 E0-T2）
 - **Risk**：~~中~~ → **已关闭** · **P0 · C:S · E:0.5d · 🐳**
 
-### E0-T2 仓库骨架与工程规范
+### E0-T2 仓库骨架与工程规范 ✅ 已于 2026-09-02 完成
 - **Goal**：monorepo 目录、依赖管理（uv/poetry）、ruff+mypy、pytest、pre-commit、CI、import-linter 边界规则，**以及 §32 的全部版本管理约定**
 - **Req**：NFR-05, NFR-07, NFR-08 · **Deps**：E0-T1
 - **Output**：可 `make dev` 起 API 与前端骨架；`CONTRIBUTING.md`（含中文注释规范）；`git init` + `.gitignore` + `.env.example`；`main` 分支保护 + 内嵌 DoD 的 PR 模板；commit 规范校验；密钥扫描钩子；`gh` 批量建 Issue 脚本 + Projects 看板
 - **AC**：lint/type/test 三条命令全绿；import-linter 规则生效（故意越界的 import 会被拦下）；提交含密钥的测试文件会被钩子拦下；违反 Conventional Commits 的提交被拒
 - **详见**：§32 工程流程与版本管理
 - **P0 · C:M · E:1.5d**
+- **实际交付**（2026-09-02）：`make dev` 同时起后端 :8000 与前端 :3000，前端首页调通 `/api/health`；
+  前端类型由 `npm run gen:api` 从后端 OpenAPI 生成，用错字段直接编译不过；
+  三条 AC 全部写成了自动化测试（`backend/tests/unit/test_repo_guards.py`，26 条）——
+  故意越界的 import 被 import-linter 拦下、六种密钥格式被钩子识别、五种不合规提交信息被拒；
+  `scripts/sync_issues.py` 从本任务表生成 GitHub Issue（默认只预览，`--apply` 才写）。
+- **仍需人工操作**：GitHub 网页上设 `main` 分支保护；装 `gh` 后跑 `sync_issues.py --apply`；Projects 看板要手建
 
 ### E0-T3 数据库 Schema v1 与迁移 ✅ 已于 2026-09-02 完成
 - **Goal**：§13 的 17 张表 + 枚举 + 索引落地

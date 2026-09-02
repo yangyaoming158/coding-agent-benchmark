@@ -33,7 +33,9 @@
 
 ```python
 class TestReportParser(Protocol):
-    def parse(self, report_path: Path | None, stdout: str, stderr: str) -> dict[str, TestStatus]: ...
+    def parse(
+        self, report_path: Path | None, stdout: str, stderr: str
+    ) -> dict[str, TestStatus]: ...
 ```
 
 | 实现 | 首选方式 | 备用方式 |

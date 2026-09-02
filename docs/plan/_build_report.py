@@ -1,172 +1,228 @@
-# -*- coding: utf-8 -*-
+# ruff: noqa: E501
+# 这个文件大半是内嵌的 CSS 和 HTML 模板，按 100 列硬拆反而看不懂，整文件豁免行宽。
 """把 docs/plan/*.md 汇编成单页 HTML 报告（受控子集的 Markdown 转换器）。
 用法：python3 docs/plan/_build_report.py <项目根目录>
 仅用于生成规划报告的可读版，不属于平台实现代码。"""
-import re, html, pathlib, sys
+
+import html
+import pathlib
+import re
+import sys
 
 ROOT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ".")
 PLAN = ROOT / "docs" / "plan"
 
 FILES = [
-    ("README.md",                      "摘要"),
-    ("01-requirements.md",             "需求与可行性"),
-    ("02-evaluation-semantics.md",     "评测语义"),
-    ("03-benchmark-spec.md",           "基准任务"),
-    ("04-runner-protocol.md",          "Runner 协议"),
-    ("05-sandbox.md",                  "沙箱"),
-    ("06-judge-attribution.md",        "判定与归因"),
-    ("07-platform-architecture.md",    "平台架构"),
-    ("08-adr.md",                      "架构决策"),
-    ("09-target-architecture.md",      "架构图"),
-    ("10-tasks-plan.md",               "任务与计划"),
-    ("11-acceptance-testing-risk.md",  "验收·测试·风险"),
-    ("12-engineering-workflow.md",     "工程流程"),
+    ("README.md", "摘要"),
+    ("01-requirements.md", "需求与可行性"),
+    ("02-evaluation-semantics.md", "评测语义"),
+    ("03-benchmark-spec.md", "基准任务"),
+    ("04-runner-protocol.md", "Runner 协议"),
+    ("05-sandbox.md", "沙箱"),
+    ("06-judge-attribution.md", "判定与归因"),
+    ("07-platform-architecture.md", "平台架构"),
+    ("08-adr.md", "架构决策"),
+    ("09-target-architecture.md", "架构图"),
+    ("10-tasks-plan.md", "任务与计划"),
+    ("11-acceptance-testing-risk.md", "验收·测试·风险"),
+    ("12-engineering-workflow.md", "工程流程"),
 ]
 
-esc = lambda s: html.escape(s, quote=False)
+
+def esc(s):
+    """HTML 转义。引号不转 —— 我们只往文本节点里塞内容，不往属性里塞。"""
+    return html.escape(s, quote=False)
+
 
 def inline(s):
     """先把行内 code 抽成占位符，再做粗体/斜体/链接，最后还原——
     避免 **粗体中包含 `代码`** 这种写法被切断导致 strong 配对错位。"""
     spans = []
+
     def stash(m):
         spans.append(m.group(1))
-        return '\x00C%d\x00' % (len(spans) - 1)
-    t = re.sub(r'`([^`]+)`', stash, s)
+        return f"\x00C{len(spans) - 1}\x00"
+
+    t = re.sub(r"`([^`]+)`", stash, s)
     t = esc(t)
-    t = re.sub(r'\*\*([^*]+)\*\*', r'<strong>\1</strong>', t)
-    t = re.sub(r'(?<!\*)\*([^*\n]+)\*(?!\*)', r'<em>\1</em>', t)
-    t = re.sub(r'\[([^\]]+)\]\(([^)\s]+)\)', r'<a href="\2">\1</a>', t)
-    return re.sub(r'\x00C(\d+)\x00', lambda m: '<code>' + esc(spans[int(m.group(1))]) + '</code>', t)
+    t = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", t)
+    t = re.sub(r"(?<!\*)\*([^*\n]+)\*(?!\*)", r"<em>\1</em>", t)
+    t = re.sub(r"\[([^\]]+)\]\(([^)\s]+)\)", r'<a href="\2">\1</a>', t)
+    return re.sub(
+        r"\x00C(\d+)\x00", lambda m: "<code>" + esc(spans[int(m.group(1))]) + "</code>", t
+    )
+
 
 def slug(text):
-    m = re.match(r'^([\d.]+)', text.strip())
+    m = re.match(r"^([\d.]+)", text.strip())
     if m:
-        return 'sec-' + m.group(1).rstrip('.').replace('.', '-')
-    return 'sec-' + re.sub(r'[^\w]+', '-', text.strip().lower())[:32]
+        return "sec-" + m.group(1).rstrip(".").replace(".", "-")
+    return "sec-" + re.sub(r"[^\w]+", "-", text.strip().lower())[:32]
+
 
 def split_heading(text):
-    m = re.match(r'^([\d.]+)\s+(.*)$', text.strip())
-    return (m.group(1), m.group(2)) if m else ('', text.strip())
+    m = re.match(r"^([\d.]+)\s+(.*)$", text.strip())
+    return (m.group(1), m.group(2)) if m else ("", text.strip())
+
 
 def render_table(rows):
-    align_re = re.compile(r'^[:\-\s|]+$')
-    cells = [[c.strip() for c in r.strip().strip('|').split('|')] for r in rows]
+    align_re = re.compile(r"^[:\-\s|]+$")
+    cells = [[c.strip() for c in r.strip().strip("|").split("|")] for r in rows]
     aligns, body = [], []
     head = cells[0]
     if len(cells) > 1 and align_re.match(rows[1].strip()):
         for a in cells[1]:
-            if a.startswith(':') and a.endswith(':'): aligns.append('center')
-            elif a.endswith(':'):                     aligns.append('right')
-            else:                                     aligns.append('left')
+            if a.startswith(":") and a.endswith(":"):
+                aligns.append("center")
+            elif a.endswith(":"):
+                aligns.append("right")
+            else:
+                aligns.append("left")
         body = cells[2:]
     else:
         body = cells[1:]
+
     def sty(i):
-        return f' style="text-align:{aligns[i]}"' if i < len(aligns) and aligns[i] != 'left' else ''
-    h = ''.join(f'<th{sty(i)}>{inline(c)}</th>' for i, c in enumerate(head))
-    b = ''.join('<tr>' + ''.join(f'<td{sty(i)}>{inline(c)}</td>' for i, c in enumerate(r)) + '</tr>' for r in body)
+        return f' style="text-align:{aligns[i]}"' if i < len(aligns) and aligns[i] != "left" else ""
+
+    h = "".join(f"<th{sty(i)}>{inline(c)}</th>" for i, c in enumerate(head))
+    b = "".join(
+        "<tr>" + "".join(f"<td{sty(i)}>{inline(c)}</td>" for i, c in enumerate(r)) + "</tr>"
+        for r in body
+    )
     return f'<div class="tw"><table><thead><tr>{h}</tr></thead><tbody>{b}</tbody></table></div>'
 
+
 def convert(md, toc, group):
-    lines = md.split('\n')
+    lines = md.split("\n")
     out, i, n = [], 0, len(lines)
     while i < n:
         ln = lines[i]
 
-        m = re.match(r'^```\s*([\w-]*)\s*$', ln)
+        m = re.match(r"^```\s*([\w-]*)\s*$", ln)
         if m:
             lang, i, buf = m.group(1), i + 1, []
-            while i < n and not re.match(r'^```\s*$', lines[i]):
-                buf.append(lines[i]); i += 1
+            while i < n and not re.match(r"^```\s*$", lines[i]):
+                buf.append(lines[i])
+                i += 1
             i += 1
-            code = esc('\n'.join(buf))
-            if lang == 'mermaid':
+            code = esc("\n".join(buf))
+            if lang == "mermaid":
                 out.append(f'<figure class="fig"><pre class="mermaid">{code}</pre></figure>')
             else:
-                cls = f' data-lang="{lang}"' if lang else ''
-                out.append(f'<div class="cw"><pre class="code"{cls}><code>{code}</code></pre></div>')
+                cls = f' data-lang="{lang}"' if lang else ""
+                out.append(
+                    f'<div class="cw"><pre class="code"{cls}><code>{code}</code></pre></div>'
+                )
             continue
 
-        if ln.startswith('|'):
+        if ln.startswith("|"):
             buf = []
-            while i < n and lines[i].startswith('|'):
-                buf.append(lines[i]); i += 1
-            out.append(render_table(buf)); continue
+            while i < n and lines[i].startswith("|"):
+                buf.append(lines[i])
+                i += 1
+            out.append(render_table(buf))
+            continue
 
-        m = re.match(r'^(#{1,4})\s+(.*)$', ln)
+        m = re.match(r"^(#{1,4})\s+(.*)$", ln)
         if m:
             lvl, text = len(m.group(1)), m.group(2).strip()
             if lvl == 1:
                 num, title = split_heading(text)
                 sid = slug(text)
                 toc.append((group, num, title, sid))
-                numhtml = f'<span class="num">{esc(num)}</span>' if num else ''
-                out.append(f'<h2 class="sec" id="{sid}">{numhtml}<span class="t">{inline(title)}</span></h2>')
+                numhtml = f'<span class="num">{esc(num)}</span>' if num else ""
+                out.append(
+                    f'<h2 class="sec" id="{sid}">{numhtml}<span class="t">{inline(title)}</span></h2>'
+                )
             else:
                 num, title = split_heading(text)
-                tag = {2: 'h3', 3: 'h4', 4: 'h5'}[lvl]
-                lead = f'<span class="sub-num">{esc(num)}</span> ' if num else ''
+                tag = {2: "h3", 3: "h4", 4: "h5"}[lvl]
+                lead = f'<span class="sub-num">{esc(num)}</span> ' if num else ""
                 out.append(f'<{tag} id="{slug(text)}">{lead}{inline(title)}</{tag}>')
-            i += 1; continue
+            i += 1
+            continue
 
-        if re.match(r'^(---|\*\*\*)\s*$', ln):
-            out.append('<hr>'); i += 1; continue
+        if re.match(r"^(---|\*\*\*)\s*$", ln):
+            out.append("<hr>")
+            i += 1
+            continue
 
-        if ln.startswith('>'):
+        if ln.startswith(">"):
             buf = []
-            while i < n and lines[i].startswith('>'):
-                buf.append(lines[i][1:].lstrip()); i += 1
-            paras = [p for p in '\n'.join(buf).split('\n\n') if p.strip()]
-            inner = ''.join(f'<p>{inline(p.strip())}</p>' for p in paras)
-            out.append(f'<blockquote>{inner}</blockquote>'); continue
+            while i < n and lines[i].startswith(">"):
+                buf.append(lines[i][1:].lstrip())
+                i += 1
+            paras = [p for p in "\n".join(buf).split("\n\n") if p.strip()]
+            inner = "".join(f"<p>{inline(p.strip())}</p>" for p in paras)
+            out.append(f"<blockquote>{inner}</blockquote>")
+            continue
 
-        m = re.match(r'^(\s*)([-*]|\d+\.)\s+(.*)$', ln)
+        m = re.match(r"^(\s*)([-*]|\d+\.)\s+(.*)$", ln)
         if m:
-            ordered = bool(re.match(r'^\d+\.$', m.group(2)))
+            ordered = bool(re.match(r"^\d+\.$", m.group(2)))
             items, cur = [], None
             while i < n:
-                mm = re.match(r'^(\s*)([-*]|\d+\.)\s+(.*)$', lines[i])
+                mm = re.match(r"^(\s*)([-*]|\d+\.)\s+(.*)$", lines[i])
                 if mm and len(mm.group(1)) < 2:
-                    if cur is not None: items.append(cur)
-                    cur = [mm.group(3)]; i += 1; continue
-                if lines[i].strip() and lines[i].startswith(('  ', '\t')) and cur is not None:
-                    cur.append(lines[i].strip()); i += 1; continue
+                    if cur is not None:
+                        items.append(cur)
+                    cur = [mm.group(3)]
+                    i += 1
+                    continue
+                if lines[i].strip() and lines[i].startswith(("  ", "\t")) and cur is not None:
+                    cur.append(lines[i].strip())
+                    i += 1
+                    continue
                 break
-            if cur is not None: items.append(cur)
-            tag = 'ol' if ordered else 'ul'
-            li = ''
+            if cur is not None:
+                items.append(cur)
+            tag = "ol" if ordered else "ul"
+            li = ""
             for parts in items:
-                li += '<li>' + inline(parts[0])
+                li += "<li>" + inline(parts[0])
                 for extra in parts[1:]:
-                    mm = re.match(r'^([-*]|\d+\.)\s+(.*)$', extra)
+                    mm = re.match(r"^([-*]|\d+\.)\s+(.*)$", extra)
                     li += f'<div class="cont">{inline(mm.group(2) if mm else extra)}</div>'
-                li += '</li>'
-            out.append(f'<{tag}>{li}</{tag}>'); continue
+                li += "</li>"
+            out.append(f"<{tag}>{li}</{tag}>")
+            continue
 
         if not ln.strip():
-            i += 1; continue
+            i += 1
+            continue
 
         buf = []
-        while i < n and lines[i].strip() and not re.match(r'^(#{1,4}\s|```|\||>|\s*([-*]|\d+\.)\s|---\s*$)', lines[i]):
-            buf.append(lines[i].strip()); i += 1
-        out.append(f'<p>{inline(" ".join(buf))}</p>')
-    return '\n'.join(out)
+        while (
+            i < n
+            and lines[i].strip()
+            and not re.match(r"^(#{1,4}\s|```|\||>|\s*([-*]|\d+\.)\s|---\s*$)", lines[i])
+        ):
+            buf.append(lines[i].strip())
+            i += 1
+        out.append(f"<p>{inline(' '.join(buf))}</p>")
+    return "\n".join(out)
+
 
 toc, body = [], []
 for fname, group in FILES:
-    md = (PLAN / fname).read_text(encoding='utf-8')
-    if fname == 'README.md':
-        md = md[md.index('# 1 Executive Summary'):]
-    body.append(f'<section class="part" data-group="{esc(group)}">' + convert(md, toc, group) + '</section>')
+    md = (PLAN / fname).read_text(encoding="utf-8")
+    if fname == "README.md":
+        md = md[md.index("# 1 Executive Summary") :]
+    body.append(
+        f'<section class="part" data-group="{esc(group)}">' + convert(md, toc, group) + "</section>"
+    )
 
 toc_html, seen = [], None
 for group, num, title, sid in toc:
     if group != seen:
-        toc_html.append(f'<div class="toc-group">{esc(group)}</div>'); seen = group
-    toc_html.append(f'<a class="toc-link" href="#{sid}"><span class="toc-num">{esc(num)}</span>'
-                    f'<span class="toc-t">{esc(title)}</span></a>')
-toc_html = '\n'.join(toc_html)
+        toc_html.append(f'<div class="toc-group">{esc(group)}</div>')
+        seen = group
+    toc_html.append(
+        f'<a class="toc-link" href="#{sid}"><span class="toc-num">{esc(num)}</span>'
+        f'<span class="toc-t">{esc(title)}</span></a>'
+    )
+toc_html = "\n".join(toc_html)
 
 STATS = [
     ("4 周可行性", "平台可交付", "6 项量化指标中 4 项需重定义口径或设降级路径"),
@@ -174,11 +230,13 @@ STATS = [
     ("硬件结论", "无需采购", "本机调 .wslconfig 至 16 vCPU / 11 GB 后即可完成 300 次实验"),
     ("最需改口径", "复现 ≤5pp", "改为 Harness Replay：确定性、零 Agent 成本、可证明"),
 ]
-stat_html = ''.join(
+stat_html = "".join(
     f'<div class="stat"><div class="stat-k">{esc(k)}</div><div class="stat-v">{esc(v)}</div>'
-    f'<div class="stat-n">{esc(nn)}</div></div>' for k, v, nn in STATS)
+    f'<div class="stat-n">{esc(nn)}</div></div>'
+    for k, v, nn in STATS
+)
 
-HEAD = '''<title>SWE-Bench 式评测平台立项规划</title>
+HEAD = """<title>SWE-Bench 式评测平台立项规划</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+SC:wght@400;500;700&family=Noto+Serif+SC:wght@600;700&display=swap">
 <style>
 :root{
@@ -327,9 +385,9 @@ footer{max-width:1220px;margin:0 auto;padding:26px 32px 46px;border-top:1px soli
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 html{scroll-behavior:smooth}
-</style>'''
+</style>"""
 
-BODY = f'''<header class="masthead">
+BODY = f"""<header class="masthead">
   <div class="mast-in">
     <div class="eyebrow">立项规划报告 · v1.0 · 规划轮（不含实现）</div>
     <h1 class="title">AI Coding Agent 评测基准平台</h1>
@@ -339,7 +397,7 @@ BODY = f'''<header class="masthead">
       <span class="chip">FastAPI 模块化单体</span>
       <span class="chip">PostgreSQL 队列</span>
       <span class="chip">双容器 Docker 沙箱</span>
-      <span class="chip">Next.js 15 · React 19</span>
+      <span class="chip">Next.js 16 · React 19</span>
       <span class="chip">31 章 · 12 项 ADR · 17 项风险</span>
     </div>
     <div class="stats">{stat_html}</div>
@@ -351,7 +409,7 @@ BODY = f'''<header class="masthead">
     <button class="toc-toggle" type="button" aria-expanded="false">目录 · 31 章</button>
     <div class="toc-body">{toc_html}</div>
   </nav>
-  <main>{''.join(body)}</main>
+  <main>{"".join(body)}</main>
 </div>
 
 <footer>
@@ -398,7 +456,7 @@ BODY = f'''<header class="masthead">
   }},{{rootMargin:'-8% 0px -78% 0px',threshold:0}});
   secs.forEach(function(s){{io.observe(s);}});
 }})();
-</script>'''
+</script>"""
 
-(PLAN / "report.html").write_text(HEAD + "\n" + BODY + "\n", encoding='utf-8')
+(PLAN / "report.html").write_text(HEAD + "\n" + BODY + "\n", encoding="utf-8")
 print("sections:", len(toc), "| bytes:", (PLAN / "report.html").stat().st_size)
