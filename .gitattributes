@@ -1,0 +1,9 @@
+# report.html 由 docs/plan/_build_report.py 自动生成。
+# 标记为 generated，GitHub 在 PR diff 里会默认折叠它，避免每次改文档都刷屏。
+docs/plan/report.html linguist-generated=true -diff
+
+# 统一换行符，避免 Windows / WSL 混用时整文件显示为改动
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary

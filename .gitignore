@@ -1,0 +1,50 @@
+# ── 运行期产物（评测过程中生成，体积随运行次数线性增长）──
+var/
+!var/.gitkeep
+
+# ── 数据集导出（MB 级大文件；只提交 datasets/manifests/ 下的指纹文件）──
+datasets/exports/
+
+# ── 密钥（本项目要接多个大模型服务商，这一段最要紧）──
+.env
+.env.*
+!.env.example
+*.env
+**/secrets*
+*.key
+*.pem
+credentials.json
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# ── Node / Next.js ──
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+npm-debug.log*
+
+# ── 日志与临时文件 ──
+*.log
+tmp/
+.DS_Store
+Thumbs.db
+
+# ── 编辑器 ──
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
