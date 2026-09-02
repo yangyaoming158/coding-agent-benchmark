@@ -30,13 +30,16 @@
 - **详见**：§32 工程流程与版本管理
 - **P0 · C:M · E:1.5d**
 
-### E0-T3 数据库 Schema v1 与迁移
-- **Goal**：§13 的 15 张表 + 枚举 + 索引落地
+### E0-T3 数据库 Schema v1 与迁移 ✅ 已于 2026-09-02 完成
+- **Goal**：§13 的 17 张表 + 枚举 + 索引落地
 - **Req**：FR-03 · **Deps**：E0-T2、**§6 语义冻结**
 - **Output**：Alembic 初版迁移；SQLAlchemy 模型；种子数据脚本（agents/agent_configs）
 - **AC**：`alembic upgrade head` 在空库成功；`downgrade base` 可回滚；模型与枚举同 §6 完全一致（用一个"枚举一致性"单测锁死）
 - **Risk**：低，但**改动代价随时间指数上升** → 必须在 Week 1 定稿
 - **P0 · C:M · E:1.5d · ⚙DB**
+- **实际交付**（2026-09-02）：17 张表、26 个原生枚举类型、迁移 `0001_initial_schema`；
+  46 个测试全绿，其中 31 个是连真库跑的。三处协议约束落到了数据库层面：
+  合法组合 CHECK（C-68、C-78）、认定结果部分唯一索引（C-57）、attempt 唯一约束（C-48）。
 
 ### E0-T4 配置、日志、制品存储抽象
 - **Goal**：Settings（pydantic-settings）、structlog（含 run_id/task_run_id 上下文）、`ArtifactStore` + `LocalArtifactStore`

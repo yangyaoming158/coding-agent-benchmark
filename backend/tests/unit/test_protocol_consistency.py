@@ -53,10 +53,44 @@ def test_truth_table_has_no_gaps_or_overlaps() -> None:
         check=False,
     )
     assert result.returncode == 0, (
-        f"真值表检查未通过，说明协议里出现了空洞或未区分的重叠：\n"
-        f"{result.stdout}\n{result.stderr}"
+        f"真值表检查未通过，说明协议里出现了空洞或未区分的重叠：\n{result.stdout}\n{result.stderr}"
     )
     assert "无空洞、无未区分的重叠" in result.stdout
+
+
+def test_protocol_section_matches_truth_table_output(protocol_text: str) -> None:
+    """协议 §4.3 里贴的那张合法组合表，必须是脚本当前输出的那一份（协议 C-79）。
+
+    没有这条检查的话会出现一种很难发现的情况：有人改了真值表脚本，
+    脚本自己跑起来还是绿的（它只检查有没有空洞和重叠），但协议正文里
+    贴的还是旧表。而代码是照着协议正文写的，于是脚本和代码悄悄分了家。
+    """
+    result = subprocess.run(
+        [sys.executable, str(TRUTH_TABLE)],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=True,
+    )
+    generated = [
+        line.strip()
+        for line in result.stdout.splitlines()
+        if line.strip().startswith("|") and "---" not in line
+    ]
+
+    heading = "### 全部合法组合"
+    assert heading in protocol_text, "协议 §4.3 的合法组合表不见了"
+    section = protocol_text[protocol_text.index(heading) : protocol_text.index("\n**C-78")]
+    in_doc = [
+        line.strip()
+        for line in section.splitlines()
+        if line.strip().startswith("|") and "---" not in line
+    ]
+
+    assert in_doc == generated, (
+        "协议 §4.3 的表和真值表脚本的输出对不上。"
+        "改完协议要重跑 `python3 docs/_protocol_truth_table.py` 并把输出贴回 §4.3。"
+    )
 
 
 def test_clause_ids_are_unique(protocol_text: str) -> None:

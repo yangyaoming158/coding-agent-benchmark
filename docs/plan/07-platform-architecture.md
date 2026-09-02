@@ -7,7 +7,10 @@
 4. **不过早拆表**：`evaluation_task_runs` 是宽表（含各阶段时间戳与统计），而不是拆成 5 张阶段表；
 5. **任务内容哈希化**：`content_hash` 让"数据集版本"成为可验证的事实。
 
-## 13.2 表清单（15 张）
+## 13.2 表清单（17 张）
+
+> **2026-09-02 实测回填**：E0-T3 落地时按本节建表，实际数量是 17 张（原文写 15 张，是数错了）。
+> 迁移脚本 `backend/alembic/versions/0001_initial_schema.py`，`upgrade head` / `downgrade base` / 再 `upgrade head` 三步都验过。
 
 ### A. 基准域
 
@@ -15,8 +18,11 @@
 `id PK` · `full_name UQ` · `url` · `default_branch` · `language` · `stars` · `license` · `is_domestic bool` · `mirror_path` · `created_at`
 
 **`environment_specs`** — 环境规格（镜像的逻辑定义）
-`id PK` · `environment_id UQ`(如 `nonebot2__py311__v3`) · `repository_id FK` · `python_version` · `install_command` · `pre_test_command` · `test_command` · `test_framework` · `test_report_path` · `protected_paths jsonb` · `image_tag` · `image_digest` · `build_status enum(PENDING|BUILDING|READY|FAILED)` · `built_at` · `build_log_uri`
+`id PK` · `environment_id UQ`(如 `nonebot2__py311__v3`) · `repository_id FK` · `python_version` · `install_command` · `pre_test_command` · `test_command` · `test_framework` · `test_report_path` · **`extra_protected_paths jsonb`** · `image_tag` · `image_digest` · `build_status enum(PENDING|BUILDING|READY|FAILED)` · `built_at` · `build_log_uri`
 索引：`(repository_id)`、`(build_status)`
+> **2026-09-02 改名**：原字段名是 `protected_paths`，落地时改成 `extra_protected_paths`。
+> 原因：协议 C-61 规定环境规格只能在默认清单上**追加**路径，禁止整体替换。
+> 叫 `protected_paths` 会让人以为这就是完整清单 —— 某个仓库配错一次，防作弊就整体失效，而且不会报错。
 
 **`benchmark_tasks`** — 任务本体
 `id PK` · `task_id UQ` · `repository_id FK` · `environment_spec_id FK` · `base_commit char(40)` · `issue_title` · `issue_body text` · `issue_language enum` · `source_issue_url` · `source_pr_url` · `fail_to_pass jsonb` · `pass_to_pass jsonb` · `test_patch_uri` · **`test_patch_paths jsonb`**（由 Validator 从 test_patch 推导，纳入 content_hash，禁止下发给 AI，见协议 C-74~C-76）· `gold_patch_uri` · `difficulty enum` · `tags text[]` · `agent_timeout_s` · `test_timeout_s` · `sandbox_cpu numeric` · `sandbox_memory_mb` · `validation_state enum(DISCOVERED|CANDIDATE|VALIDATING|VALID|INVALID|REVIEW_REQUIRED|QUARANTINED)` · `invalid_reason_code` · `validated_at` · `validation_evidence_uri` · `content_hash` · `raw_definition jsonb` · `created_at/updated_at`
@@ -44,7 +50,7 @@
 ### C. 评测域
 
 **`evaluation_runs`** — 一次实验 = Agent 配置 × 数据集
-`id PK` · `name` · `benchmark_set_id FK` · `agent_config_id FK` · `status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)` · `agent_concurrency` · `sandbox_concurrency` · `total_tasks` · `completed_tasks` · `resolved_count` · `infra_failure_count` · `strict_resolve_rate numeric` · `effective_resolve_rate numeric` · `total_cost_usd numeric` · `total_tokens bigint` · `makespan_ms bigint` · `external_wait_ms bigint` · **`protocol_version varchar`**（创建时写入，禁止事后修改，见协议 C-67）· **`retry_count int`** · **`recovered_infra_failure_count int`** · `manifest jsonb` · `started_at` · `finished_at` · `created_by`
+`id PK` · `name` · `benchmark_set_id FK` · `agent_config_id FK` · `status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)` · `agent_concurrency` · `sandbox_concurrency` · `total_tasks` · `completed_tasks` · `resolved_count` · `infra_failure_count` · `strict_resolve_rate numeric` · `effective_resolve_rate numeric` · `total_cost_usd numeric` · `total_tokens bigint` · `makespan_ms bigint` · `external_wait_ms bigint` · **`protocol_version varchar`**（创建时写入，禁止事后修改，见协议 C-67）· **`retry_count int`** · **`recovered_infra_failure_count int`** · **`dirty bool`**（工作区带未提交改动时启动的实验，不得进排行榜，见协议 C-27、C-28）· `manifest jsonb` · `started_at` · `finished_at` · `created_by`
 索引：`(status)`、`(benchmark_set_id, agent_config_id)`
 > `manifest jsonb` 承载 §24 可复现性的全部字段（镜像 digest 表、harness git sha、数据集哈希、环境变量白名单、随机种子）。
 

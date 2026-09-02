@@ -319,4 +319,19 @@ docker info --format '{{.Name}} {{.DockerRootDir}}'
 # 期望输出：DESKTOP-D3QQNH3 /var/lib/docker
 ```
 
-后端、前端、测试的命令等 `E0-T2` 完成后补充到这里。
+```bash
+# 后端（都在仓库根目录跑，Makefile 会自己 cd 进 backend）
+make install         # 装依赖 + 装提交钩子
+make check           # 提交前跑一遍：lint + 类型 + 模块边界 + 测试
+make test            # 只跑测试（跳过需要 Docker 和真实大模型的）
+
+# 数据库（端口 5433，不是 5432 —— 避开这台机器上别的项目）
+make db-up           # 起本地 Postgres 容器
+make migrate         # 升到最新
+make migrate-check   # 检查模型和迁移有没有对不上
+make seed            # 写入三个哨兵 Agent 的种子数据
+make db-psql         # 连进去看
+make db-reset        # 删掉容器和数据重来
+```
+
+前端命令等前端脚手架建好后补充。

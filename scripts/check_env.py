@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import shutil
 import subprocess
 import sys
@@ -28,12 +29,34 @@ def check(title: str, passed: bool, actual: str, hint: str = "", warn_only: bool
         print(f"     → {hint}")
 
 
-def run_cmd(cmd: list[str]) -> tuple[int, str]:
+def run_cmd(cmd: list[str], cwd: str | None = None) -> tuple[int, str]:
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=cwd)
         return r.returncode, (r.stdout + r.stderr).strip()
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
+
+
+def check_database() -> None:
+    """数据库能不能连上、迁移有没有跑到最新。
+
+    只在装了后端依赖的情况下检查 —— 前端同学跑这个脚本时不该被数据库挡住。
+    """
+    backend = pathlib.Path(__file__).resolve().parent.parent / "backend"
+    if not (backend / ".venv").is_dir():
+        check("后端依赖已安装", False, "backend/.venv 不存在", "先跑 make install", warn_only=True)
+        return
+
+    # 必须在 backend 目录里跑：alembic.ini 里的 script_location 是相对路径
+    code, out = run_cmd(["uv", "run", "alembic", "current"], cwd=str(backend))
+    if code != 0:
+        check("数据库可连接", False, (out.splitlines() or ["连不上"])[-1],
+            "先跑 make db-up", warn_only=True)
+        return
+    revision = next((line for line in out.splitlines() if line and "INFO" not in line), "")
+    check("数据库可连接", True, "可连接")
+    check("迁移已升到最新", "(head)" in revision, revision or "未初始化",
+        "跑 make migrate", warn_only=True)
 
 
 def main() -> int:
@@ -64,6 +87,8 @@ def main() -> int:
             "并发数要相应下调，见 docs/plan/01-requirements.md §4.6", warn_only=True)
     else:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
+
+    check_database()
 
     code, out = run_cmd(["git", "status", "--porcelain"])
     check("git 工作区干净", code == 0 and not out, "干净" if not out else f"{len(out.splitlines())} 个文件有改动",

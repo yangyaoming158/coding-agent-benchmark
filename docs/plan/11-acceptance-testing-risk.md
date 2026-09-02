@@ -185,7 +185,7 @@ coding-agent-benchmark/
 | ~~1~~ | ~~**E0-T1 打通 Docker + 确定机器方案**~~ **✅ 已于 2026-09-01 完成** | A | 0.5d | Docker 29.7.2 + Compose v5.5.0，systemd 托管/开机自启/免 sudo；cgroup v2 + systemd driver、`docker info` 无 warning；`.wslconfig` → 16 vCPU / 11 GiB；代理三处配齐；**E2-T2 七条沙箱负例全绿**（§10.3）；结论：无需采购硬件 | ~~全部~~ 已解除 |
 | ~~2~~ | ~~**§6 评测语义评审会 + 冻结**~~ **✅ 已于 2026-09-02 冻结** | 全员 | 0.5d | `docs/evaluation-protocol.md` 定稿签字：三个 outcome 维度、状态机、`INFRA_TO_AGENT_MAPPING` 映射表 | E0-T3, E1-T1, E3-T1 |
 | **3** | **E0-T2 仓库骨架与工程规范**（含 §32 版本管理约定） | B | 1.5d | `make lint/type/test` 三绿；import-linter 边界规则生效；pre-commit 装好；`git init` + `.gitignore` + 分支保护 + PR 模板（内嵌 DoD）+ 密钥扫描钩子就绪；Issue 批量录入完成 | 所有编码任务 |
-| **4** | **E0-T3 数据库 Schema v1 + 迁移** | B | 1.5d | `alembic upgrade head` / `downgrade base` 均成功；"枚举与 §6 一致性"单测通过；种子数据可导入 | E1-T1, E3-T1, E5-T1 |
+| ~~4~~ | ~~**E0-T3 数据库 Schema v1 + 迁移**~~ **✅ 已于 2026-09-02 完成** | B | 1.5d | `upgrade head` / `downgrade base` / 再 `upgrade head` 三步验过；枚举一致性单测直接解析协议原文比对；`python -m cli.seed` 幂等；`alembic check` 无漂移 | ~~E1-T1, E3-T1, E5-T1~~ 已解除 |
 | **5** | **E1-T1 Task Schema 冻结 + 校验器** | B | 1d | Golden 任务 JSON 双向序列化；`content_hash` 对字段序不敏感；6 类非法任务被拒并给出可读原因 | E1-T2, E1-T3, E4-* |
 | **6** | **E2-T1 工作区物化 + 防泄题** | A | 1d | 物化后 `git log --all --oneline \| wc -l == 1`；两次物化目录树哈希一致；`.gitignore` 基线生效 | E3-T3, E4-T2 |
 | **7** | **E2-T2 容器执行器 + 资源限额** | A | 2d | 四条负例测试全绿（OOM / fork 炸弹 / 超时 / `--network none` 断网）；无残留容器 | E2-T3, E4-T2, E1-T3 |

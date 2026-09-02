@@ -49,6 +49,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+# 迁移是 Alembic 自动生成的：CHECK 约束里那条合法组合表达式有 3000 多字符，
+# 拆行只会让它更难读，而且下次重新生成又会变回去
+"alembic/versions/*" = ["E501"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -70,6 +73,7 @@ ignore_missing_imports = true
 testpaths = ["tests"]
 addopts = "-ra --strict-markers"
 markers = [
+    "db: 需要一个跑着的 PostgreSQL（./scripts/dev_db.sh up），连不上就跳过",
     "docker: 需要可用的 Docker daemon，每日夜间跑",
     "agent: 会消耗真实大模型额度，手动触发",
     "slow: 单条耗时超过 10 秒",
