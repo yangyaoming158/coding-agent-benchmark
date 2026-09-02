@@ -43,7 +43,8 @@ harness ──stdin(JSON: AgentTaskInput)──▶ [Adapter 进程] ──stdout
   "constraints": {
     "deadline_unix_ms": 1767225600000,
     "max_tokens_budget": 600000,
-    "protected_paths": ["tests/**", "conftest.py", "..."],   // 明确告知：改了也会被丢弃
+    "protected_paths": ["tests/**", "conftest.py", "..."],   // 只含通用规则，改了也会被丢弃
+                                                             // 这是 agent_visible_protected_paths
     "allow_network": true,
     "allow_run_tests": true                                   // 是否允许 Agent 自己跑测试
   },
@@ -53,6 +54,10 @@ harness ──stdin(JSON: AgentTaskInput)──▶ [Adapter 进程] ──stdout
 ```
 
 > `test_command` **不下发**。若 `allow_run_tests=true`，Agent 可自行探索如何跑测试（这本身是 Coding Agent 的能力之一）；F2P 的具体用例 ID **绝不下发**（否则等于告诉它答案在哪）。
+>
+> **`protected_paths` 字段只放通用规则，绝不能放该题的 `test_patch_paths`。** 平台内部执行过滤时用的是另一份更完整的清单（含 `test_patch_paths`），两者不能混用。
+>
+> 为什么：如果把该题测试补丁实际改动的路径告诉 AI，等于直接指出"官方是改这几个文件来验证的"，是一种定位提示。虽然没有直接给出 F2P 用例 ID，但泄露程度是同一类的。详见协议 C-75、C-76。
 
 ### 输出 `AgentRunResult`（stdout，最后一行 JSON；其余行视为日志）
 ```jsonc

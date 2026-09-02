@@ -31,6 +31,11 @@
 
   // ---- 验证测试 ----
   "test_patch": "diff --git a/tests/... ",       // 仅含测试文件的 diff，由 harness 施加
+  "test_patch_paths": [                          // test_patch 实际改动的全部路径，由 Validator 推导
+    "tests/test_adapter.py",                     // 仓库相对 POSIX 路径，排序去重
+    "tests/fixtures/reconnect.json"              // rename/copy 时新旧路径都记
+  ],                                             // 纳入 content_hash；导入与验证时重算，不一致则拒收
+                                                 // 【禁止下发给被测 AI】详见协议 C-74 ~ C-76
   "fail_to_pass": ["tests/test_adapter.py::test_reconnect_no_duplicate_handler"],
   "pass_to_pass": ["tests/test_adapter.py::test_basic_register", "..."],   // 上限见 §7.7
 
@@ -175,7 +180,14 @@ DISCOVERED → CANDIDATE → VALIDATING → ┬→ VALID ──→ PUBLISHED（�
 | 猴子补丁 / sitecustomize.py 注入 | 受保护路径清单包含 `sitecustomize.py`、`conftest.py`；且测试容器从纯净镜像重建，Agent 装的包不带过去 |
 | 死循环卡测试 | `test_timeout_s` + `pids_limit` |
 
-> **受保护路径（protected_paths）** 是每个 `environment_spec` 的字段，默认：`tests/**`、`test/**`、`**/test_*.py`、`**/*_test.py`、`conftest.py`、`pytest.ini`、`tox.ini`、`setup.cfg`、`pyproject.toml`（仅 `[tool.pytest*]` 段落风险 → 简化为整文件保护）、`.github/**`、`sitecustomize.py`。
+> **受保护路径** 分两份，用途不同，**不能混用**（协议 C-75）：
+>
+> - `enforcement_protected_paths`（平台内部执行用，完整）：`tests/**`、`test/**`、`**/tests/**`、`**/test/**`、`**/test_*.py`、`**/*_test.py`、`**/conftest.py`、`pytest.ini`、`.pytest.ini`、`tox.ini`、`setup.cfg`、`pyproject.toml`（`[tool.pytest*]` 段落有风险 → 简化为整文件保护）、`**/sitecustomize.py`、`**/usercustomize.py`、`.github/**`，**外加该题的 `test_patch_paths`**。
+> - `agent_visible_protected_paths`（下发给 AI 用）：**只含上面的通用规则，不含 `test_patch_paths`**。
+>
+> 为什么要拆：把该题 `test_patch` 实际触碰的路径下发给 AI，等于直接告诉它官方测试补丁改了哪几个文件，是一种定位提示。我们没下发 F2P 用例 ID，不能从这个字段漏出去。
+>
+> 三条匹配规则（协议 C-61 ~ C-64）：环境规格只能**追加**不能替换；重命名或复制时**新旧路径任一受保护就整个文件丢弃**；第二道防线除了还原已有文件，**还要删除 AI 新增的受保护文件**（但只删确认命中规则的具体文件，禁止对目录做无限制清理）。
 
 ## 7.7 P2P 规模控制
 全量 P2P 可能有数千条，跑一遍很贵。策略：

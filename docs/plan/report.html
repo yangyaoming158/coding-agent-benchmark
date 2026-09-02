@@ -417,7 +417,10 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 <p><strong>没有 <code>TIMEOUT</code> 终态。</strong> 超时的具体类型已经完整记在 <code>infra_outcome</code> 里了。AI 自己超时算"拿到了结论"（它没在预算内做完），落 <code>COMPLETED</code>；环境问题导致测试超时算"没拿到结论"，落 <code>FAILED</code>。</p>
 <p>一个状态两种含义会直接产生矛盾，所以不设这个终态。理由见 <code>docs/evaluation-protocol.md</code> C-04a。</p>
 <h4 id="sec-四条必须永远成立的规则-写进单元测试-">四条必须永远成立的规则（写进单元测试）</h4>
-<ol><li>只有到了 <code>COMPLETED</code>，<code>agent_outcome</code> 才允许非空。</li><li>如果 <code>infra_outcome</code> 不是 <code>SUCCESS</code>，那 <code>agent_outcome</code> 只能是 <code>UNRESOLVED</code> 或 <code>NOT_ATTEMPTED</code>。</li><li><code>AGENT_RUNNING</code> 是唯一允许容器联网的阶段。<code>TESTING</code> 阶段必须加 <code>--network none</code>。</li><li>状态只能往前走，<strong>不能回退</strong>。重试的做法是新建一条记录（<code>attempt_no</code> 加 1），而不是把原来那条改回去。</li></ol>
+<ol><li>非终态时 <code>agent_outcome</code> 一律为 <code>NULL</code>。终态时按下面这张<strong>合法组合表</strong>取值，其余组合都是程序错误：</li></ol>
+<p>| 情况 | <code>lifecycle_status</code> | <code>agent_outcome</code> | |:---|:---|:---| | 正常跑完测试 | <code>COMPLETED</code> | <code>RESOLVED</code> / <code>UNRESOLVED</code> / <code>EMPTY_PATCH</code> | | AI 超时或自身崩溃 | <code>COMPLETED</code> | <code>UNRESOLVED</code> | | 补丁打不上 | <code>COMPLETED</code> | <code>INVALID_PATCH</code> | | 平台故障且 AI 从未启动 | <code>FAILED</code> | <code>NOT_ATTEMPTED</code> | | AI 已启动，之后平台故障 | <code>FAILED</code> | <code>NULL</code> | | 人工取消 | <code>CANCELLED</code> | <code>NULL</code> |</p>
+<p><code>NOT_ATTEMPTED</code> 当且仅当 <code>agent_started_at IS NULL</code>。</p>
+<ol><li><code>infra_outcome</code> 不是 <code>SUCCESS</code> 时，<code>agent_outcome</code> 要么为 <code>NULL</code>，要么只能是 <code>UNRESOLVED</code>、<code>INVALID_PATCH</code> 或 <code>NOT_ATTEMPTED</code>。</li><li><code>AGENT_RUNNING</code> 是唯一允许容器联网的阶段。<code>TESTING</code> 阶段必须加 <code>--network none</code>。</li><li>状态只能往前走，<strong>不能回退</strong>。重试的做法是新建一条记录（<code>attempt_no</code> 加 1），而不是把原来那条改回去。</li></ol>
 <p>第 4 条是为了保住历史。如果允许状态回退，一次失败的运行被重试成功后，你就再也查不到它第一次为什么失败了。</p>
 <h3 id="sec-6-6"><span class="sub-num">6.6</span> 整个实验（EvaluationRun）的状态</h3>
 <p><code>DRAFT → QUEUED → RUNNING → COMPLETED | PARTIAL | FAILED | CANCELLED</code></p>
@@ -455,6 +458,11 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 
   // ---- 验证测试 ----
   "test_patch": "diff --git a/tests/... ",       // 仅含测试文件的 diff，由 harness 施加
+  "test_patch_paths": [                          // test_patch 实际改动的全部路径，由 Validator 推导
+    "tests/test_adapter.py",                     // 仓库相对 POSIX 路径，排序去重
+    "tests/fixtures/reconnect.json"              // rename/copy 时新旧路径都记
+  ],                                             // 纳入 content_hash；导入与验证时重算，不一致则拒收
+                                                 // 【禁止下发给被测 AI】详见协议 C-74 ~ C-76
   "fail_to_pass": ["tests/test_adapter.py::test_reconnect_no_duplicate_handler"],
   "pass_to_pass": ["tests/test_adapter.py::test_basic_register", "..."],   // 上限见 §7.7
 
@@ -537,7 +545,8 @@ S8 verify P2P still PASS + flaky 复跑 → 不满足: INVALID(GOLD_REGRESSION) 
 <p><code>benchmark_sets</code> 与 <code>benchmark_tasks</code> 之间用<strong>快照表</strong>关联：发布一个数据集版本时，把当时 <code>VALID</code> 的任务 id + <code>content_hash</code> 冻结进 <code>benchmark_set_items</code>。 ⇒ 三周后重跑 <code>benchmark-cn-v1</code> 得到的是同一批题的同一版本。<strong>这是 NFR-02 的数据侧基础。</strong></p>
 <h3 id="sec-7-6"><span class="sub-num">7.6</span> 防作弊清单（NFR-04 的可执行定义）</h3>
 <div class="tw"><table><thead><tr><th>攻击面</th><th>防御</th></tr></thead><tbody><tr><td>改测试文件让 F2P 通过</td><td>① Agent 补丁按路径剔除测试文件；② 测试阶段由 harness 强制 <code>git checkout -- &lt;test_paths&gt;</code> 后再打 <code>test_patch</code></td></tr><tr><td>从 git 历史读官方修复</td><td>工作区只有 1 个提交（§7.2-1）</td></tr><tr><td>联网搜到该 PR</td><td>Agent 阶段出网走<strong>域名白名单代理</strong>（仅 LLM API），禁止 github.com</td></tr><tr><td>读到 gold_patch</td><td>gold_patch 永不进入工作区、永不进入下发给 Agent 的 JSON</td></tr><tr><td>修改测试运行配置（conftest/pytest.ini/setup.cfg）</td><td>这些路径纳入"受保护路径"，同样被剔除并还原</td></tr><tr><td>猴子补丁 / sitecustomize.py 注入</td><td>受保护路径清单包含 <code>sitecustomize.py</code>、<code>conftest.py</code>；且测试容器从纯净镜像重建，Agent 装的包不带过去</td></tr><tr><td>死循环卡测试</td><td><code>test_timeout_s</code> + <code>pids_limit</code></td></tr></tbody></table></div>
-<blockquote><p><strong>受保护路径（protected_paths）</strong> 是每个 <code>environment_spec</code> 的字段，默认：<code>tests/**</code>、<code>test/**</code>、<code>**/test_*.py</code>、<code>**/*_test.py</code>、<code>conftest.py</code>、<code>pytest.ini</code>、<code>tox.ini</code>、<code>setup.cfg</code>、<code>pyproject.toml</code>（仅 <code>[tool.pytest*]</code> 段落风险 → 简化为整文件保护）、<code>.github/**</code>、<code>sitecustomize.py</code>。</p></blockquote>
+<blockquote><p><strong>受保护路径</strong> 分两份，用途不同，<strong>不能混用</strong>（协议 C-75）：</p><p>- <code>enforcement_protected_paths</code>（平台内部执行用，完整）：<code>tests/**</code>、<code>test/**</code>、<code>**/tests/**</code>、<code>**/test/**</code>、<code>**/test_*.py</code>、<code>**/*_test.py</code>、<code>**/conftest.py</code>、<code>pytest.ini</code>、<code>.pytest.ini</code>、<code>tox.ini</code>、<code>setup.cfg</code>、<code>pyproject.toml</code>（<code>[tool.pytest*]</code> 段落有风险 → 简化为整文件保护）、<code>**/sitecustomize.py</code>、<code>**/usercustomize.py</code>、<code>.github/**</code>，<strong>外加该题的 <code>test_patch_paths</code></strong>。
+- <code>agent_visible_protected_paths</code>（下发给 AI 用）：<strong>只含上面的通用规则，不含 <code>test_patch_paths</code></strong>。</p><p>为什么要拆：把该题 <code>test_patch</code> 实际触碰的路径下发给 AI，等于直接告诉它官方测试补丁改了哪几个文件，是一种定位提示。我们没下发 F2P 用例 ID，不能从这个字段漏出去。</p><p>三条匹配规则（协议 C-61 ~ C-64）：环境规格只能<strong>追加</strong>不能替换；重命名或复制时<strong>新旧路径任一受保护就整个文件丢弃</strong>；第二道防线除了还原已有文件，<strong>还要删除 AI 新增的受保护文件</strong>（但只删确认命中规则的具体文件，禁止对目录做无限制清理）。</p></blockquote>
 <h3 id="sec-7-7"><span class="sub-num">7.7</span> P2P 规模控制</h3>
 <p>全量 P2P 可能有数千条，跑一遍很贵。策略：</p>
 <ul><li>若全量套件 ≤ 3 分钟 → P2P = 全量通过用例；</li><li>否则 P2P = <strong>与 gold_patch 改动文件同模块的用例</strong> ∪ <strong>随机抽样 200 条</strong>（固定种子），并在任务中记录 <code>p2p_sampling: {strategy, seed, total_pool}</code>；</li><li>运行期用"只跑 F2P ∪ P2P 子集"的命令，显著缩短测试时长（对 MET-02 关键）。</li></ul>
@@ -595,14 +604,15 @@ S8 verify P2P still PASS + flaky 复跑 → 不满足: INVALID(GOLD_REGRESSION) 
   "constraints": {
     "deadline_unix_ms": 1767225600000,
     "max_tokens_budget": 600000,
-    "protected_paths": ["tests/**", "conftest.py", "..."],   // 明确告知：改了也会被丢弃
+    "protected_paths": ["tests/**", "conftest.py", "..."],   // 只含通用规则，改了也会被丢弃
+                                                             // 这是 agent_visible_protected_paths
     "allow_network": true,
     "allow_run_tests": true                                   // 是否允许 Agent 自己跑测试
   },
   "model": { "name": "claude-sonnet-4-6", "temperature": 0.0 },
   "extra": {}                                                  // 适配器私有配置
 }</code></pre></div>
-<blockquote><p><code>test_command</code> <strong>不下发</strong>。若 <code>allow_run_tests=true</code>，Agent 可自行探索如何跑测试（这本身是 Coding Agent 的能力之一）；F2P 的具体用例 ID <strong>绝不下发</strong>（否则等于告诉它答案在哪）。</p></blockquote>
+<blockquote><p><code>test_command</code> <strong>不下发</strong>。若 <code>allow_run_tests=true</code>，Agent 可自行探索如何跑测试（这本身是 Coding Agent 的能力之一）；F2P 的具体用例 ID <strong>绝不下发</strong>（否则等于告诉它答案在哪）。</p><p><strong><code>protected_paths</code> 字段只放通用规则，绝不能放该题的 <code>test_patch_paths</code>。</strong> 平台内部执行过滤时用的是另一份更完整的清单（含 <code>test_patch_paths</code>），两者不能混用。</p><p>为什么：如果把该题测试补丁实际改动的路径告诉 AI，等于直接指出"官方是改这几个文件来验证的"，是一种定位提示。虽然没有直接给出 F2P 用例 ID，但泄露程度是同一类的。详见协议 C-75、C-76。</p></blockquote>
 <h4 id="sec-输出-agentrunresult-stdout-最后一行-js">输出 <code>AgentRunResult</code>（stdout，最后一行 JSON；其余行视为日志）</h4>
 <div class="cw"><pre class="code" data-lang="jsonc"><code>{
   "protocol_version": "1.0",
@@ -823,7 +833,7 @@ Layer 3b 运行期容器                      从 Layer 2/3a 起容器，挂载�
 <h4 id="sec-a-基准域">A. 基准域</h4>
 <p><strong><code>repositories</code></strong> — 被评测的开源仓库 <code>id PK</code> · <code>full_name UQ</code> · <code>url</code> · <code>default_branch</code> · <code>language</code> · <code>stars</code> · <code>license</code> · <code>is_domestic bool</code> · <code>mirror_path</code> · <code>created_at</code></p>
 <p><strong><code>environment_specs</code></strong> — 环境规格（镜像的逻辑定义） <code>id PK</code> · <code>environment_id UQ</code>(如 <code>nonebot2__py311__v3</code>) · <code>repository_id FK</code> · <code>python_version</code> · <code>install_command</code> · <code>pre_test_command</code> · <code>test_command</code> · <code>test_framework</code> · <code>test_report_path</code> · <code>protected_paths jsonb</code> · <code>image_tag</code> · <code>image_digest</code> · <code>build_status enum(PENDING|BUILDING|READY|FAILED)</code> · <code>built_at</code> · <code>build_log_uri</code> 索引：<code>(repository_id)</code>、<code>(build_status)</code></p>
-<p><strong><code>benchmark_tasks</code></strong> — 任务本体 <code>id PK</code> · <code>task_id UQ</code> · <code>repository_id FK</code> · <code>environment_spec_id FK</code> · <code>base_commit char(40)</code> · <code>issue_title</code> · <code>issue_body text</code> · <code>issue_language enum</code> · <code>source_issue_url</code> · <code>source_pr_url</code> · <code>fail_to_pass jsonb</code> · <code>pass_to_pass jsonb</code> · <code>test_patch_uri</code> · <code>gold_patch_uri</code> · <code>difficulty enum</code> · <code>tags text[]</code> · <code>agent_timeout_s</code> · <code>test_timeout_s</code> · <code>sandbox_cpu numeric</code> · <code>sandbox_memory_mb</code> · <code>validation_state enum(DISCOVERED|CANDIDATE|VALIDATING|VALID|INVALID|REVIEW_REQUIRED|QUARANTINED)</code> · <code>invalid_reason_code</code> · <code>validated_at</code> · <code>validation_evidence_uri</code> · <code>content_hash</code> · <code>raw_definition jsonb</code> · <code>created_at/updated_at</code> 索引：<code>(validation_state)</code>、<code>(repository_id)</code>、<code>(difficulty)</code>、<code>(tags) GIN</code>、<code>(issue_language)</code></p>
+<p><strong><code>benchmark_tasks</code></strong> — 任务本体 <code>id PK</code> · <code>task_id UQ</code> · <code>repository_id FK</code> · <code>environment_spec_id FK</code> · <code>base_commit char(40)</code> · <code>issue_title</code> · <code>issue_body text</code> · <code>issue_language enum</code> · <code>source_issue_url</code> · <code>source_pr_url</code> · <code>fail_to_pass jsonb</code> · <code>pass_to_pass jsonb</code> · <code>test_patch_uri</code> · <strong><code>test_patch_paths jsonb</code></strong>（由 Validator 从 test_patch 推导，纳入 content_hash，禁止下发给 AI，见协议 C-74~C-76）· <code>gold_patch_uri</code> · <code>difficulty enum</code> · <code>tags text[]</code> · <code>agent_timeout_s</code> · <code>test_timeout_s</code> · <code>sandbox_cpu numeric</code> · <code>sandbox_memory_mb</code> · <code>validation_state enum(DISCOVERED|CANDIDATE|VALIDATING|VALID|INVALID|REVIEW_REQUIRED|QUARANTINED)</code> · <code>invalid_reason_code</code> · <code>validated_at</code> · <code>validation_evidence_uri</code> · <code>content_hash</code> · <code>raw_definition jsonb</code> · <code>created_at/updated_at</code> 索引：<code>(validation_state)</code>、<code>(repository_id)</code>、<code>(difficulty)</code>、<code>(tags) GIN</code>、<code>(issue_language)</code></p>
 <blockquote><p><code>test_patch</code> 与 <code>gold_patch</code> 存<strong>制品</strong>而非文本列：它们经常几十 KB，且 gold_patch 属于"绝不能误发给 Agent"的敏感内容，放在独立存储更容易做访问控制。</p></blockquote>
 <p><strong><code>benchmark_sets</code></strong> — 数据集版本 <code>id PK</code> · <code>slug</code>(如 <code>benchmark-cn-v1</code>) · <code>version</code> · <code>title</code> · <code>description</code> · <code>status enum(DRAFT|PUBLISHED|ARCHIVED)</code> · <code>task_count</code> · <code>published_at</code> · UQ<code>(slug, version)</code></p>
 <p><strong><code>benchmark_set_items</code></strong> — 数据集快照（关键：冻结版本） <code>id PK</code> · <code>benchmark_set_id FK</code> · <code>benchmark_task_id FK</code> · <code>task_content_hash</code> · <code>position</code> · UQ<code>(benchmark_set_id, benchmark_task_id)</code></p>
@@ -1156,16 +1166,17 @@ runs/{run_id}/report.html</code></pre></div>
     ANALYZING --&gt; COMPLETED
     COMPLETED --&gt; [*]
 
-    AGENT_RUNNING --&gt; COMPLETED: AGENT_TIMEOUT&lt;br/&gt;存补丁但不跑测试 → UNRESOLVED
-    PATCH_CAPTURED --&gt; COMPLETED: EMPTY_PATCH → UNRESOLVED
-    TESTING --&gt; COMPLETED: 补丁导致的 TEST_TIMEOUT → UNRESOLVED
-    TESTING --&gt; COMPLETED: PATCH_APPLY_FAILED → INVALID_PATCH
+    AGENT_RUNNING --&gt; COMPLETED: AGENT_TIMEOUT&lt;br/&gt;存补丁但不跑测试，判 UNRESOLVED
+    AGENT_RUNNING --&gt; COMPLETED: AGENT_RUNTIME_ERROR&lt;br/&gt;重试耗尽后判 UNRESOLVED
+    PATCH_CAPTURED --&gt; COMPLETED: 正常退出且补丁为空&lt;br/&gt;判 EMPTY_PATCH
+    TESTING --&gt; COMPLETED: 补丁导致的 TEST_TIMEOUT&lt;br/&gt;判 UNRESOLVED
+    TESTING --&gt; COMPLETED: PATCH_APPLY_FAILED&lt;br/&gt;判 INVALID_PATCH
 
-    PREPARING --&gt; FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR
-    AGENT_RUNNING --&gt; FAILED: AGENT_RUNTIME_ERROR / AGENT_AUTH_ERROR
-    TESTING --&gt; FAILED: SANDBOX_ERROR / OOM_KILLED
-    TESTING --&gt; FAILED: 环境导致的 TEST_TIMEOUT
-    JUDGING --&gt; FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR
+    PREPARING --&gt; FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR&lt;br/&gt;AI 未启动 → NOT_ATTEMPTED
+    AGENT_RUNNING --&gt; FAILED: AGENT_AUTH_ERROR&lt;br/&gt;外部服务问题 → NULL
+    TESTING --&gt; FAILED: SANDBOX_ERROR / OOM_KILLED&lt;br/&gt;AI 已启动 → NULL
+    TESTING --&gt; FAILED: 环境导致的 TEST_TIMEOUT&lt;br/&gt;对照组也超时 → NULL
+    JUDGING --&gt; FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR&lt;br/&gt;解析器问题 → NULL
     ANALYZING --&gt; COMPLETED: 归因失败不影响判定结论
 
     QUEUED --&gt; CANCELLED
@@ -1183,8 +1194,14 @@ runs/{run_id}/report.html</code></pre></div>
         COMPLETED = 拿到了可信结论（哪怕结论是"没修好"）
         FAILED    = 没拿到可信结论
 
-        只有 COMPLETED 允许 agent_outcome 非空
+        FAILED 时 agent_outcome 分两种：
+          AI 从未启动     → NOT_ATTEMPTED
+          AI 启动后才故障 → NULL
+        判据：agent_started_at 是否为空
+
+        合法组合共六种，见协议 C-68
         重试 = 新建一条 attempt_no+1 的记录，不回退状态
+        统计只看被标记为 canonical 的那一次
     end note</pre></figure>
 <h3 id="sec-20-5"><span class="sub-num">20.5</span> Benchmark Task State Machine（任务生命周期）</h3>
 <figure class="fig"><pre class="mermaid">stateDiagram-v2

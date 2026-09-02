@@ -19,7 +19,7 @@
 索引：`(repository_id)`、`(build_status)`
 
 **`benchmark_tasks`** — 任务本体
-`id PK` · `task_id UQ` · `repository_id FK` · `environment_spec_id FK` · `base_commit char(40)` · `issue_title` · `issue_body text` · `issue_language enum` · `source_issue_url` · `source_pr_url` · `fail_to_pass jsonb` · `pass_to_pass jsonb` · `test_patch_uri` · `gold_patch_uri` · `difficulty enum` · `tags text[]` · `agent_timeout_s` · `test_timeout_s` · `sandbox_cpu numeric` · `sandbox_memory_mb` · `validation_state enum(DISCOVERED|CANDIDATE|VALIDATING|VALID|INVALID|REVIEW_REQUIRED|QUARANTINED)` · `invalid_reason_code` · `validated_at` · `validation_evidence_uri` · `content_hash` · `raw_definition jsonb` · `created_at/updated_at`
+`id PK` · `task_id UQ` · `repository_id FK` · `environment_spec_id FK` · `base_commit char(40)` · `issue_title` · `issue_body text` · `issue_language enum` · `source_issue_url` · `source_pr_url` · `fail_to_pass jsonb` · `pass_to_pass jsonb` · `test_patch_uri` · **`test_patch_paths jsonb`**（由 Validator 从 test_patch 推导，纳入 content_hash，禁止下发给 AI，见协议 C-74~C-76）· `gold_patch_uri` · `difficulty enum` · `tags text[]` · `agent_timeout_s` · `test_timeout_s` · `sandbox_cpu numeric` · `sandbox_memory_mb` · `validation_state enum(DISCOVERED|CANDIDATE|VALIDATING|VALID|INVALID|REVIEW_REQUIRED|QUARANTINED)` · `invalid_reason_code` · `validated_at` · `validation_evidence_uri` · `content_hash` · `raw_definition jsonb` · `created_at/updated_at`
 索引：`(validation_state)`、`(repository_id)`、`(difficulty)`、`(tags) GIN`、`(issue_language)`
 > `test_patch` 与 `gold_patch` 存**制品**而非文本列：它们经常几十 KB，且 gold_patch 属于"绝不能误发给 Agent"的敏感内容，放在独立存储更容易做访问控制。
 

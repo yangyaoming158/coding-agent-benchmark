@@ -2,9 +2,10 @@
 
 | | |
 |:---|:---|
-| **状态** | **DRAFT v1.1 —— 已过一轮评审，仍未冻结** |
+| **状态** | **DRAFT v1.2 —— 已过两轮评审，仍未冻结** |
 | 起草日期 | 2026-09-02 |
-| 上次评审 | 2026-09-02，结论见 §9 变更记录与 §10 |
+| 评审轮次 | 第一轮 2026-09-02（Q1~Q6）· 第二轮 2026-09-02（Q7~Q9 + 7 组内部问题）|
+| 冻结还差 | 全条款组合真值表复查（§11）|
 | 适用范围 | 判定引擎、数据库状态字段、编排层、报表口径、前端展示 |
 | 冻结后的效力 | 本文件是上述所有模块的**唯一依据**。代码与本文件不一致时，以本文件为准 |
 | 变更方式 | 见 §9 |
@@ -49,7 +50,11 @@
 
 **C-01【必须】** 一次评测的结果用三个字段记录：`lifecycle_status`、`infra_outcome`、`agent_outcome`。
 
-**C-02【必须】** 这三个字段互相独立。任何一个的取值都不得由另外两个推导得出，也不得合并成一个字段。
+**C-02【必须】** 这三个字段描述三个不同的维度，**禁止合并存储**。
+
+它们的取值之间**存在合法组合约束**，以 C-09、C-18、C-30、C-68 为准。
+
+> v1.1 措辞修正：原文写的是"任何一个的取值都不得由另外两个推导得出"，这与 C-09（终态决定能否有 `agent_outcome`）、C-18（故障类型决定映射结果）直接矛盾。真正要禁止的是**把三件事塞进一个字段**，不是禁止它们之间有约束关系。
 
 **C-03【禁止】** 把"平台自己出故障"和"被测 AI 没修好"存进同一个字段。
 
@@ -97,10 +102,14 @@
 | 值 | 判定条件 |
 |:---|:---|
 | `RESOLVED` | 全部 F2P 用例状态为 `PASSED`，**且**全部 P2P 用例状态为 `PASSED` |
-| `UNRESOLVED` | 有可应用的非空补丁，但不满足上一条 |
+| `UNRESOLVED` | ① 有可应用的非空补丁但不满足上一条；**或** ② 协议明确归属于 AI 的失败（超时、自身运行错误），**此时补丁允许为空** |
 | `EMPTY_PATCH` | AI 正常退出，标准化后的补丁为空 |
 | `INVALID_PATCH` | 补丁非空但打不上去 |
 | `NOT_ATTEMPTED` | 因平台故障，AI 从未真正开始 |
+
+**C-08c【必须】** `UNRESOLVED` 与 `EMPTY_PATCH` 的区分标准：AI **正常退出**且补丁为空 → `EMPTY_PATCH`；AI **异常终止**（超时、崩溃）且补丁为空 → `UNRESOLVED`。
+
+> 为什么不都算 `EMPTY_PATCH`：`EMPTY_PATCH` 是一个诊断信号，含义是"AI 跑完了但没交出东西"。超时被杀的 AI 不属于这种情况——它可能正要写文件就被杀了。混在一起会让空补丁率这个指标失去意义。
 
 **C-08a【必须】** `EMPTY_PATCH` 的含义是"**标准化之后**的补丁为空"，**不等于**"AI 什么都没做"。
 
@@ -121,14 +130,36 @@
 
 > 为什么：空补丁率低不代表 AI 强。一个胡乱改代码但从不交白卷的 AI，空补丁率是 0，但解决率可能很差。把它计入排名会奖励错误的行为。
 
-**C-09【必须】** `agent_outcome` 非空，当且仅当 `lifecycle_status = COMPLETED`。`FAILED` 和 `CANCELLED` 一律为 `NULL`，非终态一律为 `NULL`。
+**C-09【必须】** 非终态时 `agent_outcome` 一律为 `NULL`。终态时按 C-68 的合法组合表取值。
+
+**C-68【必须】** `lifecycle_status` 与 `agent_outcome` 的合法组合**只有以下六种**，其余组合一律视为程序错误：
+
+| 情况 | `lifecycle_status` | `agent_outcome` | 说明 |
+|:---|:---|:---|:---|
+| 正常跑完测试 | `COMPLETED` | `RESOLVED` / `UNRESOLVED` / `EMPTY_PATCH` | 拿到了判定结论 |
+| AI 超时或自身运行失败 | `COMPLETED` | `UNRESOLVED` | 责任在 AI，结论明确 |
+| 补丁打不上 | `COMPLETED` | `INVALID_PATCH` | 责任在 AI，结论明确 |
+| 平台故障且 AI 从未启动 | `FAILED` | `NOT_ATTEMPTED` | 没给 AI 机会 |
+| AI 已启动，之后平台故障导致无法判定 | `FAILED` | `NULL` | 给了机会但没拿到结论 |
+| 人工取消 | `CANCELLED` | `NULL` | — |
+
+**C-69【必须】** `NOT_ATTEMPTED` 当且仅当 `agent_started_at IS NULL`。
+
+> 为什么要分"从未启动"和"启动后平台故障"：前者对 AI 完全没有信息量；后者说明 AI 已经消耗了时间和 token（成本要计入），只是我们没能拿到结论。两者混用会让成本统计对不上。
+
+> v1.0/v1.1 修正记录：原 C-09 规定 `FAILED` 时 `agent_outcome` 必为 `NULL`，但故障映射表（C-18）把平台故障全部映射成 `NOT_ATTEMPTED`（非空）。两条直接矛盾。现用 C-68 的组合表统一。
 
 > v1.0 修正记录：原条款与故障映射表（C-18）直接矛盾——映射表规定 `AGENT_TIMEOUT` 判 `UNRESOLVED`，但当时 `AGENT_TIMEOUT` 会落到 `TIMEOUT` 终态，按原 C-09 就必须为 `NULL`。现按 C-04a 取消 `TIMEOUT` 终态后，矛盾消除。
 
 **C-09a【必须】** `AGENT_TIMEOUT` 发生时：仍然收集并保存它已改出来的补丁（供失败分析用），但**不跑测试**，直接判 `UNRESOLVED`，`lifecycle_status = COMPLETED`。
 
 > 为什么不跑测试：时间预算本身就是评测的一部分，超过预算才交付等于没交付。同时省下约 75 秒的测试时间。
-> 已知的取舍：如果 AI 在被杀之前其实已经改对了，我们不会发现。补丁仍然存档，v1.1 之后可以考虑加一个"影子判定"（跑但不计分）来量化这种情况有多少。
+> 已知的取舍：如果 AI 在被杀之前其实已经改对了，我们不会发现。补丁仍然存档。
+> 成本说明：如果要加"影子判定"，**只有发生超时的那些 task run 各多花约 75 秒**，不是所有题都增加时间。
+
+**C-09b【必须】** 超时时已经产生的补丁必须保存为制品，并统计两个低成本指标：`agent_timeout_count`、`timeout_with_nonempty_patch_count`。
+
+**C-09c【建议】** 影子判定（对超时补丁跑测试但不计分）**放到离线分析任务里做**，不占正式实验的关键路径。影子结果**禁止**影响 `agent_outcome` 和排行榜。
 
 ### 2.4 `test_status` —— 单条测试用例的状态
 
@@ -138,7 +169,19 @@
 
 **C-12【禁止】** 把 `MISSING`、`SKIPPED`、`XFAIL` 当作通过。
 
-**C-13【必须】** 如果 F2P 里有任何一条是 `MISSING`，判 `UNRESOLVED`，并打标记 **`TEST_RESULT_INTEGRITY_SUSPECTED`（测试完整性异常）**，自动进入人工复核队列。
+**C-13【必须】** 出现 `MISSING` 时，**先做 C-13b 的三项自动检查，再根据检查结果分三种情况处理**，不得无条件判 `UNRESOLVED`：
+
+| 检查结论 | 处理 |
+|:---|:---|
+| **(a) 平台或解析器的问题**：报告被截断、解析失败、用例 ID 归一化错误 | `FAILED` + `HARNESS_ERROR` 或 `TEST_DISCOVERY_ERROR` + `agent_outcome = NULL`，**计入平台故障率** |
+| **(b) AI 补丁导致的**：有实际证据表明补丁破坏了测试收集，或删改了测试 | `COMPLETED` + `UNRESOLVED` |
+| **(c) 原因不明** | `COMPLETED` + `UNRESOLVED` + 标记 `TEST_RESULT_INTEGRITY_SUSPECTED`，自动进人工复核 |
+
+> v1.1 修正记录：原条款先无条件判 `UNRESOLVED`，后面的 C-13b 才去查是不是我们自己的解析器出错。顺序反了——如果确认是平台的问题，就不该罚 AI。
+
+**C-13f【必须】** 如果一次实验中情况 (c) 的题目比例超过 5%，整个实验标记为**需人工确认才能发布**。
+
+> 为什么：解析器的系统性 bug 会让大量题目落进 (c)。如果不设这道闸，我们会安静地发布一批被压低的解决率，而且很难察觉。
 
 **C-13a【禁止】** 仅凭出现 `MISSING` 就判定为作弊。
 
@@ -301,7 +344,17 @@
 
 > 最后两个指标要在实验报告里单独展示。它们回答一个重要问题：**这次实验到底顺不顺利**。一个解决率 40%、零重试的实验，和一个解决率 40%、重试了 30 次才凑齐的实验，可信度完全不同。
 
-**C-57【必须】** 数据库中用显式字段标记 canonical attempt（`is_canonical boolean`，或在 `evaluation_runs` 上记 `selected_attempt_id`）。
+**C-57【必须】** 数据库中用 `evaluation_task_runs.is_canonical boolean` 显式标记，并配一个部分唯一索引 `(evaluation_run_id, benchmark_task_id) WHERE is_canonical` 保证每题至多一个。
+
+> v1.1 修正记录：原文还写了"或在 `evaluation_runs` 上记 `selected_attempt_id`"，这是错的——一次实验有上百道题，一个字段装不下每道题各自的选择。该方案删除。
+
+**C-70【必须】** "每题恰好一个 canonical attempt"这条只约束状态为 `COMPLETED` 或 `PARTIAL` 的实验。被取消的实验、调度层自己失败的实验不强制。
+
+**C-71【必须】** 设一个**全局最大 attempt 数**（建议 4），一道题的 attempt 总数达到上限后不再重试，直接把最后一次作为 canonical。
+
+> 为什么需要这个上限：C-18 是按错误类型分别规定重试次数的。如果一道题先遇到 `ENV_BUILD_FAILED`（重试 1 次）、再遇到 `SANDBOX_ERROR`（重试 2 次）、再遇到 `OOM_KILLED`（重试 1 次），每种错误各自的预算都没超，但这道题已经跑了 7 次。不设全局上限，重试预算会被不同错误类型轮流重置。
+
+**C-72【必须】** C-20 里那次"不打补丁的对照测试"是**诊断执行，不是一次 attempt**。它不写入 `evaluation_task_runs`，不参与 canonical 选取，其耗时单独记录。
 
 **C-58【禁止】** 靠"取最大的 `attempt_no`"临时推断 canonical attempt。
 
@@ -341,16 +394,17 @@
 QUEUED → PREPARING → AGENT_RUNNING → PATCH_CAPTURED → TESTING → JUDGING → ANALYZING → COMPLETED
 ```
 
-任何状态都可以跳到 `FAILED`、`TIMEOUT`、`CANCELLED`。
+任何状态都可以跳到 `FAILED` 或 `CANCELLED`。**没有 `TIMEOUT` 终态**（C-04a）。
 
 ### 4.2 四条必须永远成立的规则
 
 **C-29【必须】** 只有 `COMPLETED` 允许 `agent_outcome` 非空。
 
-**C-30【必须】** `infra_outcome` 不是 `SUCCESS` 时，`agent_outcome` 只能是 `UNRESOLVED`、`INVALID_PATCH` 或 `NOT_ATTEMPTED`。**禁止**为 `RESOLVED` 或 `EMPTY_PATCH`。
+**C-30【必须】** `infra_outcome` 不是 `SUCCESS` 时，`agent_outcome` **要么为 `NULL`，要么只能是** `UNRESOLVED`、`INVALID_PATCH` 或 `NOT_ATTEMPTED`。**禁止**为 `RESOLVED` 或 `EMPTY_PATCH`。
 
-> v1.0 修正记录：原条款只允许 `UNRESOLVED` 和 `NOT_ATTEMPTED`，但故障映射表（C-18）规定 `PATCH_APPLY_FAILED` 判 `INVALID_PATCH`，两条直接矛盾。现补入 `INVALID_PATCH`。
-> `EMPTY_PATCH` 不在允许之列，是因为它只可能发生在 AI 正常退出的情况下，此时 `infra_outcome` 必为 `SUCCESS`。
+具体取哪个，以 C-68 的组合表为准。
+
+> v1.0/v1.1 修正记录：原条款写成"只能是 UNRESOLVED 或 NOT_ATTEMPTED"，有两处问题——一是与映射表规定的 `PATCH_APPLY_FAILED → INVALID_PATCH` 矛盾；二是它不允许 `NULL`，但人工取消和"AI 启动后平台故障"这两种情况按 C-68 都必须是 `NULL`。现改为"非空时只能是……"。
 
 **C-31【必须】** `AGENT_RUNNING` 是唯一允许容器联网的阶段。`TESTING` 阶段必须加 `--network none`。
 
@@ -370,7 +424,13 @@ QUEUED → PREPARING → AGENT_RUNNING → PATCH_CAPTURED → TESTING → JUDGIN
 
 ## 5 确定性要求
 
-**C-34【必须】** 给定同样的四样东西——题目版本、补丁内容、镜像 digest、平台代码版本——判定引擎在任何时间、任何机器上必须返回完全一样的结论，以及完全一样的逐条用例状态。
+**C-34【必须】** **判定逻辑本身必须完全确定。** 给定完全相同的逐条用例状态，判定函数必须返回完全相同的 `agent_outcome`。这是一个纯函数，不允许有任何随机性。
+
+**C-73【必须】** **测试执行的可复现性是目标，不是保证。** 同一份补丁重复执行，逐条用例结果应当一致；如果不一致，必须记录为**环境波动**或**不稳定用例**并告警，**禁止**在报告中声称测试执行绝对确定。
+
+> v1.1 修正记录：原 C-34 要求"任何机器上返回完全一样的结果"，但 C-20 又允许第一次测试超时、重跑一次就通过——这等于已经承认了机器负载会改变执行结果。两条不能同时成立。
+> 现在拆开：**判定逻辑**是纯函数，100% 确定；**测试执行**受机器状态影响，我们尽力控制（断网、固定环境变量、剔除不稳定用例），但必须诚实地承认它不是绝对的，并把偏差记录下来。
+> 这个区分对报告很重要：如果有人质疑结果可复现性，我们能明确说出"哪一部分是保证的，哪一部分是尽力而为并且我们测量了偏差"。
 
 **C-35【必须】** 跑测试时加 `--network none`。
 
@@ -412,11 +472,44 @@ tox.ini             setup.cfg       pyproject.toml
 
 # 该题 test_patch 实际改动的每一个文件路径
 # —— 包括名字看起来不像测试的 fixture、数据文件、辅助模块
-<test_patch 的全部路径>
+<该题的 test_patch_paths，见 C-74>
 ```
 
 > **v1.0 遗漏修正**：原清单漏了 `pyproject.toml`，但 `docs/plan/03-benchmark-spec.md` §7.6 已经明确要求保护它（因为 `[tool.pytest.*]` 段落能改变测试行为，简化处理为整文件保护）。协议与已冻结的任务规范不一致，属于必须修掉的缺陷。
 > 同时补上：嵌套目录下的测试（原来只写了仓库根下的 `tests/`）、`.pytest.ini`、`usercustomize.py`、以及 `test_patch` 实际触碰的所有路径。最后一条最重要——有些题目的测试改动会带上名字完全不像测试的 fixture 文件，靠通配符是匹配不到的。
+
+**C-74【必须】** 题目 Schema 增加 `test_patch_paths` 字段，存放 `test_patch` 实际改动的全部文件路径：
+
+```jsonc
+"test_patch_paths": [
+  "tests/test_adapter.py",
+  "tests/fixtures/reconnect.json"
+]
+```
+
+生成与校验规则：
+
+1. 由 Validator 从 `test_patch` 推导，**不是**人工填写
+2. 统一转成**仓库相对的 POSIX 路径**（正斜杠、无 `./` 前缀）
+3. 排序 + 去重
+4. 出现 rename 或 copy 时，**旧路径和新路径都要记录**
+5. 纳入 `content_hash` 计算
+6. 导入题目和题目验证时**重新计算一遍**，与已存清单不一致就拒绝该题
+7. 运行时直接用已验证的清单，不必每次重新解析 diff
+
+> 第 6 条是防篡改：如果有人手工改了 `test_patch_paths` 想放开某个文件的保护，重新计算时就会对不上。
+
+**C-75【必须】** 受保护路径拆成两份，**用途不同，不能混用**：
+
+| 名称 | 内容 | 用在哪 |
+|:---|:---|:---|
+| `enforcement_protected_paths` | 完整清单，**包含该题的 `test_patch_paths`** | 平台内部执行过滤与还原 |
+| `agent_visible_protected_paths` | **只含通用规则**（`tests/**`、`conftest.py` 这类），**不含 `test_patch_paths`** | 下发给被测 AI 的任务输入 |
+
+**C-76【禁止】** 把 `test_patch_paths` 下发给被测 AI，或以任何形式让 AI 推断出它。
+
+> 为什么：`docs/plan/04-runner-protocol.md` 的任务输入里有 `protected_paths` 字段，本意是告诉 AI"改这些也没用"。但如果把该题 `test_patch` 实际触碰的路径也放进去，等于**直接告诉 AI 官方测试补丁改了哪几个文件**——这是明确的定位提示。
+> 我们没有下发 F2P 的用例 ID，却通过这个字段泄露了测试补丁的位置，属于同一类泄题。
 
 **C-61【必须】** 每个环境规格（`environment_spec`）只能在默认清单上**追加**路径，**禁止**整体替换或删减默认清单。
 
@@ -428,7 +521,13 @@ tox.ini             setup.cfg       pyproject.toml
 
 **C-63【必须】** 第二道防线（C-16 的强制还原）不仅要还原已存在的文件，**还要删除 AI 新增的受保护路径下的文件**。
 
-> 为什么：`git checkout -- tests/` 只能还原已被 git 跟踪的文件，**删不掉 AI 新建的未跟踪文件**。AI 完全可以新增一个 `conftest.py` 来做猴子补丁。实现上需要 `git checkout` 加 `git clean -fd` 两步都做。
+> 为什么：`git checkout -- tests/` 只能还原已被 git 跟踪的文件，**删不掉 AI 新建的未跟踪文件**。AI 完全可以新增一个 `conftest.py` 来做猴子补丁。
+
+**C-63a【禁止】** 对整个工作区执行无路径限制的 `git clean -fd`。
+
+> 为什么：那会把 AI **合法新增的源代码文件**一起删掉。修 bug 时新建一个模块文件是完全正常的行为，删掉它等于把正确答案删了。
+
+**C-63b【必须】** 只删除"经过路径归一化、并确认命中受保护规则"的新增文件。实现上是先算出要删的具体文件清单，再逐个删，**不是**对目录做通配清理。
 
 **C-64【必须】** 题目验证阶段，如果 `gold_patch` 命中了任何受保护路径，直接判该题**无效**。
 
@@ -464,14 +563,15 @@ tox.ini             setup.cfg       pyproject.toml
 | 编号 | 断言 |
 |:---|:---|
 | T-1 | 判定真值表：F2P 全过 + P2P 全过 → `RESOLVED`；其余组合 → `UNRESOLVED` |
-| T-2 | F2P 中有 `MISSING` → `UNRESOLVED` 且打上疑似篡改标记 |
+| T-2 | F2P 中有 `MISSING` → 按 C-13 的三分支处理；解析器问题走 `FAILED`，不罚 AI |
 | T-3 | 空补丁 → `EMPTY_PATCH` |
 | T-4 | 补丁打不上 → `INVALID_PATCH` |
 | T-5 | `infra_outcome` 非 `SUCCESS` 时 `agent_outcome` 不是 `RESOLVED`（C-30） |
 | T-6 | 状态不能回退（C-32） |
 | T-7 | 用官方补丁跑整个题库 → 解决率 100%（Oracle 哨兵） |
 | T-8 | 用空补丁跑整个题库 → 解决率 0%（Noop 哨兵） |
-| T-9 | 同一补丁重判 3 次，结论与逐条用例状态完全一致（C-34） |
+| T-9a | 判定函数：喂同样的逐条用例状态，返回同样的 `agent_outcome`（C-34，单元测试） |
+| T-9b | 测试执行：同一补丁重跑 3 次，结果不一致时被正确标记为环境波动或不稳定用例（C-73，集成测试） |
 | T-10 | 被测 AI 改了测试文件 → 该改动被丢弃，判定结果不受影响（C-41） |
 | T-11 | 工作目录 `git log --all --oneline \| wc -l` 等于 1（C-43） |
 | T-12 | 测试容器内访问外网失败（C-35） |
@@ -507,7 +607,28 @@ tox.ini             setup.cfg       pyproject.toml
 | 版本 | 日期 | 改了什么 | 提出人 |
 |:---|:---|:---|:---|
 | v1.0-draft | 2026-09-02 | 起草 | — |
-| v1.1-draft | 2026-09-02 | 第一轮评审结论落地，详见下方清单 | 评审 |
+| v1.1-draft | 2026-09-02 | 第一轮评审结论落地 | 评审 |
+| v1.2-draft | 2026-09-02 | 第二轮评审：Q7~Q9 定案 + 修掉 7 组内部问题 | 评审 |
+
+**v1.2-draft 改动清单**
+
+Q7~Q9 定案：Q7 维持不做影子判定（改为离线分析，C-09b、C-09c）；Q8 接受取消 `TIMEOUT` 终态，以完成本轮修复为生效前提；Q9 存 `test_patch_paths` 清单并由 Validator 强制校验（C-74~C-76）。
+
+修掉 7 组内部问题：
+
+| # | 问题 | 怎么修的 |
+|:--|:---|:---|
+| 1 | C-02 说三字段不能互相推导，但 C-09/C-18/C-30 正在规定它们的合法组合 | 改为"禁止合并存储，但存在合法组合约束" |
+| 2 | C-09 要求 `FAILED` 时 `agent_outcome` 为 `NULL`，映射表却把平台故障全映射成 `NOT_ATTEMPTED` | 新增 C-68 六种合法组合表；C-69 规定 `NOT_ATTEMPTED` 当且仅当 `agent_started_at IS NULL`；C-30 改为"非空时只能是……" |
+| 3 | `UNRESOLVED` 定义要求补丁非空，但 AI 可能没改任何文件就超时 | 定义加例外：协议明确归属 AI 的失败允许补丁为空；C-08c 区分它与 `EMPTY_PATCH` |
+| 4 | C-13 先无条件判 `UNRESOLVED`，C-13b 才去查是不是我们自己的解析器出错，顺序反了 | C-13 改成先自检再三分支：解析器问题走 `FAILED` 不罚 AI；C-13f 加系统性异常闸门 |
+| 5 | canonical attempt 三处边界未定义；`selected_attempt_id` 方案不可行 | C-70 唯一性只约束 COMPLETED/PARTIAL；C-71 全局最大 attempt 上限；C-72 对照测试不算 attempt；删除 `selected_attempt_id` |
+| 6 | C-63 的 `git clean -fd` 会删掉 AI 合法新增的源文件 | C-63a 禁止无路径限制清理；C-63b 只删确认命中规则的具体文件 |
+| 7 | C-34 要求任何机器结果完全一致，但 C-20 允许重跑后结果不同 | 拆成两条：C-34 判定逻辑是纯函数必须确定；C-73 测试执行可复现是目标不是保证，偏差要记录告警 |
+
+同步修改的规划文档：§6 不变式（补合法组合表）、任务 Schema（加 `test_patch_paths`）、数据模型（`benchmark_tasks.test_patch_paths`）、Runner 协议（说明测试路径不下发）、状态机图（`EMPTY_PATCH` 和 `AGENT_RUNTIME_ERROR` 原来画错了）。
+
+测试断言增至 22 条（T-9 拆成 T-9a / T-9b）。
 
 **v1.1-draft 改动清单**
 
@@ -544,9 +665,9 @@ tox.ini             setup.cfg       pyproject.toml
 
 | 编号 | 问题 | 起草建议 | 决定 |
 |:---|:---|:---|:---|
-| **Q7** | `AGENT_TIMEOUT` 时要不要跑一次"影子判定"（跑测试但不计分），用来量化"其实已经改对了只是超时"的比例？ | v1 不做（C-09a）。它每次多花约 75 秒，而且结论不参与评分。等第一次小规模试跑后，如果超时比例很高再考虑 | ☐ 维持不做 ☐ 加进 v1.2 |
-| **Q8** | 取消 `TIMEOUT` 终态（C-04a）比评审建议的"终态是否有值由映射决定"走得更远，是否接受？ | 接受。理由：一个终态两种含义正是 v1.0 那个矛盾的根源，与其打补丁不如去掉重复 | ☐ 接受 ☐ 改回评审原方案 |
-| **Q9** | `test_patch` 触碰的全部路径都要保护（C-42 最后一条），需要在题目 Schema 里显式存一份路径清单吗？ | 需要。运行时从 `test_patch` 现算也可以，但存下来更快且可审计 | ☐ 存清单 ☐ 运行时现算 |
+| **Q7** | 超时时要不要跑"影子判定" | v1 不做 | ✅ **维持不做**。补丁仍存档，只统计超时数与"超时但补丁非空"数（C-09b）；影子判定日后做成离线分析任务，不占关键路径（C-09c） |
+| **Q8** | 取消 `TIMEOUT` 终态是否接受 | 接受 | ✅ **接受**，但以完成本轮全部一致性修复为生效前提 |
+| **Q9** | `test_patch` 路径要不要存进题目 Schema | 需要 | ✅ **存清单**，由 Validator 生成并强制校验（C-74）；且必须拆成内部执行用与下发给 AI 用两份，禁止泄露（C-75、C-76） |
 
 ### 10.3 第一轮问题存档
 

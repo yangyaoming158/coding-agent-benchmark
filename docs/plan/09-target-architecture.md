@@ -143,16 +143,17 @@ stateDiagram-v2
     ANALYZING --> COMPLETED
     COMPLETED --> [*]
 
-    AGENT_RUNNING --> COMPLETED: AGENT_TIMEOUT<br/>存补丁但不跑测试 → UNRESOLVED
-    PATCH_CAPTURED --> COMPLETED: EMPTY_PATCH → UNRESOLVED
-    TESTING --> COMPLETED: 补丁导致的 TEST_TIMEOUT → UNRESOLVED
-    TESTING --> COMPLETED: PATCH_APPLY_FAILED → INVALID_PATCH
+    AGENT_RUNNING --> COMPLETED: AGENT_TIMEOUT<br/>存补丁但不跑测试，判 UNRESOLVED
+    AGENT_RUNNING --> COMPLETED: AGENT_RUNTIME_ERROR<br/>重试耗尽后判 UNRESOLVED
+    PATCH_CAPTURED --> COMPLETED: 正常退出且补丁为空<br/>判 EMPTY_PATCH
+    TESTING --> COMPLETED: 补丁导致的 TEST_TIMEOUT<br/>判 UNRESOLVED
+    TESTING --> COMPLETED: PATCH_APPLY_FAILED<br/>判 INVALID_PATCH
 
-    PREPARING --> FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR
-    AGENT_RUNNING --> FAILED: AGENT_RUNTIME_ERROR / AGENT_AUTH_ERROR
-    TESTING --> FAILED: SANDBOX_ERROR / OOM_KILLED
-    TESTING --> FAILED: 环境导致的 TEST_TIMEOUT
-    JUDGING --> FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR
+    PREPARING --> FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR<br/>AI 未启动 → NOT_ATTEMPTED
+    AGENT_RUNNING --> FAILED: AGENT_AUTH_ERROR<br/>外部服务问题 → NULL
+    TESTING --> FAILED: SANDBOX_ERROR / OOM_KILLED<br/>AI 已启动 → NULL
+    TESTING --> FAILED: 环境导致的 TEST_TIMEOUT<br/>对照组也超时 → NULL
+    JUDGING --> FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR<br/>解析器问题 → NULL
     ANALYZING --> COMPLETED: 归因失败不影响判定结论
 
     QUEUED --> CANCELLED
@@ -170,8 +171,14 @@ stateDiagram-v2
         COMPLETED = 拿到了可信结论（哪怕结论是"没修好"）
         FAILED    = 没拿到可信结论
 
-        只有 COMPLETED 允许 agent_outcome 非空
+        FAILED 时 agent_outcome 分两种：
+          AI 从未启动     → NOT_ATTEMPTED
+          AI 启动后才故障 → NULL
+        判据：agent_started_at 是否为空
+
+        合法组合共六种，见协议 C-68
         重试 = 新建一条 attempt_no+1 的记录，不回退状态
+        统计只看被标记为 canonical 的那一次
     end note
 ```
 

@@ -135,8 +135,20 @@ QUEUED            排队中
 
 ### 四条必须永远成立的规则（写进单元测试）
 
-1. 只有到了 `COMPLETED`，`agent_outcome` 才允许非空。
-2. 如果 `infra_outcome` 不是 `SUCCESS`，那 `agent_outcome` 只能是 `UNRESOLVED` 或 `NOT_ATTEMPTED`。
+1. 非终态时 `agent_outcome` 一律为 `NULL`。终态时按下面这张**合法组合表**取值，其余组合都是程序错误：
+
+   | 情况 | `lifecycle_status` | `agent_outcome` |
+   |:---|:---|:---|
+   | 正常跑完测试 | `COMPLETED` | `RESOLVED` / `UNRESOLVED` / `EMPTY_PATCH` |
+   | AI 超时或自身崩溃 | `COMPLETED` | `UNRESOLVED` |
+   | 补丁打不上 | `COMPLETED` | `INVALID_PATCH` |
+   | 平台故障且 AI 从未启动 | `FAILED` | `NOT_ATTEMPTED` |
+   | AI 已启动，之后平台故障 | `FAILED` | `NULL` |
+   | 人工取消 | `CANCELLED` | `NULL` |
+
+   `NOT_ATTEMPTED` 当且仅当 `agent_started_at IS NULL`。
+
+2. `infra_outcome` 不是 `SUCCESS` 时，`agent_outcome` 要么为 `NULL`，要么只能是 `UNRESOLVED`、`INVALID_PATCH` 或 `NOT_ATTEMPTED`。
 3. `AGENT_RUNNING` 是唯一允许容器联网的阶段。`TESTING` 阶段必须加 `--network none`。
 4. 状态只能往前走，**不能回退**。重试的做法是新建一条记录（`attempt_no` 加 1），而不是把原来那条改回去。
 
