@@ -44,13 +44,17 @@
 ### C. 评测域
 
 **`evaluation_runs`** — 一次实验 = Agent 配置 × 数据集
-`id PK` · `name` · `benchmark_set_id FK` · `agent_config_id FK` · `status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)` · `agent_concurrency` · `sandbox_concurrency` · `total_tasks` · `completed_tasks` · `resolved_count` · `infra_failure_count` · `strict_resolve_rate numeric` · `effective_resolve_rate numeric` · `total_cost_usd numeric` · `total_tokens bigint` · `makespan_ms bigint` · `external_wait_ms bigint` · `manifest jsonb` · `started_at` · `finished_at` · `created_by`
+`id PK` · `name` · `benchmark_set_id FK` · `agent_config_id FK` · `status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)` · `agent_concurrency` · `sandbox_concurrency` · `total_tasks` · `completed_tasks` · `resolved_count` · `infra_failure_count` · `strict_resolve_rate numeric` · `effective_resolve_rate numeric` · `total_cost_usd numeric` · `total_tokens bigint` · `makespan_ms bigint` · `external_wait_ms bigint` · **`protocol_version varchar`**（创建时写入，禁止事后修改，见协议 C-67）· **`retry_count int`** · **`recovered_infra_failure_count int`** · `manifest jsonb` · `started_at` · `finished_at` · `created_by`
 索引：`(status)`、`(benchmark_set_id, agent_config_id)`
 > `manifest jsonb` 承载 §24 可复现性的全部字段（镜像 digest 表、harness git sha、数据集哈希、环境变量白名单、随机种子）。
 
 **`evaluation_task_runs`** — 单题单次执行（核心宽表）
-`id PK` · `evaluation_run_id FK` · `benchmark_task_id FK` · `attempt_no smallint` · `lifecycle_status enum` · `infra_outcome enum` · `agent_outcome enum` · `queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at` · `agent_duration_ms/test_duration_ms/total_duration_ms` · `exit_code` · `tokens_input/tokens_output/tokens_total bigint` · `cost_usd numeric` · `cost_source enum` · `turns` · `patch_artifact_id FK NULL` · `files_changed/lines_added/lines_deleted` · `f2p_passed/f2p_total/p2p_passed/p2p_total` · `error_code` · `error_message_excerpt varchar(2000)` · `worker_id` · `retry_of_id FK NULL`
-索引：`(evaluation_run_id, lifecycle_status)`、`(benchmark_task_id)`、`(agent_outcome)`、UQ`(evaluation_run_id, benchmark_task_id, attempt_no)`
+`id PK` · `evaluation_run_id FK` · `benchmark_task_id FK` · `attempt_no smallint` · `lifecycle_status enum` · `infra_outcome enum` · `agent_outcome enum` · `queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at` · `agent_duration_ms/test_duration_ms/total_duration_ms` · `exit_code` · `tokens_input/tokens_output/tokens_total bigint` · `cost_usd numeric` · `cost_source enum` · `turns` · `patch_artifact_id FK NULL` · `files_changed/lines_added/lines_deleted` · `f2p_passed/f2p_total/p2p_passed/p2p_total` · `error_code` · `error_message_excerpt varchar(2000)` · `worker_id` · `retry_of_id FK NULL` · **`is_canonical boolean`**（这次 attempt 是否被选为统计依据，规则见协议 C-24）· **`raw_patch_empty boolean`** · **`protected_path_edit_attempted boolean`** · **`filtered_change_reasons jsonb`**
+索引：`(evaluation_run_id, lifecycle_status)`、`(benchmark_task_id)`、`(agent_outcome)`、UQ`(evaluation_run_id, benchmark_task_id, attempt_no)`、**部分唯一索引 `(evaluation_run_id, benchmark_task_id) WHERE is_canonical`**（保证每题只有一个认定结果）
+
+> **`is_canonical` 为什么必须是显式字段**：一道题重试多次时，被选作统计依据的那一次**不一定是编号最大的**。比如第 1 次就遇到 AI 超时（按协议 C-18 不可重试），它就是认定结果。靠"取最大 attempt_no"推断会算错。协议 C-57、C-58 明确禁止临时推断。
+>
+> **三个诊断字段是干什么的**：`EMPTY_PATCH` 的含义是"过滤之后补丁为空"，不等于"AI 什么都没做"。AI 可能改了一堆测试文件想蒙混过关，被平台全部丢弃后也是空补丁。这两种行为必须能区分，否则失败分析会得出错误结论。
 
 **`patch_artifacts`** — 补丁及其统计
 `id PK` · `evaluation_task_run_id FK` · `kind enum(AGENT_RAW|AGENT_NORMALIZED|GOLD|TEST)` · `uri` · `sha256` · `size_bytes` · `files_changed` · `lines_added` · `lines_deleted` · `is_empty bool` · `applies_cleanly bool`

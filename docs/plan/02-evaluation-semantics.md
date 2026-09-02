@@ -36,16 +36,22 @@
 **两个解决率都要算出来**，不然后面一定会有人吵"你这个数是怎么算的"：
 
 ```
+以下全部只统计 canonical attempt（一道题重试多次时被选定的那一次，
+定义见 docs/evaluation-protocol.md C-24）
+
 严格解决率 = RESOLVED 数 / 数据集里的全部题数
             ← 排行榜用这个。跟 SWE-Bench 官方口径一致
 
-有效解决率 = RESOLVED 数 / 平台跑得没问题的题数
-            ← 我们自己诊断用。它排除了平台故障的干扰
+有效解决率 = RESOLVED 数
+           / agent_outcome ∈ {RESOLVED, UNRESOLVED, EMPTY_PATCH, INVALID_PATCH} 的题数
+            ← 我们自己诊断用。分母是"确实拿到了一个能归因于 AI 的结果"的题数
 
-平台故障率 = infra_outcome 不是 SUCCESS 的题数 / 全部题数
+平台故障率 = 计入平台故障率的题数 / 全部题数
 ```
 
-**排行榜准入规则**：平台故障率超过 5% 的实验结果，**不许进排行榜**，只能标成 `DEGRADED`（降级）并要求重跑。
+> 注意有效解决率的分母**不是** `infra_outcome = SUCCESS` 的题数。那样会把 AI 超时、补丁打不上、补丁导致测试超时这些**AI 自己的失败**一起排除掉，算出来的数字会虚高。
+
+**排行榜准入规则**：平台故障题数超过 `floor(总题数 × 0.05)` 的实验结果，**不许进排行榜**。数据库状态记为 `PARTIAL`，前端展示为"降级"，并要求重跑。（60 题最多允许 3 题故障，100 题最多允许 5 题。）
 
 这条规则的作用是把"平台质量"变成一条硬性检查，而不是报告末尾的一句备注。
 
@@ -100,7 +106,9 @@
 
 **一条铁律：`MISSING`、`SKIPPED`、`XFAIL` 一律不算通过。**
 
-如果 `fail_to_pass` 里有任何一条变成了 `MISSING`，说明被测 AI 很可能把测试删了或改了。直接判 `UNRESOLVED`，并打上 `TEST_TAMPERING_SUSPECTED`（疑似篡改测试）的标记。
+如果 `fail_to_pass` 里有任何一条变成了 `MISSING`，判 `UNRESOLVED`，并打上 `TEST_RESULT_INTEGRITY_SUSPECTED`（测试完整性异常）的标记，自动进人工复核。
+
+**不要直接当成作弊。** 用例 ID 归一化写错本身就会制造大量假 `MISSING`（见 §11.3，这是全项目最容易出的静默 bug）。只有在发现 AI 确实动了受保护文件之类的实际证据时，才升级为 `TEST_TAMPERING_SUSPECTED`。详细流程见 `docs/evaluation-protocol.md` C-13 系列。
 
 ## 6.5 一次评测从头到尾经过哪些状态
 
@@ -115,7 +123,15 @@ QUEUED            排队中
   → COMPLETED     结束
 ```
 
-异常结束：`FAILED`（平台故障）、`TIMEOUT`（阶段超时向上传递）、`CANCELLED`（人工取消）。
+终态只有三个：
+
+- `COMPLETED` —— 跑完了，拿到了可信结论（哪怕结论是"没修好"）
+- `FAILED` —— 因平台故障中止，**没**拿到可信结论
+- `CANCELLED` —— 人工取消
+
+**没有 `TIMEOUT` 终态。** 超时的具体类型已经完整记在 `infra_outcome` 里了。AI 自己超时算"拿到了结论"（它没在预算内做完），落 `COMPLETED`；环境问题导致测试超时算"没拿到结论"，落 `FAILED`。
+
+一个状态两种含义会直接产生矛盾，所以不设这个终态。理由见 `docs/evaluation-protocol.md` C-04a。
 
 ### 四条必须永远成立的规则（写进单元测试）
 
@@ -130,8 +146,8 @@ QUEUED            排队中
 
 `DRAFT → QUEUED → RUNNING → COMPLETED | PARTIAL | FAILED | CANCELLED`
 
-- `COMPLETED`：所有子任务都结束了，且平台故障率 ≤ 5% → **可以进排行榜**
-- `PARTIAL`：所有子任务都结束了，但平台故障率 > 5% → 标记为降级，不进排行榜
+- `COMPLETED`：所有子任务都结束了，且平台故障题数 ≤ `floor(总题数 × 0.05)` → **可以进排行榜**
+- `PARTIAL`：所有子任务都结束了，但平台故障题数超标 → 前端显示"降级"，不进排行榜
 - `FAILED`：调度层自己挂了（比如镜像仓库整体连不上）
 
 ## 6.7 "判定必须可复现"到底是什么意思

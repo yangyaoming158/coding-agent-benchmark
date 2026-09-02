@@ -373,14 +373,19 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 <h3 id="sec-6-2"><span class="sub-num">6.2</span> 被测 AI 的结果 — <code>agent_outcome</code></h3>
 <div class="tw"><table><thead><tr><th>值</th><th>什么情况下填这个</th></tr></thead><tbody><tr><td><code>RESOLVED</code></td><td><strong>所有</strong> <code>fail_to_pass</code> 用例都通过了，<strong>并且所有</strong> <code>pass_to_pass</code> 用例也都还通过。两个条件缺一不可</td></tr><tr><td><code>UNRESOLVED</code></td><td>交出了一个能用的补丁，但没同时满足上面两个条件</td></tr><tr><td><code>EMPTY_PATCH</code></td><td>AI 正常退出了，但一行代码都没改。<strong>算作没修好</strong>，但单独统计出来</td></tr><tr><td><code>INVALID_PATCH</code></td><td>补丁不是空的，但打不上去（<code>git apply</code> 失败）。<strong>算作没修好</strong></td></tr><tr><td><code>NOT_ATTEMPTED</code></td><td>平台自己出故障，AI 压根没开始跑。<strong>不算进分母</strong>（严格口径除外）</td></tr></tbody></table></div>
 <p><strong>两个解决率都要算出来</strong>，不然后面一定会有人吵"你这个数是怎么算的"：</p>
-<div class="cw"><pre class="code"><code>严格解决率 = RESOLVED 数 / 数据集里的全部题数
+<div class="cw"><pre class="code"><code>以下全部只统计 canonical attempt（一道题重试多次时被选定的那一次，
+定义见 docs/evaluation-protocol.md C-24）
+
+严格解决率 = RESOLVED 数 / 数据集里的全部题数
             ← 排行榜用这个。跟 SWE-Bench 官方口径一致
 
-有效解决率 = RESOLVED 数 / 平台跑得没问题的题数
-            ← 我们自己诊断用。它排除了平台故障的干扰
+有效解决率 = RESOLVED 数
+           / agent_outcome ∈ {RESOLVED, UNRESOLVED, EMPTY_PATCH, INVALID_PATCH} 的题数
+            ← 我们自己诊断用。分母是"确实拿到了一个能归因于 AI 的结果"的题数
 
-平台故障率 = infra_outcome 不是 SUCCESS 的题数 / 全部题数</code></pre></div>
-<p><strong>排行榜准入规则</strong>：平台故障率超过 5% 的实验结果，<strong>不许进排行榜</strong>，只能标成 <code>DEGRADED</code>（降级）并要求重跑。</p>
+平台故障率 = 计入平台故障率的题数 / 全部题数</code></pre></div>
+<blockquote><p>注意有效解决率的分母<strong>不是</strong> <code>infra_outcome = SUCCESS</code> 的题数。那样会把 AI 超时、补丁打不上、补丁导致测试超时这些<strong>AI 自己的失败</strong>一起排除掉，算出来的数字会虚高。</p></blockquote>
+<p><strong>排行榜准入规则</strong>：平台故障题数超过 <code>floor(总题数 × 0.05)</code> 的实验结果，<strong>不许进排行榜</strong>。数据库状态记为 <code>PARTIAL</code>，前端展示为"降级"，并要求重跑。（60 题最多允许 3 题故障，100 题最多允许 5 题。）</p>
 <p>这条规则的作用是把"平台质量"变成一条硬性检查，而不是报告末尾的一句备注。</p>
 <h3 id="sec-6-3"><span class="sub-num">6.3</span> 平台自己的结果 — <code>infra_outcome</code></h3>
 <div class="tw"><table><thead><tr><th>值</th><th>什么时候出现</th><th style="text-align:center">自动重试几次</th><th>这算谁的问题</th></tr></thead><tbody><tr><td><code>SUCCESS</code></td><td>一切正常，判定结论可信</td><td style="text-align:center">—</td><td>—</td></tr><tr><td><code>ENV_BUILD_FAILED</code></td><td>镜像构建不出来、依赖装不上</td><td style="text-align:center">1</td><td>平台 / 题目</td></tr><tr><td><code>WORKSPACE_ERROR</code></td><td>代码快照准备失败</td><td style="text-align:center">1</td><td>平台</td></tr><tr><td><code>AGENT_TIMEOUT</code></td><td>AI 跑的时间超过 <code>agent_timeout_s</code></td><td style="text-align:center"><strong>不重试</strong></td><td><strong>AI</strong>（判为没修好）</td></tr><tr><td><code>AGENT_RUNTIME_ERROR</code></td><td>AI 进程崩了、退出码非 0、输出不符合协议</td><td style="text-align:center">1</td><td><strong>AI</strong>（重试后还失败就判没修好）</td></tr><tr><td><code>AGENT_AUTH_ERROR</code></td><td>密钥无效、额度用完、限流退避多次仍失败</td><td style="text-align:center">3（带退避）</td><td><strong>外部服务</strong>（不算 AI 能力差）</td></tr><tr><td><code>SANDBOX_ERROR</code></td><td>Docker 报错、容器建不起来、挂载失败</td><td style="text-align:center">2</td><td>平台</td></tr><tr><td><code>OOM_KILLED</code></td><td>容器内存超限被系统杀掉</td><td style="text-align:center">1（降配后）</td><td>平台 / 题目</td></tr><tr><td><code>TEST_TIMEOUT</code></td><td>跑测试超过 <code>test_timeout_s</code></td><td style="text-align:center">1</td><td>题目（也可能是补丁写出了死循环 → 判没修好）</td></tr><tr><td><code>TEST_DISCOVERY_ERROR</code></td><td>测试框架收集不到用例、报告文件没生成</td><td style="text-align:center">1</td><td>题目 / 平台</td></tr><tr><td><code>PATCH_APPLY_FAILED</code></td><td>补丁打不上去</td><td style="text-align:center">不重试</td><td><strong>AI</strong>（→ <code>INVALID_PATCH</code>）</td></tr><tr><td><code>HARNESS_ERROR</code></td><td>我们自己的代码抛了没接住的异常</td><td style="text-align:center">1</td><td>平台（必须告警）</td></tr><tr><td><code>CANCELLED</code></td><td>人工取消</td><td style="text-align:center">不重试</td><td>人工</td></tr></tbody></table></div>
@@ -396,7 +401,8 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 <h3 id="sec-6-4"><span class="sub-num">6.4</span> 单条测试用例的状态 — <code>test_status</code></h3>
 <div class="tw"><table><thead><tr><th>值</th><th>含义</th></tr></thead><tbody><tr><td><code>PASSED</code></td><td>通过</td></tr><tr><td><code>FAILED</code></td><td>断言没过</td></tr><tr><td><code>ERROR</code></td><td>用例执行时抛异常，或者收集阶段就报错</td></tr><tr><td><code>SKIPPED</code></td><td>被跳过了</td></tr><tr><td><code>XFAIL</code> / <code>XPASS</code></td><td>pytest 的"预期会失败"和"居然通过了"</td></tr><tr><td><code>MISSING</code></td><td><strong>测试报告里根本找不到这条用例</strong>（被删了、被改名了、或者没被收集到）</td></tr></tbody></table></div>
 <p><strong>一条铁律：<code>MISSING</code>、<code>SKIPPED</code>、<code>XFAIL</code> 一律不算通过。</strong></p>
-<p>如果 <code>fail_to_pass</code> 里有任何一条变成了 <code>MISSING</code>，说明被测 AI 很可能把测试删了或改了。直接判 <code>UNRESOLVED</code>，并打上 <code>TEST_TAMPERING_SUSPECTED</code>（疑似篡改测试）的标记。</p>
+<p>如果 <code>fail_to_pass</code> 里有任何一条变成了 <code>MISSING</code>，判 <code>UNRESOLVED</code>，并打上 <code>TEST_RESULT_INTEGRITY_SUSPECTED</code>（测试完整性异常）的标记，自动进人工复核。</p>
+<p><strong>不要直接当成作弊。</strong> 用例 ID 归一化写错本身就会制造大量假 <code>MISSING</code>（见 §11.3，这是全项目最容易出的静默 bug）。只有在发现 AI 确实动了受保护文件之类的实际证据时，才升级为 <code>TEST_TAMPERING_SUSPECTED</code>。详细流程见 <code>docs/evaluation-protocol.md</code> C-13 系列。</p>
 <h3 id="sec-6-5"><span class="sub-num">6.5</span> 一次评测从头到尾经过哪些状态</h3>
 <div class="cw"><pre class="code"><code>QUEUED            排队中
   → PREPARING     准备代码快照、检查镜像
@@ -406,13 +412,16 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
   → JUDGING       解析测试报告 → 逐条比对 → 得出 agent_outcome
   → ANALYZING     先用规则分类失败原因，规则搞不定的再交给大模型
   → COMPLETED     结束</code></pre></div>
-<p>异常结束：<code>FAILED</code>（平台故障）、<code>TIMEOUT</code>（阶段超时向上传递）、<code>CANCELLED</code>（人工取消）。</p>
+<p>终态只有三个：</p>
+<ul><li><code>COMPLETED</code> —— 跑完了，拿到了可信结论（哪怕结论是"没修好"）</li><li><code>FAILED</code> —— 因平台故障中止，<strong>没</strong>拿到可信结论</li><li><code>CANCELLED</code> —— 人工取消</li></ul>
+<p><strong>没有 <code>TIMEOUT</code> 终态。</strong> 超时的具体类型已经完整记在 <code>infra_outcome</code> 里了。AI 自己超时算"拿到了结论"（它没在预算内做完），落 <code>COMPLETED</code>；环境问题导致测试超时算"没拿到结论"，落 <code>FAILED</code>。</p>
+<p>一个状态两种含义会直接产生矛盾，所以不设这个终态。理由见 <code>docs/evaluation-protocol.md</code> C-04a。</p>
 <h4 id="sec-四条必须永远成立的规则-写进单元测试-">四条必须永远成立的规则（写进单元测试）</h4>
 <ol><li>只有到了 <code>COMPLETED</code>，<code>agent_outcome</code> 才允许非空。</li><li>如果 <code>infra_outcome</code> 不是 <code>SUCCESS</code>，那 <code>agent_outcome</code> 只能是 <code>UNRESOLVED</code> 或 <code>NOT_ATTEMPTED</code>。</li><li><code>AGENT_RUNNING</code> 是唯一允许容器联网的阶段。<code>TESTING</code> 阶段必须加 <code>--network none</code>。</li><li>状态只能往前走，<strong>不能回退</strong>。重试的做法是新建一条记录（<code>attempt_no</code> 加 1），而不是把原来那条改回去。</li></ol>
 <p>第 4 条是为了保住历史。如果允许状态回退，一次失败的运行被重试成功后，你就再也查不到它第一次为什么失败了。</p>
 <h3 id="sec-6-6"><span class="sub-num">6.6</span> 整个实验（EvaluationRun）的状态</h3>
 <p><code>DRAFT → QUEUED → RUNNING → COMPLETED | PARTIAL | FAILED | CANCELLED</code></p>
-<ul><li><code>COMPLETED</code>：所有子任务都结束了，且平台故障率 ≤ 5% → <strong>可以进排行榜</strong></li><li><code>PARTIAL</code>：所有子任务都结束了，但平台故障率 &gt; 5% → 标记为降级，不进排行榜</li><li><code>FAILED</code>：调度层自己挂了（比如镜像仓库整体连不上）</li></ul>
+<ul><li><code>COMPLETED</code>：所有子任务都结束了，且平台故障题数 ≤ <code>floor(总题数 × 0.05)</code> → <strong>可以进排行榜</strong></li><li><code>PARTIAL</code>：所有子任务都结束了，但平台故障题数超标 → 前端显示"降级"，不进排行榜</li><li><code>FAILED</code>：调度层自己挂了（比如镜像仓库整体连不上）</li></ul>
 <h3 id="sec-6-7"><span class="sub-num">6.7</span> "判定必须可复现"到底是什么意思</h3>
 <blockquote><p>给定同样的四样东西——题目版本、补丁内容、镜像 digest、平台代码版本——判定引擎在任何时间、任何机器上都必须返回<strong>完全一样</strong>的结论和<strong>完全一样</strong>的逐条用例状态。</p></blockquote>
 <p>靠这五件事保证：</p>
@@ -824,9 +833,10 @@ Layer 3b 运行期容器                      从 Layer 2/3a 起容器，挂载�
 <p><strong><code>agent_configs</code></strong> — Agent × 模型 × 参数 的具体组合（<strong>这才是排行榜上的"参赛者"</strong>） <code>id PK</code> · <code>agent_id FK</code> · <code>label</code>(如 <code>aider@deepseek-chat</code>) · <code>agent_version</code> · <code>model_name</code> · <code>params jsonb</code>(temperature/max_turns/…) · <code>price_input_per_mtok numeric</code> · <code>price_output_per_mtok numeric</code> · <code>config_hash</code> · <code>enabled bool</code></p>
 <blockquote><p>把"Agent"与"配置"分开是必要的：同一个 Aider 接 3 个模型就是 3 个参赛者，而适配器只有 1 个。</p></blockquote>
 <h4 id="sec-c-评测域">C. 评测域</h4>
-<p><strong><code>evaluation_runs</code></strong> — 一次实验 = Agent 配置 × 数据集 <code>id PK</code> · <code>name</code> · <code>benchmark_set_id FK</code> · <code>agent_config_id FK</code> · <code>status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)</code> · <code>agent_concurrency</code> · <code>sandbox_concurrency</code> · <code>total_tasks</code> · <code>completed_tasks</code> · <code>resolved_count</code> · <code>infra_failure_count</code> · <code>strict_resolve_rate numeric</code> · <code>effective_resolve_rate numeric</code> · <code>total_cost_usd numeric</code> · <code>total_tokens bigint</code> · <code>makespan_ms bigint</code> · <code>external_wait_ms bigint</code> · <code>manifest jsonb</code> · <code>started_at</code> · <code>finished_at</code> · <code>created_by</code> 索引：<code>(status)</code>、<code>(benchmark_set_id, agent_config_id)</code></p>
+<p><strong><code>evaluation_runs</code></strong> — 一次实验 = Agent 配置 × 数据集 <code>id PK</code> · <code>name</code> · <code>benchmark_set_id FK</code> · <code>agent_config_id FK</code> · <code>status enum(DRAFT|QUEUED|RUNNING|COMPLETED|PARTIAL|FAILED|CANCELLED)</code> · <code>agent_concurrency</code> · <code>sandbox_concurrency</code> · <code>total_tasks</code> · <code>completed_tasks</code> · <code>resolved_count</code> · <code>infra_failure_count</code> · <code>strict_resolve_rate numeric</code> · <code>effective_resolve_rate numeric</code> · <code>total_cost_usd numeric</code> · <code>total_tokens bigint</code> · <code>makespan_ms bigint</code> · <code>external_wait_ms bigint</code> · <strong><code>protocol_version varchar</code></strong>（创建时写入，禁止事后修改，见协议 C-67）· <strong><code>retry_count int</code></strong> · <strong><code>recovered_infra_failure_count int</code></strong> · <code>manifest jsonb</code> · <code>started_at</code> · <code>finished_at</code> · <code>created_by</code> 索引：<code>(status)</code>、<code>(benchmark_set_id, agent_config_id)</code></p>
 <blockquote><p><code>manifest jsonb</code> 承载 §24 可复现性的全部字段（镜像 digest 表、harness git sha、数据集哈希、环境变量白名单、随机种子）。</p></blockquote>
-<p><strong><code>evaluation_task_runs</code></strong> — 单题单次执行（核心宽表） <code>id PK</code> · <code>evaluation_run_id FK</code> · <code>benchmark_task_id FK</code> · <code>attempt_no smallint</code> · <code>lifecycle_status enum</code> · <code>infra_outcome enum</code> · <code>agent_outcome enum</code> · <code>queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at</code> · <code>agent_duration_ms/test_duration_ms/total_duration_ms</code> · <code>exit_code</code> · <code>tokens_input/tokens_output/tokens_total bigint</code> · <code>cost_usd numeric</code> · <code>cost_source enum</code> · <code>turns</code> · <code>patch_artifact_id FK NULL</code> · <code>files_changed/lines_added/lines_deleted</code> · <code>f2p_passed/f2p_total/p2p_passed/p2p_total</code> · <code>error_code</code> · <code>error_message_excerpt varchar(2000)</code> · <code>worker_id</code> · <code>retry_of_id FK NULL</code> 索引：<code>(evaluation_run_id, lifecycle_status)</code>、<code>(benchmark_task_id)</code>、<code>(agent_outcome)</code>、UQ<code>(evaluation_run_id, benchmark_task_id, attempt_no)</code></p>
+<p><strong><code>evaluation_task_runs</code></strong> — 单题单次执行（核心宽表） <code>id PK</code> · <code>evaluation_run_id FK</code> · <code>benchmark_task_id FK</code> · <code>attempt_no smallint</code> · <code>lifecycle_status enum</code> · <code>infra_outcome enum</code> · <code>agent_outcome enum</code> · <code>queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at</code> · <code>agent_duration_ms/test_duration_ms/total_duration_ms</code> · <code>exit_code</code> · <code>tokens_input/tokens_output/tokens_total bigint</code> · <code>cost_usd numeric</code> · <code>cost_source enum</code> · <code>turns</code> · <code>patch_artifact_id FK NULL</code> · <code>files_changed/lines_added/lines_deleted</code> · <code>f2p_passed/f2p_total/p2p_passed/p2p_total</code> · <code>error_code</code> · <code>error_message_excerpt varchar(2000)</code> · <code>worker_id</code> · <code>retry_of_id FK NULL</code> · <strong><code>is_canonical boolean</code></strong>（这次 attempt 是否被选为统计依据，规则见协议 C-24）· <strong><code>raw_patch_empty boolean</code></strong> · <strong><code>protected_path_edit_attempted boolean</code></strong> · <strong><code>filtered_change_reasons jsonb</code></strong> 索引：<code>(evaluation_run_id, lifecycle_status)</code>、<code>(benchmark_task_id)</code>、<code>(agent_outcome)</code>、UQ<code>(evaluation_run_id, benchmark_task_id, attempt_no)</code>、<strong>部分唯一索引 <code>(evaluation_run_id, benchmark_task_id) WHERE is_canonical</code></strong>（保证每题只有一个认定结果）</p>
+<blockquote><p><strong><code>is_canonical</code> 为什么必须是显式字段</strong>：一道题重试多次时，被选作统计依据的那一次<strong>不一定是编号最大的</strong>。比如第 1 次就遇到 AI 超时（按协议 C-18 不可重试），它就是认定结果。靠"取最大 attempt_no"推断会算错。协议 C-57、C-58 明确禁止临时推断。</p><p><strong>三个诊断字段是干什么的</strong>：<code>EMPTY_PATCH</code> 的含义是"过滤之后补丁为空"，不等于"AI 什么都没做"。AI 可能改了一堆测试文件想蒙混过关，被平台全部丢弃后也是空补丁。这两种行为必须能区分，否则失败分析会得出错误结论。</p></blockquote>
 <p><strong><code>patch_artifacts</code></strong> — 补丁及其统计 <code>id PK</code> · <code>evaluation_task_run_id FK</code> · <code>kind enum(AGENT_RAW|AGENT_NORMALIZED|GOLD|TEST)</code> · <code>uri</code> · <code>sha256</code> · <code>size_bytes</code> · <code>files_changed</code> · <code>lines_added</code> · <code>lines_deleted</code> · <code>is_empty bool</code> · <code>applies_cleanly bool</code></p>
 <p><strong><code>test_results</code></strong> — 逐用例结果（判定的证据） <code>id PK</code> · <code>evaluation_task_run_id FK</code> · <code>test_id text</code> · <code>role enum(F2P|P2P|OTHER)</code> · <code>status enum(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS|MISSING)</code> · <code>duration_ms</code> · <code>message_excerpt varchar(2000)</code> 索引：<code>(evaluation_task_run_id)</code>、<code>(evaluation_task_run_id, role)</code></p>
 <blockquote><p>量级：300 run × ~50 用例 ≈ 15,000 行/实验，完全无压力。逐用例入库是"证据可查"的基础，也是失败归因 Stage 2 的数据源。</p></blockquote>
@@ -1134,7 +1144,7 @@ runs/{run_id}/report.html</code></pre></div>
     W-&gt;&gt;DB: 写 test_results 明细
     W-&gt;&gt;DB: → ANALYZING：规则前置；模糊则入 ATTRIBUTE 队列（异步）
     W-&gt;&gt;DB: → COMPLETED（释放 sandbox_sem）</pre></figure>
-<h3 id="sec-20-4"><span class="sub-num">20.4</span> EvaluationTaskRun State Machine（任务运行状态机）</h3>
+<h3 id="sec-20-4"><span class="sub-num">20.4</span> EvaluationTaskRun State Machine（一次评测的状态流转）</h3>
 <figure class="fig"><pre class="mermaid">stateDiagram-v2
     [*] --&gt; QUEUED
     QUEUED --&gt; PREPARING
@@ -1146,14 +1156,17 @@ runs/{run_id}/report.html</code></pre></div>
     ANALYZING --&gt; COMPLETED
     COMPLETED --&gt; [*]
 
+    AGENT_RUNNING --&gt; COMPLETED: AGENT_TIMEOUT&lt;br/&gt;存补丁但不跑测试 → UNRESOLVED
+    PATCH_CAPTURED --&gt; COMPLETED: EMPTY_PATCH → UNRESOLVED
+    TESTING --&gt; COMPLETED: 补丁导致的 TEST_TIMEOUT → UNRESOLVED
+    TESTING --&gt; COMPLETED: PATCH_APPLY_FAILED → INVALID_PATCH
+
     PREPARING --&gt; FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR
-    AGENT_RUNNING --&gt; TIMEOUT: AGENT_TIMEOUT（归属 Agent）
     AGENT_RUNNING --&gt; FAILED: AGENT_RUNTIME_ERROR / AGENT_AUTH_ERROR
-    PATCH_CAPTURED --&gt; COMPLETED: EMPTY_PATCH（判 UNRESOLVED）
-    TESTING --&gt; TIMEOUT: TEST_TIMEOUT
-    TESTING --&gt; FAILED: SANDBOX_ERROR / OOM_KILLED / PATCH_APPLY_FAILED
+    TESTING --&gt; FAILED: SANDBOX_ERROR / OOM_KILLED
+    TESTING --&gt; FAILED: 环境导致的 TEST_TIMEOUT
     JUDGING --&gt; FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR
-    ANALYZING --&gt; COMPLETED: 归因失败不阻塞判定
+    ANALYZING --&gt; COMPLETED: 归因失败不影响判定结论
 
     QUEUED --&gt; CANCELLED
     PREPARING --&gt; CANCELLED
@@ -1161,12 +1174,17 @@ runs/{run_id}/report.html</code></pre></div>
     TESTING --&gt; CANCELLED
 
     FAILED --&gt; [*]
-    TIMEOUT --&gt; [*]
     CANCELLED --&gt; [*]
 
     note right of COMPLETED
-        仅 COMPLETED 允许 agent_outcome ≠ NULL
-        重试 = 新建 attempt_no+1 行，不回退状态
+        终态只有三个：COMPLETED / FAILED / CANCELLED
+        没有 TIMEOUT 终态——超时类型记在 infra_outcome 里
+
+        COMPLETED = 拿到了可信结论（哪怕结论是"没修好"）
+        FAILED    = 没拿到可信结论
+
+        只有 COMPLETED 允许 agent_outcome 非空
+        重试 = 新建一条 attempt_no+1 的记录，不回退状态
     end note</pre></figure>
 <h3 id="sec-20-5"><span class="sub-num">20.5</span> Benchmark Task State Machine（任务生命周期）</h3>
 <figure class="fig"><pre class="mermaid">stateDiagram-v2

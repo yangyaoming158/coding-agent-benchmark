@@ -129,7 +129,7 @@ sequenceDiagram
     W->>DB: → COMPLETED（释放 sandbox_sem）
 ```
 
-## 20.4 EvaluationTaskRun State Machine（任务运行状态机）
+## 20.4 EvaluationTaskRun State Machine（一次评测的状态流转）
 
 ```mermaid
 stateDiagram-v2
@@ -143,14 +143,17 @@ stateDiagram-v2
     ANALYZING --> COMPLETED
     COMPLETED --> [*]
 
+    AGENT_RUNNING --> COMPLETED: AGENT_TIMEOUT<br/>存补丁但不跑测试 → UNRESOLVED
+    PATCH_CAPTURED --> COMPLETED: EMPTY_PATCH → UNRESOLVED
+    TESTING --> COMPLETED: 补丁导致的 TEST_TIMEOUT → UNRESOLVED
+    TESTING --> COMPLETED: PATCH_APPLY_FAILED → INVALID_PATCH
+
     PREPARING --> FAILED: ENV_BUILD_FAILED / WORKSPACE_ERROR
-    AGENT_RUNNING --> TIMEOUT: AGENT_TIMEOUT（归属 Agent）
     AGENT_RUNNING --> FAILED: AGENT_RUNTIME_ERROR / AGENT_AUTH_ERROR
-    PATCH_CAPTURED --> COMPLETED: EMPTY_PATCH（判 UNRESOLVED）
-    TESTING --> TIMEOUT: TEST_TIMEOUT
-    TESTING --> FAILED: SANDBOX_ERROR / OOM_KILLED / PATCH_APPLY_FAILED
+    TESTING --> FAILED: SANDBOX_ERROR / OOM_KILLED
+    TESTING --> FAILED: 环境导致的 TEST_TIMEOUT
     JUDGING --> FAILED: TEST_DISCOVERY_ERROR / HARNESS_ERROR
-    ANALYZING --> COMPLETED: 归因失败不阻塞判定
+    ANALYZING --> COMPLETED: 归因失败不影响判定结论
 
     QUEUED --> CANCELLED
     PREPARING --> CANCELLED
@@ -158,12 +161,17 @@ stateDiagram-v2
     TESTING --> CANCELLED
 
     FAILED --> [*]
-    TIMEOUT --> [*]
     CANCELLED --> [*]
 
     note right of COMPLETED
-        仅 COMPLETED 允许 agent_outcome ≠ NULL
-        重试 = 新建 attempt_no+1 行，不回退状态
+        终态只有三个：COMPLETED / FAILED / CANCELLED
+        没有 TIMEOUT 终态——超时类型记在 infra_outcome 里
+
+        COMPLETED = 拿到了可信结论（哪怕结论是"没修好"）
+        FAILED    = 没拿到可信结论
+
+        只有 COMPLETED 允许 agent_outcome 非空
+        重试 = 新建一条 attempt_no+1 的记录，不回退状态
     end note
 ```
 
