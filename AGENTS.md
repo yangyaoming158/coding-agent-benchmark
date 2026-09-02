@@ -92,7 +92,17 @@
 
 **如果你觉得需要改其中任何一条，先停下来说明理由，不要直接改。**
 
-### 4.1 评测语义（`02-evaluation-semantics.md`）
+### 4.1 评测语义 —— 已冻结
+
+正式协议文本：[`docs/evaluation-protocol.md`](docs/evaluation-protocol.md)，**FROZEN v1.2（2026-09-02）**，共 79 条编号条款。
+
+`docs/plan/02-evaluation-semantics.md` 讲的是设计理由，协议讲的是精确定义。**两者冲突以协议为准。**
+
+协议冻结后**不得直接修改**，必须走它 §9 的变更流程：提 issue → 至少 1 人 review → 更新协议并升版本号 → 同步更新代码、数据库迁移和规划文档。
+
+CI 里有持续校验（`backend/tests/unit/test_protocol_consistency.py`），改了协议但没重跑真值表会直接让构建失败。
+
+核心内容：
 
 一次评测的结果用三个**互相独立**的字段描述：
 

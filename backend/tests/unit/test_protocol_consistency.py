@@ -86,7 +86,7 @@ def test_no_dangling_clause_references(protocol_text: str) -> None:
 def test_title_version_matches_status_table(protocol_text: str) -> None:
     """曾经出过一次：改了状态表格里的版本号，但 H1 标题还停在旧版本。"""
     title_ver = re.search(r"^# 评测协议 (v[\d.]+)", protocol_text, re.M)
-    status_ver = re.search(r"\*\*状态\*\* \| \*\*DRAFT (v[\d.]+)", protocol_text)
+    status_ver = re.search(r"\*\*状态\*\* \| \*\*(?:DRAFT|FROZEN) (v[\d.]+)", protocol_text)
     assert title_ver and status_ver, "标题或状态表格里找不到版本号"
     assert title_ver.group(1) == status_ver.group(1), (
         f"标题写的是 {title_ver.group(1)}，状态表格写的是 {status_ver.group(1)}，两者必须一致"
