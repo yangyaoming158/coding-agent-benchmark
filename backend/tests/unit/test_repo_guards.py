@@ -79,15 +79,30 @@ def test_boundary_violation_is_caught() -> None:
 # ── 2. 密钥扫描 ────────────────────────────────────────────────
 
 
+def _fake_secret(prefix: str, body: str) -> str:
+    """拼一个假密钥出来。
+
+    **必须拼，不能整串写在源码里。** 整串写的话，密钥扫描器扫到这个测试文件
+    自己就会报警，CI 直接红 —— 已经踩过一次：这个检查密钥扫描器的测试，
+    被它自己检查的那个扫描器给拦了。
+    分成两段之后，源码里的 `"sk-" + "abc..."` 不匹配任何密钥格式，
+    运行时拼出来的完整串才匹配，正好是我们要测的东西。
+    """
+    return prefix + body
+
+
 @pytest.mark.parametrize(
     ("label", "content"),
     [
-        ("OpenAI 风格", "OPENAI_API_KEY = 'sk-abcdefghijklmnopqrstuvwxyz0123'"),
-        ("Anthropic", "key = 'sk-ant-api03-abcdefghijklmnopqrstuvwxyz'"),
-        ("GitHub token", "token = 'ghp_abcdefghijklmnopqrstuvwxyz012345'"),
-        ("AWS", "aws = 'AKIAIOSFODNN7EXAMPLE'"),
-        ("私钥文件", "-----BEGIN RSA PRIVATE KEY-----"),
-        ("阿里云", "ak = 'LTAI5tAbcdefghijklmn'"),
+        (
+            "OpenAI 风格",
+            f"OPENAI_API_KEY = '{_fake_secret('sk-', 'abcdefghijklmnopqrstuvwxyz0123')}'",
+        ),
+        ("Anthropic", f"key = '{_fake_secret('sk-ant-', 'api03-abcdefghijklmnopqrstuvwxyz')}'"),
+        ("GitHub token", f"token = '{_fake_secret('ghp_', 'abcdefghijklmnopqrstuvwxyz012345')}'"),
+        ("AWS", f"aws = '{_fake_secret('AKIA', 'IOSFODNN7EXAMPLE')}'"),
+        ("私钥文件", _fake_secret("-----BEGIN RSA ", "PRIVATE KEY-----")),
+        ("阿里云", f"ak = '{_fake_secret('LTAI', '5tAbcdefghijklmn')}'"),
     ],
 )
 def test_secret_scanner_catches(tmp_path: Path, label: str, content: str) -> None:
@@ -223,3 +238,35 @@ def test_issue_body_carries_common_dod() -> None:
 
     assert body.count("- [ ] ") == len(sync.COMMON_DOD)
     assert "任务表是唯一来源" in body
+
+
+def test_secret_scanner_only_looks_at_tracked_files() -> None:
+    """扫描器只看 git 跟踪的文件，不扫 node_modules 和各种缓存。
+
+    这条是被 CI 逼出来的：原来不带参数跑时它扫全盘，
+    把 Next.js 自带文档里的示例私钥、pytest 缓存里的测试用例名全当成了泄漏。
+    误报比漏报更糟糕 —— 它会让人直接把钩子关掉。
+    """
+    scanner = _load_script("check_secrets")
+    tracked = {str(p) for p in scanner.tracked_files()}
+
+    assert tracked, "一个跟踪文件都没有，说明 git ls-files 没跑通"
+    # 用 endswith：结果是绝对路径，而且这条测试不该依赖从哪个目录跑
+    assert any(p.endswith("backend/app/main.py") for p in tracked)
+    assert any("frontend/src" in p for p in tracked), (
+        "扫不到前端。多半是 git ls-files 从 backend/ 而不是仓库根目录列的，"
+        "那样前端泄的密钥会被静默漏掉"
+    )
+    noisy = [p for p in tracked if "node_modules" in p or "_cache" in p or ".venv" in p]
+    assert not noisy, f"这些不该被扫：{noisy[:5]}"
+
+
+def test_repo_has_no_secrets() -> None:
+    """整个仓库当前扫不出密钥。
+
+    这条等于把 CI 里的 secrets 那个 job 也放进本地测试 ——
+    本地绿、CI 红是最浪费时间的一种失败。
+    """
+    scanner = _load_script("check_secrets")
+    hits = [hit for path in scanner.tracked_files() if path.is_file() for hit in scanner.scan(path)]
+    assert not hits, "仓库里扫出疑似密钥：\n" + "\n".join(hits)

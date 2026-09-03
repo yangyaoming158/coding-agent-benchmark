@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -42,8 +43,35 @@ def scan(path: Path) -> list[str]:
     return hits
 
 
+def tracked_files() -> list[Path]:
+    """git 跟踪的全部文件。
+
+    不用 `Path(".").rglob("*")` 扫全盘，两个原因：
+
+    1. **全是误报**：node_modules 里 Next.js 自带的文档就有示例私钥，
+       .pytest_cache 里存着测试用例名（而我们的测试用例名里就有假密钥）。
+       误报比漏报更糟 —— 它会让人直接把钩子关掉。
+    2. **只有被 git 跟踪的文件才可能被提交上去**，扫别的没有意义，还慢。
+
+    从**仓库根目录**列，不是从当前目录列：`git ls-files` 默认只列当前目录以下的
+    文件，在 backend/ 里跑就只能扫到后端，前端泄的密钥会被静默漏掉。
+
+    不在 git 仓库里时退回扫当前目录。
+    """
+
+    def git(*args: str) -> str:
+        return subprocess.run(["git", *args], capture_output=True, text=True, check=True).stdout
+
+    try:
+        root = Path(git("rev-parse", "--show-toplevel").strip())
+        listed = git("-C", str(root), "ls-files")
+    except (OSError, subprocess.CalledProcessError):
+        return list(Path(".").rglob("*"))
+    return [root / line for line in listed.splitlines() if line]
+
+
 def main(argv: list[str]) -> int:
-    files = [Path(a) for a in argv[1:]] or list(Path(".").rglob("*"))
+    files = [Path(a) for a in argv[1:]] or tracked_files()
     all_hits = [h for f in files if f.is_file() for h in scan(f)]
     if all_hits:
         print("发现疑似密钥，已阻止提交：\n", file=sys.stderr)
