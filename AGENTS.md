@@ -13,7 +13,15 @@
 
 参考 SWE-Bench 的做法（这是学术界评测 AI 编程能力的通用基准）。
 
-**当前阶段：规划已完成，业务代码一行都还没写。** 目前仓库里只有 `docs/plan/` 下的规划文档。
+**当前阶段：E0 基础设施全部完成（T1–T4），下一批是 E1-T1 / E2-T1 / E2-T2 / E3-T1。**
+
+仓库里现在有：评测协议正文（`docs/evaluation-protocol.md`，FROZEN v1.2）、后端骨架
+（FastAPI + SQLAlchemy + Alembic，17 张表）、前端骨架（Next.js，类型从 OpenAPI 生成）、
+配置 / 结构化日志 / 制品存储抽象、以及整套工程规范（ruff、mypy strict、import-linter、
+pre-commit、GitHub Actions）。业务逻辑（建题、跑沙箱、判定、归因、报表）还没开始写。
+
+**进度以 `docs/plan/10-tasks-plan.md` 里标 ✅ 的任务为准。** 别依赖这段话——
+它是手写的，一定会过时；任务表是每个任务做完时顺手更新的，更可信。
 
 ---
 

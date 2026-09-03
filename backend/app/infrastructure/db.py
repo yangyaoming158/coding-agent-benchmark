@@ -5,24 +5,22 @@ Docker 容器和大模型 API 上，不在数据库上；Worker 是独立进程�
 写起来简单得多，也不用担心 async 上下文里误调阻塞函数。
 """
 
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-#: 默认连接串。正式配置在 E0-T4 的 Settings 里统一管理，这里只保证
-#: 迁移脚本和单元测试有个能用的默认值。
-#:
-#: 端口用 5433 不用 5432：这台开发机上还有别的项目在用 Postgres，
-#: 抢同一个端口会让两边互相起不来，排查起来还特别费时间。
-DEFAULT_DATABASE_URL = "postgresql+psycopg://bench:bench@localhost:5433/bench"
+from app.infrastructure.config import get_settings
 
 
 def get_database_url() -> str:
-    """取数据库连接串。环境变量优先，方便测试指向临时容器。"""
-    return os.environ.get("BENCH_DATABASE_URL", DEFAULT_DATABASE_URL)
+    """取数据库连接串（来自 `BENCH_DATABASE_URL`，默认值和端口说明见 config.py）。
+
+    配置读一次就缓存住。测试里要改指向，改完环境变量调
+    `app.infrastructure.config.reset_settings_cache()`。
+    """
+    return get_settings().database_url
 
 
 def create_db_engine(url: str | None = None, *, echo: bool = False) -> Engine:

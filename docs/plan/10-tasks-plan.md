@@ -47,11 +47,17 @@
   46 个测试全绿，其中 31 个是连真库跑的。三处协议约束落到了数据库层面：
   合法组合 CHECK（C-68、C-78）、认定结果部分唯一索引（C-57）、attempt 唯一约束（C-48）。
 
-### E0-T4 配置、日志、制品存储抽象
+### E0-T4 配置、日志、制品存储抽象 ✅ 已于 2026-09-03 完成
 - **Goal**：Settings（pydantic-settings）、structlog（含 run_id/task_run_id 上下文）、`ArtifactStore` + `LocalArtifactStore`
 - **Req**：NFR-06, FR-19 · **Deps**：E0-T2
 - **AC**：ArtifactStore 契约测试通过；日志带结构化上下文；敏感值（API Key）在日志中脱敏
 - **P0 · C:S · E:1d**
+- **实际交付**（2026-09-03）：`infrastructure/config.py`、`infrastructure/logging.py`、
+  `storage/{base,local}.py`；新增 88 个测试（合计 165 个全绿）。三条 AC 各自有测试：
+  契约测试 39 条（按接口写，E10-T2 接 MinIO 时加一行参数就能复用）、
+  上下文测试验证 `bind_run_context` 可嵌套且退出即还原、
+  脱敏测试覆盖三条泄漏路径（字段名、Agent 回显的明文、第三方密钥格式）。
+  实测结论回填在 §17.4。
 
 ---
 

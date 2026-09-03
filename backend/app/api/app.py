@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
 from fastapi import FastAPI
@@ -15,12 +14,9 @@ from sqlalchemy import Engine
 
 from app.api import health
 from app.domain.protocol import PROTOCOL_VERSION
+from app.infrastructure.config import get_settings
 from app.infrastructure.db import create_db_engine
-
-#: 开发时允许跨域访问的前端地址，逗号分隔。
-DEV_FRONTEND_ORIGINS = os.environ.get(
-    "BENCH_DEV_FRONTEND_ORIGINS", "http://localhost:3000,http://127.0.0.1:3000"
-)
+from app.infrastructure.logging import configure_logging, get_logger
 
 
 @lru_cache(maxsize=1)
@@ -35,6 +31,11 @@ def get_engine() -> Engine:
 
 def create_app() -> FastAPI:
     """建应用。写成工厂函数而不是模块级单例，测试里才能建互不干扰的实例。"""
+    settings = get_settings()
+    # 日志在这里配一次。Worker 有自己的入口，也要各配一次 ——
+    # 两个进程各配各的，不共享。
+    configure_logging(settings)
+
     app = FastAPI(
         title="AI Coding Agent 评测基准平台",
         version=PROTOCOL_VERSION,
@@ -47,10 +48,17 @@ def create_app() -> FastAPI:
     # 只放行本机的前端地址，不写 "*" —— 生产环境前后端同域，这段配置不该起作用。
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[o.strip() for o in DEV_FRONTEND_ORIGINS.split(",") if o.strip()],
+        allow_origins=settings.frontend_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
     app.include_router(health.router)
+
+    get_logger(__name__).info(
+        "API 已装配",
+        protocol_version=PROTOCOL_VERSION,
+        artifact_backend=settings.artifact_backend,
+        cors_origins=settings.frontend_origins,
+    )
     return app
