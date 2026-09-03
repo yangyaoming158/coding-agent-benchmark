@@ -69,6 +69,37 @@ def check_database() -> None:
     )
 
 
+#: 探针：用真正的 Settings 建一次 store 并写个文件。
+#: 不在这个脚本里自己拼路径 —— 那样就有两处解析规则，迟早对不上。
+_ARTIFACT_PROBE = (
+    "from app.storage import create_artifact_store; "
+    "s = create_artifact_store(); "
+    "s.put('_env_check/probe.txt', b'ok', content_type='text/plain'); "
+    "s.delete('_env_check/probe.txt'); "
+    "print(getattr(s, 'root', '?'))"
+)
+
+
+def check_artifact_store() -> None:
+    """制品目录能不能写。
+
+    写不了的话，评测会一路跑到"保存 Agent 日志"那一步才炸，前面几分钟白跑。
+    在这里花 0.2 秒问一次，比事后翻日志便宜。
+    """
+    backend = pathlib.Path(__file__).resolve().parent.parent / "backend"
+    if not (backend / ".venv").is_dir():
+        return  # check_database 已经提示过没装依赖了，不重复刷屏
+
+    code, out = run_cmd(["uv", "run", "python", "-c", _ARTIFACT_PROBE], cwd=str(backend))
+    check(
+        "制品目录可写",
+        code == 0,
+        out.splitlines()[-1] if out else "?",
+        "检查 ARTIFACT_LOCAL_ROOT 指向的目录权限",
+        warn_only=True,
+    )
+
+
 def main() -> int:
     print("=== 开发环境自检 ===\n")
 
@@ -126,6 +157,7 @@ def main() -> int:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
 
     check_database()
+    check_artifact_store()
 
     code, out = run_cmd(["git", "status", "--porcelain"])
     check(
