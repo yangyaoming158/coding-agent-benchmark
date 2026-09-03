@@ -1,0 +1,54 @@
+{
+  "schema_version": "1.0",
+  "task_id": "nonebot__nonebot2-2314",
+  "dataset_id": "golden-tasks",
+  "repo_url": "https://github.com/nonebot/nonebot2",
+  "repo_name": "nonebot/nonebot2",
+  "base_commit": "3f2a1c9e7b4d5a6f8c0e1b2d3a4f5c6e7d8a9b0c",
+  "environment_id": "nonebot2__py311__v3",
+  "issue_title": "适配器在断线重连后重复注册事件处理器",
+  "issue_body": "## 问题描述\n\n使用 WebSocket 适配器时，如果连接断开后自动重连，同一个事件会被处理两次。\n\n## 复现步骤\n\n1. 启动机器人并连接到平台；\n2. 手动断开网络，等待适配器自动重连；\n3. 重连成功后，向机器人发送任意一条消息。\n\n## 期望行为\n\n消息只被处理一次，日志里只出现一条「收到事件」记录。\n\n## 实际行为\n\n消息被处理两次，日志里出现两条「收到事件」记录。断开重连的次数越多，重复的次数就越多——断三次就会收到四份。\n\n## 环境\n\nPython 3.11，适配器版本 2.3.1，操作系统 Ubuntu 22.04。\n",
+  "issue_language": "zh",
+  "hints_text": null,
+  "install_command": "python -m pip install -e .[test]",
+  "pre_test_command": null,
+  "test_command": "python -m pytest -rA -p no:randomly -p no:cacheprovider --junitxml=/tmp/report.xml",
+  "test_framework": "pytest",
+  "test_report_path": "/tmp/report.xml",
+  "test_patch": "diff --git a/tests/test_adapter.py b/tests/test_adapter.py\n--- a/tests/test_adapter.py\n+++ b/tests/test_adapter.py\n@@ -1,6 +1,17 @@\n import pytest\n \n from nonebot.adapter import Adapter\n \n \n def test_basic_register():\n+    adapter = Adapter()\n+    adapter.register()\n+    assert len(adapter.handlers) == 1\n+\n+\n+def test_reconnect_no_duplicate_handler():\n+    adapter = Adapter()\n+    adapter.register()\n+    adapter.reconnect()\n+    adapter.reconnect()\n+    assert len(adapter.handlers) == 1\n",
+  "test_patch_paths": [
+    "tests/test_adapter.py"
+  ],
+  "fail_to_pass": [
+    "tests/test_adapter.py::test_reconnect_no_duplicate_handler"
+  ],
+  "pass_to_pass": [
+    "tests/test_adapter.py::test_basic_register"
+  ],
+  "gold_patch": "diff --git a/nonebot/adapter.py b/nonebot/adapter.py\n--- a/nonebot/adapter.py\n+++ b/nonebot/adapter.py\n@@ -18,7 +18,10 @@ class Adapter:\n     def reconnect(self) -> None:\n         self._connect()\n-        self.register()\n+        # 重连不应该再注册一次：处理器是连接无关的，注册两次会让同一个事件被分发两遍\n+        if not self._registered:\n+            self.register()\n \n     def register(self) -> None:\n         self.handlers.append(self._on_event)\n+        self._registered = True\n",
+  "agent_timeout_s": 720,
+  "test_timeout_s": 480,
+  "sandbox_cpu": 1.0,
+  "sandbox_memory_mb": 1536,
+  "sandbox_pids_limit": 512,
+  "source_issue_url": "https://github.com/nonebot/nonebot2/issues/2301",
+  "source_pr_url": null,
+  "created_at_upstream": "2024-11-03T08:21:00Z",
+  "language": "python",
+  "framework": "nonebot",
+  "difficulty": "easy",
+  "tags": [
+    "async",
+    "bugfix",
+    "cn",
+    "domestic-oss"
+  ],
+  "content_hash": "sha256:c5071dd93a040bbfb9c4bbcc5de7bcaf910f0a0cff9719c6b52d8646d5246649",
+  "validation": {
+    "state": "VALID",
+    "validated_at": "2026-09-03T10:00:00Z",
+    "validator_version": "1.0",
+    "image_digest": "sha256:abababababababababababababababababababababababababababababababab",
+    "evidence_artifact_uri": "local://tasks/nonebot__nonebot2-2314/validation/evidence.json"
+  }
+}

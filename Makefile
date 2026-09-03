@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
-        dev dev-api dev-web web-install web-lint web-build gen-api
+        dev dev-api dev-web web-install web-lint web-build gen-api report schema
 
 BACKEND := backend
 FRONTEND := frontend
@@ -100,6 +100,9 @@ env:                 ## 开发环境自检
 
 report:              ## 重新生成规划报告 HTML
 	python3 docs/plan/_build_report.py .
+
+schema:              ## 从 TaskDefinition 重新导出 schemas/task.schema.json
+	$(UV) python -m cli.task schema
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

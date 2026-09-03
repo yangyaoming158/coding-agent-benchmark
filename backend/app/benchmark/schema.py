@@ -1,0 +1,307 @@
+"""题目 Schema（`docs/plan/03-benchmark-spec.md` §7.1，**冻结件**）。
+
+一道题就是这么几样东西：代码快照（`repo_name` + `base_commit`）、给被测 AI 看的
+issue 描述、一组"修好之后必须由失败变通过"的测试（`fail_to_pass`）、
+一组"不能被改坏"的测试（`pass_to_pass`），外加官方补丁（`gold_patch`）做参考解。
+
+字段定义抄自 §7.1，**不要在这里加减字段**。要改先走 §7.1 的变更流程。
+
+## 这个模型做两件事
+
+1. **解析和序列化**：JSON ↔ `TaskDefinition`，双向无损。
+2. **拒收坏题**：坏题比没题更糟——它会让解决率无声地偏掉，而且极难查。
+   所有校验规则都写成"命中就抛错，错误消息里说清楚是哪条规则、实际值是什么"。
+
+硬性拒收（构造时抛 `ValidationError`）和需要人工看一眼（`review_flags()`）
+是分开的：前者是数据本身不合法，后者是数据合法但可疑（§7.4 的 `REVIEW_REQUIRED`）。
+"""
+
+from __future__ import annotations
+
+import re
+from datetime import datetime
+from typing import Any, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.benchmark.hashing import compute_content_hash
+from app.benchmark.patch_paths import derive_patch_paths
+from app.domain.enums import IssueLanguage, TaskDifficulty, TaskValidationState
+from app.domain.protected_paths import (
+    DEFAULT_PROTECTED_PATTERNS,
+    is_protected,
+    protected_hits,
+)
+
+#: `{owner}__{repo}-{pr_number}`，与 SWE-bench 的命名兼容。
+#: 仓库名里可以有 `-`，所以 PR 号匹配的是**最后**一段 `-数字`。
+TASK_ID_PATTERN = re.compile(r"^[A-Za-z0-9][\w.-]*__[A-Za-z0-9][\w.-]*-\d+$")
+
+#: 40 位小写全 SHA。§7.2(2)：禁止短 SHA、分支名、tag。
+FULL_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+
+#: issue 正文里出现这些就算泄题：指向 PR 的链接、或者干脆贴了一段 diff。
+_LEAK_PR_URL = re.compile(r"https?://[^\s]*/(?:pull|merge_requests)/\d+", re.IGNORECASE)
+_LEAK_DIFF_BLOCK = re.compile(r"^diff --git ", re.MULTILINE)
+
+#: issue 短于这个长度就要人工看一眼（§7.2(7)）。不是硬性拒收——
+#: 有些 issue 确实短，但配了清晰的复现步骤。
+MIN_ISSUE_BODY_CHARS = 200
+
+#: F2P 数量落在这个区间外要人工复核（§7.4）。
+REVIEW_F2P_MAX = 20
+
+
+class TaskValidation(BaseModel):
+    """题目验证的结论与证据（§7.3 八步流水线跑完写进来）。
+
+    这一段**不参与** `content_hash`：它记的是验证过程的结果，不是题目内容。
+    每周复验会更新 `validated_at`，但题目本身没变。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: TaskValidationState
+    validated_at: datetime | None = None
+    validator_version: str | None = None
+    #: 验证时实际用的镜像 digest。协议 C-36：引用镜像用 digest 不用 tag，tag 会被覆盖。
+    image_digest: str | None = None
+    evidence_artifact_uri: str | None = None
+
+
+class TaskDefinition(BaseModel):
+    """一道评测题的完整定义（§7.1）。"""
+
+    # extra="forbid"：JSON 里多一个字段就报错。宽容处理的代价是字段拼错了不报错，
+    # 那个值静默地不生效——比如 `fail_to_pass` 写成 `failed_to_pass`，
+    # 题目会变成"没有 F2P"，而这本该是拒收条件。
+    model_config = ConfigDict(extra="forbid", use_enum_values=False)
+
+    schema_version: Literal["1.0"] = "1.0"
+    task_id: str
+    dataset_id: str
+
+    # ── 仓库与快照 ──
+    repo_url: str
+    repo_name: str
+    #: 代码回退到的提交，也就是"bug 还在"的状态。必须是修复 PR 的第一父提交。
+    base_commit: str
+    #: 指向 `environment_specs`，决定用哪个镜像。
+    #: 任务不直接记 `docker_image`——镜像是环境的属性，多个任务共享同一个环境。
+    environment_id: str
+
+    # ── 问题描述（给被测 AI 的唯一输入）──
+    issue_title: str
+    issue_body: str
+    issue_language: IssueLanguage
+    #: 默认 null，即不给提示，对齐 SWE-bench Verified。
+    hints_text: str | None = None
+
+    # ── 执行定义（继承自环境规格，可覆盖）──
+    install_command: str
+    pre_test_command: str | None = None
+    test_command: str
+    test_framework: Literal["pytest", "unittest", "jest", "gotest", "junit"] = "pytest"
+    test_report_path: str
+
+    # ── 验证测试 ──
+    #: 仅含测试文件的 diff，由 harness 施加，不下发给被测 AI。
+    test_patch: str
+    #: `test_patch` 实际改动的全部路径，由本模型从 `test_patch` 重算并校验（C-74）。
+    #: **禁止下发给被测 AI**（C-76）。
+    test_patch_paths: list[str] = Field(default_factory=list)
+    fail_to_pass: list[str]
+    pass_to_pass: list[str] = Field(default_factory=list)
+
+    # ── 参考解 ──
+    #: 仅含非测试文件的 diff，**永不下发给被测 AI**（协议 C-44）。
+    gold_patch: str
+
+    # ── 预算 ──
+    agent_timeout_s: int = Field(default=720, ge=1)
+    test_timeout_s: int = Field(default=480, ge=1)
+    sandbox_cpu: float = Field(default=1.0, gt=0)
+    sandbox_memory_mb: int = Field(default=1536, ge=256)
+    sandbox_pids_limit: int = Field(default=512, ge=1)
+
+    # ── 溯源与元数据 ──
+    source_issue_url: str | None = None
+    source_pr_url: str | None = None
+    created_at_upstream: datetime | None = None
+    language: str = "python"
+    framework: str | None = None
+    difficulty: TaskDifficulty
+    tags: list[str] = Field(default_factory=list)
+
+    # ── 完整性 ──
+    #: `sha256:` 开头。缺省时自动算出来；给了就校验，对不上直接拒收。
+    content_hash: str | None = None
+    validation: TaskValidation | None = None
+
+    # ── 校验与规范化 ────────────────────────────────────────
+
+    @model_validator(mode="after")
+    def _validate_and_normalize(self) -> Self:
+        """按 §7 和协议的规则挨条查一遍，顺手把集合类字段规范化。
+
+        顺序有讲究：先规范化，再校验，最后才算哈希——哈希必须建立在
+        规范化之后的数据上，否则同样的内容换个写法会得到不同的哈希。
+        """
+        self._normalize_collections()
+        self._check_identifiers()
+        self._check_test_selection()
+        self._check_patches()
+        self._check_issue_not_leaking()
+        self._settle_content_hash()
+        return self
+
+    def _normalize_collections(self) -> None:
+        """集合语义的列表一律排序去重。
+
+        这是 `content_hash` 对字段序不敏感的另一半：字段顺序由规范 JSON 的键排序
+        解决，列表内部的顺序在这里解决。两道题只有 F2P 排列顺序不同的话，
+        它们本来就是同一道题。
+        """
+        self.fail_to_pass = sorted(set(self.fail_to_pass))
+        self.pass_to_pass = sorted(set(self.pass_to_pass))
+        self.tags = sorted(set(self.tags))
+
+    def _check_identifiers(self) -> None:
+        if not TASK_ID_PATTERN.match(self.task_id):
+            raise ValueError(
+                f"task_id 不符合 {{owner}}__{{repo}}-{{pr_number}} 格式：{self.task_id!r}"
+            )
+        if not FULL_SHA_PATTERN.match(self.base_commit):
+            raise ValueError(
+                f"base_commit 必须是 40 位小写全 SHA，禁止短 SHA / 分支名 / tag（§7.2）："
+                f"{self.base_commit!r}"
+            )
+
+    def _check_test_selection(self) -> None:
+        if not self.fail_to_pass:
+            raise ValueError(
+                "fail_to_pass 不能为空：没有'修好才会通过'的测试，这道题无法判定（§7.2）"
+            )
+        overlap = sorted(set(self.fail_to_pass) & set(self.pass_to_pass))
+        if overlap:
+            raise ValueError(
+                f"同一个用例不能既在 fail_to_pass 又在 pass_to_pass 里："
+                f"{overlap[:5]}（共 {len(overlap)} 条）"
+            )
+
+    def _check_patches(self) -> None:
+        """三条补丁规则，每条都对应一种已知的坏题或作弊路径。"""
+        derived = derive_patch_paths(self.test_patch)
+        if not derived:
+            raise ValueError("test_patch 解析不出任何被改动的文件，不是合法的 unified diff")
+
+        # C-74 第 6 条：重算一遍和已存清单比对。有人手工改这份清单想放开某个文件的
+        # 保护时，这里会对不上。给了才比，没给就直接用算出来的。
+        if self.test_patch_paths and sorted(set(self.test_patch_paths)) != derived:
+            raise ValueError(
+                f"test_patch_paths 与 test_patch 重新解析的结果不一致（协议 C-74 第 6 条）。"
+                f"声明的={sorted(set(self.test_patch_paths))}，实际解析={derived}"
+            )
+        self.test_patch_paths = derived
+
+        # §7.1：test_patch 只含测试文件。碰了业务代码的话，官方测试补丁就把 bug 一起
+        # 修掉了，F2P 在 base 上也能过，这道题就没有区分度了。
+        non_test = [p for p in derived if not is_protected(p, DEFAULT_PROTECTED_PATTERNS)]
+        if non_test:
+            raise ValueError(f"test_patch 只能改测试文件，但它改了：{non_test}")
+
+        gold_paths = derive_patch_paths(self.gold_patch)
+        if not gold_paths:
+            raise ValueError("gold_patch 为空：这道题只改测试就能通过，没有修复内容（§7.2）")
+
+        # 协议 C-64：gold_patch 命中受保护路径 → 题目无效。
+        # 注意这里要连 test_patch_paths 一起算，不能只用通用规则。
+        hits = protected_hits(tuple(gold_paths), (*DEFAULT_PROTECTED_PATTERNS, *derived))
+        if hits:
+            raise ValueError(f"gold_patch 命中了受保护路径（协议 C-64）：{hits}")
+
+    def _check_issue_not_leaking(self) -> None:
+        """issue 正文里不能带着答案（§7.2(7)）。
+
+        只查两种没有歧义的形式：指向 PR 的链接、以及直接贴出来的 diff。
+        不查裸的 commit hash——用户贴报错日志时带上哈希是很正常的，
+        按那个拒收会误伤一大批好题。
+        """
+        if _LEAK_PR_URL.search(self.issue_body):
+            raise ValueError("issue_body 里有指向 PR 的链接，等于把答案给了被测 AI（§7.2(7)）")
+        if _LEAK_DIFF_BLOCK.search(self.issue_body):
+            raise ValueError("issue_body 里贴了 diff 代码块，等于把答案给了被测 AI（§7.2(7)）")
+
+    def _settle_content_hash(self) -> None:
+        """算哈希；已经带了就核对。"""
+        computed = compute_content_hash(self._hash_payload())
+        if self.content_hash is not None and self.content_hash != computed:
+            raise ValueError(
+                f"content_hash 对不上，题目内容被改过或哈希算错了。"
+                f"声明的={self.content_hash}，重算={computed}"
+            )
+        self.content_hash = computed
+
+    def _hash_payload(self) -> dict[str, Any]:
+        """喂给哈希函数的字典。排除项由 `hashing.EXCLUDED_FIELDS` 负责。"""
+        return self.model_dump(mode="json")
+
+    # ── 对外 ────────────────────────────────────────────────
+
+    def review_flags(self) -> list[str]:
+        """数据合法但可疑的地方，用来把题目路由到 `REVIEW_REQUIRED`（§7.4）。
+
+        和构造时的硬性拒收分开：那些是数据不合法，这些是"合法但值得人看一眼"。
+        混在一起的话，要么好题被拒，要么坏题混进数据集。
+        """
+        flags = []
+        if len(self.issue_body) < MIN_ISSUE_BODY_CHARS:
+            flags.append(
+                f"issue_body 只有 {len(self.issue_body)} 字，少于 {MIN_ISSUE_BODY_CHARS}，"
+                f"可能信息不足以让 AI 定位问题"
+            )
+        if len(self.fail_to_pass) > REVIEW_F2P_MAX:
+            flags.append(
+                f"fail_to_pass 有 {len(self.fail_to_pass)} 条，超过 {REVIEW_F2P_MAX}，"
+                f"这道题可能一次改了太多东西"
+            )
+        if not self.pass_to_pass:
+            flags.append("pass_to_pass 为空：没有回归护栏，AI 删掉功能也能通过 F2P（§7.2(6)）")
+        return flags
+
+    def agent_visible_dump(self) -> dict[str, Any]:
+        """下发给被测 AI 的那份数据里，题目侧允许出现的字段。
+
+        **不含** `gold_patch`（C-44）、`test_patch`、`test_patch_paths`（C-76）、
+        `fail_to_pass`、`pass_to_pass`——用例 ID 也是定位提示。
+
+        完整的下发格式是 Runner 协议的事（`04-runner-protocol.md`，E3-T1），
+        这里只负责"题目这边哪些字段可以给"，把这条边界钉在题目模型上，
+        免得每个适配器各自决定一次，漏一个就泄题。
+        """
+        return self.model_dump(
+            mode="json",
+            include={
+                "task_id",
+                "repo_name",
+                "base_commit",
+                "issue_title",
+                "issue_body",
+                "issue_language",
+                "hints_text",
+                "language",
+                "framework",
+                "test_command",
+                "test_framework",
+                "agent_timeout_s",
+            },
+        )
+
+
+__all__ = [
+    "FULL_SHA_PATTERN",
+    "MIN_ISSUE_BODY_CHARS",
+    "TASK_ID_PATTERN",
+    "TaskDefinition",
+    "TaskValidation",
+]

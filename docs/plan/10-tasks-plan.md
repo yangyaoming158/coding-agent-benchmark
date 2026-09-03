@@ -63,12 +63,18 @@
 
 ## E1 — Benchmark Domain & Task Builder
 
-### E1-T1 Task Schema 冻结与校验器
+### E1-T1 Task Schema 冻结与校验器 ✅ 已于 2026-09-03 完成
 - **Goal**：§7.1 Schema 的 Pydantic 模型 + JSON Schema 导出 + `content_hash` 规范化算法
 - **Req**：FR-04 · **Deps**：E0-T3 · **Modules**：`benchmark/`
 - **Output**：`TaskDefinition` 模型、`schemas/task.schema.json`、导入/导出 CLI
 - **AC**：Golden Task 的 JSON 能双向序列化且 hash 稳定（同内容不同字段序 → 同 hash）；非法任务被明确拒绝并给出可读原因
 - **P0 · C:M · E:1d**
+- **实际交付**（2026-09-03）：`benchmark/{schema,hashing,patch_paths}.py`、
+  `domain/protected_paths.py`（C-42 清单，放 domain 让 benchmark/runner/judge 共用）、
+  `python -m cli.task {import,export,schema}`、`schemas/task.schema.json`（生成物，
+  `make schema` 重出，CI 查漂移）。新增 122 个测试（合计 287 全绿）。
+  拒收 10 类非法任务（DoD 要求 6 类），另有 3 类走人工复核；
+  哈希算法与三处 Schema/DB 不一致的记录见 `03-benchmark-spec.md` §7.9。
 
 ### E1-T2 Golden Tasks（3–5 道人工任务）
 - **Goal**：不依赖挖掘、可在 60 秒内跑完的验证基石

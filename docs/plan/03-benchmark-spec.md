@@ -200,6 +200,73 @@ DISCOVERED → CANDIDATE → VALIDATING → ┬→ VALID ──→ PUBLISHED（�
 `easy`: ≤1 文件 且 ≤15 行；`medium`: ≤3 文件 且 ≤60 行；`hard`: 其余。
 （可选 P2：用 Mock/基线 Agent 的实测解决率做校准。）
 
+## 7.9 实现落地与待决问题（2026-09-03，E1-T1）
+
+> **本节是追加的实现记录，没有改动 §7.1 ~ §7.8 的任何一条。**
+> 下面三处不一致需要走 §9 的变更流程定夺，在那之前代码按"当前写法"运行。
+
+`TaskDefinition`（`backend/app/benchmark/schema.py`）已按 §7.1 逐字段落地，
+JSON Schema 导出在 `schemas/task.schema.json`（生成物，`make schema` 重出，
+CI 有漂移检查）。
+
+### content_hash 的算法
+
+**除 `content_hash` 和 `validation` 外，所有字段都算进哈希。**
+
+不手工维护一份"判定相关字段"清单，理由是清单会烂：以后有人加字段忘了往清单里补，
+哈希就悄悄不覆盖那个字段，而且没有任何报错。反过来"除了这两个全算"是默认安全的——
+新字段自动被覆盖，漏掉的成本只是"哈希变多了"（顶多误报一次题目变更），
+不是"哈希漏了"（漏报等于可复现性是假的）。
+`tests/unit/test_content_hash.py` 里有一条用例强制每个模型字段要么在变异表、
+要么在豁免表里登记，加字段时不做这个决定就会红。
+
+排除 `validation` 的理由：它记的是验证过程的结果，不是题目内容。发布后每周复验会更新
+`validated_at` 和 `image_digest`，算进去的话每复验一次全部数据集快照就集体失配。
+
+规范化方式：递归按键名排序的紧凑 JSON（`ensure_ascii=False`，中文保持可读）。
+列表**不在哈希里排序**——`fail_to_pass` 这些集合语义的字段在模型解析时就排序去重了，
+规范化留在数据里看得见。将来加一个顺序有意义的列表字段时，
+哈希不会悄悄把顺序抹平。
+
+### 三处待决的不一致
+
+| # | 现象 | 当前写法 |
+|:--|:---|:---|
+| 1 | §7.1 的 `content_hash` 是 `"sha256:..."`（71 字符），迁移 0001 的 `benchmark_tasks.content_hash` 是 `CHAR(64)` | JSON 带前缀、数据库存裸十六进制，转换收在 `hashing.to_bare_hex()` 一个地方 |
+| 2 | §7.1 有 `sandbox_pids_limit`，`benchmark_tasks` 没有对应列（只有 `sandbox_cpu`、`sandbox_memory_mb`） | 模型保留该字段（冻结件为准），入库时落在 `raw_definition` JSONB 里 |
+| 3 | §7.7 说"在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`"，但 §7.1 的字段表里没有这个字段 | 模型**未**加该字段（`extra="forbid"`，多字段会被拒收）。E1-T3 做 P2P 抽样时需要先定夺 |
+
+### 校验规则落地情况
+
+硬性拒收（导入即报错，消息里带字段名和实际值）：`base_commit` 非 40 位全 SHA、
+`task_id` 不合 `{owner}__{repo}-{pr_number}`、`fail_to_pass` 为空、F2P 与 P2P 有交集、
+`test_patch` 碰了非测试文件、`test_patch_paths` 与重算结果不一致（C-74 第 6 条）、
+`gold_patch` 为空或命中受保护路径（C-64）、`issue_body` 里有 PR 链接或 diff 块、
+`content_hash` 对不上、出现未知字段。
+
+需人工复核（`review_flags()`，对应 §7.4 的 `REVIEW_REQUIRED`，不拒收）：
+`issue_body` 短于 200 字、F2P 超过 20 条、P2P 为空。
+
+泄题检测只查两种没有歧义的形式（PR 链接、`diff --git` 块），**不查裸 commit hash**——
+用户贴报错日志时带哈希很常见，按那个拒收会误伤一大批好题。LLM 预筛是 E1-T5 的事。
+
+### 受保护路径
+
+C-42 的清单落在 `backend/app/domain/protected_paths.py`（放 `domain` 是因为
+benchmark、runner、judge 三边都要用）。C-75 的两份清单拆成
+`enforcement_patterns()` 和 `agent_visible_patterns()` 两个函数，
+后者不含 `test_patch_paths`（C-76）。**执行**（C-41 剔除、C-16 还原、C-63 删除）
+是 E2/E4 的事，本任务只做规则与匹配。
+
+### 从补丁解析路径
+
+`test_patch_paths` 由 `patch_paths.derive_patch_paths()` 从 diff 推导（C-74 第 1 条）。
+实现上按 hunk 头 `@@ -a,b +c,d @@` 声明的行数**精确数过内容行**，不按行首前缀 grep：
+删掉一行 `-- foo` 之后 diff 里那行长得和文件头一模一样（`--- foo`），
+grep 的写法会凭空多出一个"被改的文件"，而这份清单是要并进受保护路径的。
+git 对非 ASCII 路径的八进制转义（`"a/\346\265\213.py"`）也要还原，
+不然中文文件名和存的路径对不上，第 6 条的防篡改校验会对好题误报。
+
 ---
 
 # 8 Benchmark Construction Strategy
