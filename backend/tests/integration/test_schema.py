@@ -151,6 +151,33 @@ def _task_run(fixture_ids: dict[str, int], **overrides: Any) -> EvaluationTaskRu
 # ── 枚举 ────────────────────────────────────────────────────────
 
 
+def test_task_resource_limits_are_real_columns(
+    session: Session, fixture_ids: dict[str, int]
+) -> None:
+    """三个沙箱限额都要是独立列，能直接查。
+
+    `sandbox_pids_limit` 是 2026-09-04 补的（issue #60）：任务 Schema §7.1 里一直有它，
+    但 0001 建表时漏了，只有另外两个有列。
+
+    为什么不塞进 `raw_definition` JSONB：三个都是起容器时要读的限额，存法不一致的话
+    E2-T2 得为其中一个写特例，取不到还要兜默认值 —— 又多一处"静默用错默认值"的地方。
+    pids 上限挡的是 fork 炸弹，兜错了防线就没了。
+    """
+    task = session.get(BenchmarkTask, fixture_ids["task_id"])
+    assert task is not None
+    assert (task.sandbox_cpu, task.sandbox_memory_mb, task.sandbox_pids_limit) == (
+        Decimal("2.00"),
+        2048,
+        512,
+    )
+
+    # 能进 WHERE 子句才算"真的是列"，JSONB 里的字段做不到这么直接
+    found = session.execute(
+        text("SELECT task_id FROM benchmark_tasks WHERE sandbox_pids_limit = 512")
+    ).scalars()
+    assert "acme__demo-1" in set(found)
+
+
 def test_database_enum_values_match_code(engine: Engine) -> None:
     """数据库里建出来的枚举类型，取值和顺序都要和代码一致（协议 C-46、C-47）。
 

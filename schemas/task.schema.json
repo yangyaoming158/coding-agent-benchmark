@@ -1,0 +1,408 @@
+{
+  "$defs": {
+    "IssueLanguage": {
+      "description": "Issue 正文的语言。zh 占比是本项目的公开指标之一，所以要单独存一列而不是靠事后检测。",
+      "enum": [
+        "zh",
+        "en",
+        "mixed"
+      ],
+      "title": "IssueLanguage",
+      "type": "string"
+    },
+    "P2PSampling": {
+      "additionalProperties": false,
+      "description": "P2P 用例是怎么选出来的（§7.7）。\n\n全量套件跑一遍很贵（可能几千条用例），所以 P2P 不一定是\"全部通过的用例\"。\n抽样规则必须记下来，因为**抽样参数决定 P2P 名单，而 P2P 名单直接决定判定结论**：\n同一道题换一个随机种子，选中的回归护栏就不同，同一个补丁可能一次判过一次判挂。\n所以这一段纳入 `content_hash`，不记的话\"同一个数据集版本\"给不出同样的判定。",
+      "properties": {
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "strategy": {
+          "enum": [
+            "full",
+            "module_and_random"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "total_pool": {
+          "minimum": 0,
+          "title": "Total Pool",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "strategy",
+        "total_pool"
+      ],
+      "title": "P2PSampling",
+      "type": "object"
+    },
+    "TaskDifficulty": {
+      "description": "题目难度。由 gold_patch 改动行数、改动文件数、F2P 用例数三个客观量派生，不靠拍脑袋。\n\n取值用小写，与任务 JSON（`docs/plan/03-benchmark-spec.md` §7.1）保持一致。",
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ],
+      "title": "TaskDifficulty",
+      "type": "string"
+    },
+    "TaskValidation": {
+      "additionalProperties": false,
+      "description": "题目验证的结论与证据（§7.3 八步流水线跑完写进来）。\n\n这一段**不参与** `content_hash`：它记的是验证过程的结果，不是题目内容。\n每周复验会更新 `validated_at`，但题目本身没变。",
+      "properties": {
+        "evidence_artifact_uri": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Artifact Uri"
+        },
+        "image_digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Digest"
+        },
+        "state": {
+          "$ref": "#/$defs/TaskValidationState"
+        },
+        "validated_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validated At"
+        },
+        "validator_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Validator Version"
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "TaskValidation",
+      "type": "object"
+    },
+    "TaskValidationState": {
+      "description": "题目的验证状态。只有 VALID 的题目能进数据集。\n\nQUARANTINED 是隔离：题目复验也失败才会到这一步（协议 C-20 第 6 步）。\n**禁止**因为一次超时就直接隔离题目（协议 C-20a）。",
+      "enum": [
+        "DISCOVERED",
+        "CANDIDATE",
+        "VALIDATING",
+        "VALID",
+        "INVALID",
+        "REVIEW_REQUIRED",
+        "QUARANTINED"
+      ],
+      "title": "TaskValidationState",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "description": "一道评测题的完整定义（§7.1）。",
+  "properties": {
+    "agent_timeout_s": {
+      "default": 720,
+      "minimum": 1,
+      "title": "Agent Timeout S",
+      "type": "integer"
+    },
+    "base_commit": {
+      "title": "Base Commit",
+      "type": "string"
+    },
+    "content_hash": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Content Hash"
+    },
+    "created_at_upstream": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Created At Upstream"
+    },
+    "dataset_id": {
+      "title": "Dataset Id",
+      "type": "string"
+    },
+    "difficulty": {
+      "$ref": "#/$defs/TaskDifficulty"
+    },
+    "environment_id": {
+      "title": "Environment Id",
+      "type": "string"
+    },
+    "fail_to_pass": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Fail To Pass",
+      "type": "array"
+    },
+    "framework": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Framework"
+    },
+    "gold_patch": {
+      "title": "Gold Patch",
+      "type": "string"
+    },
+    "hints_text": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hints Text"
+    },
+    "install_command": {
+      "title": "Install Command",
+      "type": "string"
+    },
+    "issue_body": {
+      "title": "Issue Body",
+      "type": "string"
+    },
+    "issue_language": {
+      "$ref": "#/$defs/IssueLanguage"
+    },
+    "issue_title": {
+      "title": "Issue Title",
+      "type": "string"
+    },
+    "language": {
+      "default": "python",
+      "title": "Language",
+      "type": "string"
+    },
+    "p2p_sampling": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/P2PSampling"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "pass_to_pass": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Pass To Pass",
+      "type": "array"
+    },
+    "pre_test_command": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pre Test Command"
+    },
+    "repo_name": {
+      "title": "Repo Name",
+      "type": "string"
+    },
+    "repo_url": {
+      "title": "Repo Url",
+      "type": "string"
+    },
+    "sandbox_cpu": {
+      "default": 1.0,
+      "exclusiveMinimum": 0,
+      "title": "Sandbox Cpu",
+      "type": "number"
+    },
+    "sandbox_memory_mb": {
+      "default": 1536,
+      "minimum": 256,
+      "title": "Sandbox Memory Mb",
+      "type": "integer"
+    },
+    "sandbox_pids_limit": {
+      "default": 512,
+      "minimum": 1,
+      "title": "Sandbox Pids Limit",
+      "type": "integer"
+    },
+    "schema_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "source_issue_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Issue Url"
+    },
+    "source_pr_url": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Source Pr Url"
+    },
+    "tags": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Tags",
+      "type": "array"
+    },
+    "task_id": {
+      "title": "Task Id",
+      "type": "string"
+    },
+    "test_command": {
+      "title": "Test Command",
+      "type": "string"
+    },
+    "test_framework": {
+      "default": "pytest",
+      "enum": [
+        "pytest",
+        "unittest",
+        "jest",
+        "gotest",
+        "junit"
+      ],
+      "title": "Test Framework",
+      "type": "string"
+    },
+    "test_patch": {
+      "title": "Test Patch",
+      "type": "string"
+    },
+    "test_patch_paths": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Test Patch Paths",
+      "type": "array"
+    },
+    "test_report_path": {
+      "title": "Test Report Path",
+      "type": "string"
+    },
+    "test_timeout_s": {
+      "default": 480,
+      "minimum": 1,
+      "title": "Test Timeout S",
+      "type": "integer"
+    },
+    "validation": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TaskValidation"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "task_id",
+    "dataset_id",
+    "repo_url",
+    "repo_name",
+    "base_commit",
+    "environment_id",
+    "issue_title",
+    "issue_body",
+    "issue_language",
+    "install_command",
+    "test_command",
+    "test_report_path",
+    "test_patch",
+    "fail_to_pass",
+    "gold_patch",
+    "difficulty"
+  ],
+  "title": "TaskDefinition",
+  "type": "object"
+}

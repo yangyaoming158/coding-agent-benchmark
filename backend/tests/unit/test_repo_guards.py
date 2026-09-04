@@ -220,14 +220,44 @@ def test_issue_sync_parses_every_task() -> None:
 
 
 def test_issue_sync_marks_finished_tasks() -> None:
-    """已完成的任务默认不建 Issue。"""
+    """已完成的任务默认不建 Issue。
+
+    断言写成"解析结果和文档结构一致"，不钉死某个任务 ID。原来这里钉的是
+    `not by_id["E1-T1"].done`，E1-T1 一做完这条就红了 —— 而它想测的其实是
+    "标题里有没有 ✅ 能不能被认出来"，不是"E1-T1 做没做完"。
+    每完成一个任务就要回来改一次测试，这种测试迟早会被人改成永远为真。
+    """
+    sync = _load_script("sync_issues")
+    text = sync.TASKS_DOC.read_text(encoding="utf-8")
+    tasks = sync.parse_tasks(text)
+
+    marked = set()
+    for line in text.splitlines():
+        heading = sync.TASK_HEADING.match(line)
+        if heading and sync.DONE_MARKER.search(line):
+            marked.add(heading.group(1))
+
+    assert {t.task_id for t in tasks if t.done} == marked
+    # 两边都要有例子，否则上面那条断言可能是空对空
+    assert marked, "文档里一个已完成任务都没有，解析逻辑八成失效了"
+    assert len(marked) < len(tasks), "文档里所有任务都标了完成？"
+
+    # 钉一个永久成立的历史事实，确认解析真的在工作而不是全返回 False
+    by_id = {t.task_id: t for t in tasks}
+    assert by_id["E0-T1"].done, "E0-T1 已完成，不该再建 Issue"
+
+
+def test_issue_title_drops_done_suffix() -> None:
+    """Issue 标题里不要带"✅ 已于 …… 完成"的后缀。
+
+    这些后缀是给人看任务表用的，跑进 Issue 标题会让同名 Issue 认不出来 ——
+    `sync_issues.py` 靠标题查重，标题一变就会重复建一份。
+    """
     sync = _load_script("sync_issues")
     tasks = sync.parse_tasks(sync.TASKS_DOC.read_text(encoding="utf-8"))
-    by_id = {t.task_id: t for t in tasks}
-
-    assert by_id["E0-T1"].done, "E0-T1 已完成，不该再建 Issue"
-    assert by_id["E0-T3"].done, "E0-T3 已完成，不该再建 Issue"
-    assert not by_id["E1-T1"].done
+    for task in tasks:
+        assert "✅" not in task.title
+        assert "已于" not in task.title
 
 
 def test_issue_body_carries_common_dod() -> None:

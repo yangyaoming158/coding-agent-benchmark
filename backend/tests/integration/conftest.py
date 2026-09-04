@@ -19,7 +19,8 @@ from app.infrastructure.db import create_db_engine, get_database_url
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 
-def _alembic_config(url: str) -> Config:
+def alembic_config(url: str) -> Config:
+    """建 alembic 配置。不带下划线是因为别的测试文件也要用它取当前 head 版本。"""
     config = Config(str(BACKEND_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND_ROOT / "alembic"))
     config.set_main_option("sqlalchemy.url", url)
@@ -48,7 +49,7 @@ def engine(database_url: str) -> Iterator[Engine]:
             f"连不上数据库 {database_url}，先跑 ./scripts/dev_db.sh up（{exc.__class__.__name__}）"
         )
 
-    config = _alembic_config(database_url)
+    config = alembic_config(database_url)
     command.downgrade(config, "base")
     command.upgrade(config, "head")
     yield eng

@@ -38,6 +38,12 @@
                                                  // 【禁止下发给被测 AI】详见协议 C-74 ~ C-76
   "fail_to_pass": ["tests/test_adapter.py::test_reconnect_no_duplicate_handler"],
   "pass_to_pass": ["tests/test_adapter.py::test_basic_register", "..."],   // 上限见 §7.7
+  "p2p_sampling": {                              // P2P 是怎么选出来的，见 §7.7
+    "strategy": "module_and_random",             // full | module_and_random
+    "seed": 20260903,                            // full 策略下为 null
+    "total_pool": 1840                           // 候选池里一共有多少条通过的用例
+  },                                             // 纳入 content_hash（抽样参数决定 P2P 名单，
+                                                 // 而 P2P 名单直接决定判定结论）
 
   // ---- 参考解 ----
   "gold_patch": "diff --git a/nonebot/... ",     // 仅含非测试文件的 diff，永不下发给 Agent
@@ -192,13 +198,105 @@ DISCOVERED → CANDIDATE → VALIDATING → ┬→ VALID ──→ PUBLISHED（�
 ## 7.7 P2P 规模控制
 全量 P2P 可能有数千条，跑一遍很贵。策略：
 - 若全量套件 ≤ 3 分钟 → P2P = 全量通过用例；
-- 否则 P2P = **与 gold_patch 改动文件同模块的用例** ∪ **随机抽样 200 条**（固定种子），并在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`；
+- 否则 P2P = **与 gold_patch 改动文件同模块的用例** ∪ **随机抽样 200 条**（固定种子），并在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`（字段定义见 §7.1，2026-09-04 补入，issue #60）；
 - 运行期用"只跑 F2P ∪ P2P 子集"的命令，显著缩短测试时长（对 MET-02 关键）。
 
 ## 7.8 难度分级
 不靠拍脑袋：`difficulty` 由三个客观量派生 —— `gold_patch` 改动行数 + 改动文件数 + F2P 用例数。
 `easy`: ≤1 文件 且 ≤15 行；`medium`: ≤3 文件 且 ≤60 行；`hard`: 其余。
 （可选 P2：用 Mock/基线 Agent 的实测解决率做校准。）
+
+## 7.9 实现落地与待决问题（2026-09-03，E1-T1）
+
+> **本节是追加的实现记录，没有改动 §7.1 ~ §7.8 的任何一条。**
+> 下面三处不一致需要走 §9 的变更流程定夺，在那之前代码按"当前写法"运行。
+
+`TaskDefinition`（`backend/app/benchmark/schema.py`）已按 §7.1 逐字段落地（含 2026-09-04 补入的 `p2p_sampling`），
+JSON Schema 导出在 `schemas/task.schema.json`（生成物，`make schema` 重出，
+CI 有漂移检查）。
+
+### content_hash 的算法
+
+**除 `content_hash` 和 `validation` 外，所有字段都算进哈希。**
+
+不手工维护一份"判定相关字段"清单，理由是清单会烂：以后有人加字段忘了往清单里补，
+哈希就悄悄不覆盖那个字段，而且没有任何报错。反过来"除了这两个全算"是默认安全的——
+新字段自动被覆盖，漏掉的成本只是"哈希变多了"（顶多误报一次题目变更），
+不是"哈希漏了"（漏报等于可复现性是假的）。
+`tests/unit/test_content_hash.py` 里有一条用例强制每个模型字段要么在变异表、
+要么在豁免表里登记，加字段时不做这个决定就会红。
+
+排除 `validation` 的理由：它记的是验证过程的结果，不是题目内容。发布后每周复验会更新
+`validated_at` 和 `image_digest`，算进去的话每复验一次全部数据集快照就集体失配。
+
+规范化方式：递归按键名排序的紧凑 JSON（`ensure_ascii=False`，中文保持可读）。
+列表**不在哈希里排序**——`fail_to_pass` 这些集合语义的字段在模型解析时就排序去重了，
+规范化留在数据里看得见。将来加一个顺序有意义的列表字段时，
+哈希不会悄悄把顺序抹平。
+
+### 三处不一致（2026-09-04 已全部处理，issue #60）
+
+| # | 现象 | 结论 |
+|:--|:---|:---|
+| 1 | §7.1 的 `content_hash` 是 `"sha256:..."`（71 字符），迁移 0001 的 `benchmark_tasks.content_hash` 是 `CHAR(64)` | **两份文档都不改**：JSON 带前缀、数据库存裸十六进制，转换收在 `hashing.to_bare_hex()` 一处 |
+| 2 | §7.1 有 `sandbox_pids_limit`，`benchmark_tasks` 没有对应列（只有 `sandbox_cpu`、`sandbox_memory_mb`） | **迁移 0002 补列**。三个都是起容器时要读的限额，存法不一致的话 E2-T2 得为其中一个写特例，取不到还要兜默认值 —— 而 pids 上限挡的是 fork 炸弹，兜错了防线就没了 |
+| 3 | §7.7 说"在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`"，但 §7.1 的字段表里没有这个字段 | **§7.1 补入该字段**（走协议 §9 流程，见下） |
+
+#### 关于第 3 条：为什么是补字段而不是别的做法
+
+抽样参数决定 `pass_to_pass` 名单，而 P2P 名单直接决定判定结论 —— 同一道题换个随机种子，
+选中的回归护栏就不同，同一个补丁可能一次判过一次判挂。所以它必须在题目定义里、
+必须被 `content_hash` 覆盖，否则"同一个数据集版本"给不出同样的判定，NFR-02 就是空的。
+
+§7.7 本来就要求记录它，所以这更像 §7.1 落笔时漏了一个字段，不是设计变更。
+
+**`PROTOCOL_VERSION` 保持 `v1.2`，不升版本**：`p2p_sampling` 不在 `docs/evaluation-protocol.md`
+正文里（协议管的是判定语义 C-01 ~ C-79），本次改的是任务规范这个冻结件，
+按 AGENTS.md 第 4 节"先说明理由再改"的要求走，变更记录在 issue #60。
+
+`schema_version` 也保持 `"1.0"`：新字段可选（默认 `null`），不带它的老 JSON 照样解析，
+属于向后兼容的追加；§7.1 标题写的是"Task Schema（v1，冻结项）"，这仍然是 v1。
+真到了删字段或改字段语义的时候再升，那时候升才有意义。
+
+**副作用（已实测）**：加字段会让所有已有题目的 `content_hash` 变掉，因为规范 JSON 多了一个键。
+现在改的成本是零 —— 还没发布任何数据集，仓库里只有一个测试样例。
+等到数据集发布之后再改，就要重算全部题目的哈希，`benchmark_set_items` 里冻结的快照会集体失配。
+**这一条本身就是"现在改而不是以后改"的理由。**
+
+抽样记录还带两条一致性校验（`schema.py::_check_p2p_sampling`）：
+`module_and_random` 必须给 `seed`（没有种子就复现不出当初选了哪 200 条，而这正是记录它的全部意义）；
+`full` 表示候选池全都当了 P2P，数量对不上说明记录是拼的。
+
+### 校验规则落地情况
+
+硬性拒收（导入即报错，消息里带字段名和实际值）：`base_commit` 非 40 位全 SHA、
+`task_id` 不合 `{owner}__{repo}-{pr_number}`、`fail_to_pass` 为空、F2P 与 P2P 有交集、
+`test_patch` 碰了非测试文件、`test_patch_paths` 与重算结果不一致（C-74 第 6 条）、
+`gold_patch` 为空或命中受保护路径（C-64）、`issue_body` 里有 PR 链接或 diff 块、
+`content_hash` 对不上、出现未知字段。
+
+需人工复核（`review_flags()`，对应 §7.4 的 `REVIEW_REQUIRED`，不拒收）：
+`issue_body` 短于 200 字、F2P 超过 20 条、P2P 为空。
+
+泄题检测只查两种没有歧义的形式（PR 链接、`diff --git` 块），**不查裸 commit hash**——
+用户贴报错日志时带哈希很常见，按那个拒收会误伤一大批好题。LLM 预筛是 E1-T5 的事。
+
+### 受保护路径
+
+C-42 的清单落在 `backend/app/domain/protected_paths.py`（放 `domain` 是因为
+benchmark、runner、judge 三边都要用）。C-75 的两份清单拆成
+`enforcement_patterns()` 和 `agent_visible_patterns()` 两个函数，
+后者不含 `test_patch_paths`（C-76）。**执行**（C-41 剔除、C-16 还原、C-63 删除）
+是 E2/E4 的事，本任务只做规则与匹配。
+
+### 从补丁解析路径
+
+`test_patch_paths` 由 `patch_paths.derive_patch_paths()` 从 diff 推导（C-74 第 1 条）。
+实现上按 hunk 头 `@@ -a,b +c,d @@` 声明的行数**精确数过内容行**，不按行首前缀 grep：
+删掉一行 `-- foo` 之后 diff 里那行长得和文件头一模一样（`--- foo`），
+grep 的写法会凭空多出一个"被改的文件"，而这份清单是要并进受保护路径的。
+git 对非 ASCII 路径的八进制转义（`"a/\346\265\213.py"`）也要还原，
+不然中文文件名和存的路径对不上，第 6 条的防篡改校验会对好题误报。
 
 ---
 
