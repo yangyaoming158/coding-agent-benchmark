@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bench-golden__textkit-1",
+  "dataset_id": "golden-v1",
+  "repo_url": "golden://bench-golden/textkit",
+  "repo_name": "bench-golden/textkit",
+  "base_commit": "f9b70bf0cec58fe5c3b19044cfb98975e82ca4f7",
+  "environment_id": "bench-golden__textkit__py311",
+  "issue_title": "导入带引号的 CSV 日志时，字段被逗号切碎了",
+  "issue_body": "## 现象\n\n我们的访问日志里有一列是用户代理串（User-Agent），里面本身就带逗号，导出成 CSV 时是用双引号包起来的，像这样：\n\n```\n2026-08-30,\"Mozilla/5.0 (X11; Linux x86_64)\",200\n```\n\n用 `textkit.csvline.parse_line()` 读这一行，本来应该切出 3 个字段，实际切出了 4 个：日期、`\"Mozilla/5.0 (X11; Linux x86_64)\"` 被从中间的逗号处劈成了两半。\n\n## 复现步骤\n\n```python\nfrom textkit.csvline import parse_line\n\nprint(parse_line('\"a,b\",c'))\n```\n\n期望输出 `['a,b', 'c']`，实际输出 `['\"a', 'b\"', 'c']`。\n\n## 影响\n\n导入脚本按字段个数校验每一行，多出来的字段会让整批日志被判成格式错误，当天的数据就全丢了。这个月已经出现两次。\n\n## 期望行为\n\n双引号包起来的字段里，逗号是普通字符，不是分隔符。另外按 CSV 的通行写法（RFC 4180），引号内要表示一个双引号本身时写成两个连续的双引号，解析时应当还原成一个。\n\n外层的那对引号本身不属于字段内容，不要出现在结果里。\n",
+  "issue_language": "zh",
+  "hints_text": null,
+  "install_command": "python -m pip install pytest",
+  "pre_test_command": null,
+  "test_command": "python -m pytest -p no:cacheprovider -p no:randomly --junitxml=report/junit.xml",
+  "test_framework": "pytest",
+  "test_report_path": "report/junit.xml",
+  "test_patch": "diff --git a/tests/test_csvline.py b/tests/test_csvline.py\nindex 278234a..344713a 100644\n--- a/tests/test_csvline.py\n+++ b/tests/test_csvline.py\n@@ -15,3 +15,15 @@ def test_single_field():\n \n def test_strips_trailing_newline():\n     assert parse_line(\"a,b\\n\") == [\"a\", \"b\"]\n+\n+\n+def test_quoted_field_keeps_comma():\n+    assert parse_line('\"a,b\",c') == [\"a,b\", \"c\"]\n+\n+\n+def test_quoted_field_in_the_middle():\n+    assert parse_line('x,\"y,z\",w') == [\"x\", \"y,z\", \"w\"]\n+\n+\n+def test_double_quote_inside_quoted_field():\n+    assert parse_line('\"he said \"\"hi\"\"\",done') == ['he said \"hi\"', \"done\"]\n",
+  "test_patch_paths": [
+    "tests/test_csvline.py"
+  ],
+  "fail_to_pass": [
+    "tests/test_csvline.py::test_double_quote_inside_quoted_field",
+    "tests/test_csvline.py::test_quoted_field_in_the_middle",
+    "tests/test_csvline.py::test_quoted_field_keeps_comma"
+  ],
+  "pass_to_pass": [
+    "tests/test_csvline.py::test_keeps_empty_fields",
+    "tests/test_csvline.py::test_single_field",
+    "tests/test_csvline.py::test_splits_plain_fields",
+    "tests/test_csvline.py::test_strips_trailing_newline"
+  ],
+  "p2p_sampling": {
+    "strategy": "full",
+    "seed": null,
+    "total_pool": 4
+  },
+  "gold_patch": "diff --git a/textkit/csvline.py b/textkit/csvline.py\nindex cf73471..0d974fb 100644\n--- a/textkit/csvline.py\n+++ b/textkit/csvline.py\n@@ -7,9 +7,39 @@ from __future__ import annotations\n \n \n def parse_line(line: str) -> list[str]:\n-    \"\"\"把一行 CSV 切成字段列表。\n+    \"\"\"把一行 CSV 切成字段列表，双引号里的逗号不当分隔符。\n \n     >>> parse_line(\"a,b,c\")\n     ['a', 'b', 'c']\n+    >>> parse_line('\"a,b\",c')\n+    ['a,b', 'c']\n+\n+    引号内要表示一个双引号本身，写成两个连续的双引号（RFC 4180 的写法）。\n     \"\"\"\n-    return line.rstrip(\"\\n\").split(\",\")\n+    text = line.rstrip(\"\\n\")\n+    fields: list[str] = []\n+    current: list[str] = []\n+    in_quotes = False\n+    index = 0\n+    while index < len(text):\n+        char = text[index]\n+        if in_quotes:\n+            if char == '\"':\n+                # 连续两个双引号表示一个字面量双引号，不是引号结束\n+                if index + 1 < len(text) and text[index + 1] == '\"':\n+                    current.append('\"')\n+                    index += 2\n+                    continue\n+                in_quotes = False\n+            else:\n+                current.append(char)\n+        elif char == '\"':\n+            in_quotes = True\n+        elif char == \",\":\n+            fields.append(\"\".join(current))\n+            current = []\n+        else:\n+            current.append(char)\n+        index += 1\n+    fields.append(\"\".join(current))\n+    return fields\n",
+  "agent_timeout_s": 300,
+  "test_timeout_s": 60,
+  "sandbox_cpu": 1.0,
+  "sandbox_memory_mb": 1536,
+  "sandbox_pids_limit": 512,
+  "source_issue_url": null,
+  "source_pr_url": null,
+  "created_at_upstream": null,
+  "language": "python",
+  "framework": null,
+  "difficulty": "easy",
+  "tags": [
+    "csv",
+    "parsing"
+  ],
+  "content_hash": "sha256:1a323f27131a91e84814fae347b859eb45bd7d060291931b7379a57c6eb5fcae",
+  "validation": null
+}

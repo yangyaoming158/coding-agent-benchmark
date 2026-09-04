@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bench-golden__pager-4",
+  "dataset_id": "golden-v1",
+  "repo_url": "golden://bench-golden/pager",
+  "repo_name": "bench-golden/pager",
+  "base_commit": "04e06a70c5f5c92fa3ece2d98bd91203345654d6",
+  "environment_id": "bench-golden__pager__py311",
+  "issue_title": "第 0 页返回的是最后一页的数据",
+  "issue_body": "## 现象\n\n前端有个筛选组件在清空条件时会把页码重置成 0 再请求一次列表。这时候接口返回的不是空列表，而是**最后一页**的内容，用户看到的是列表末尾的几条记录，还以为自己的数据只剩这么多。\n\n定位到 `pager.paginate.page_slice()`。页码从 1 开始数，`page=0` 算出来的起始下标是 -3，Python 的负数切片从列表尾部取值，于是就取到了最后三条。\n\n## 复现步骤\n\n```python\nfrom pager.paginate import page_slice\n\nprint(page_slice([1, 2, 3, 4, 5, 6, 7], 0, 3))\n```\n\n期望是报错，实际输出 `[5, 6, 7]`。页码传 -1 也是类似的结果。\n\n## 影响\n\n不会报错，只是数据不对，所以线上跑了两个月没人发现，是用户来问\"我的记录怎么少了\"才查出来的。这种静默错误比直接抛异常难查得多。\n\n## 顺带发现的第二个问题\n\n`page_slice()` 对每页条数也不校验。传 0 会返回空列表，而同一个模块里的 `page_count()` 遇到 0 是抛 `ValueError` 的。同一个参数在两个函数里行为不一致，调用方没法写统一的错误处理。\n\n## 期望行为\n\n页码小于 1 时抛 `ValueError`。每页条数不是正数时也抛 `ValueError`，和 `page_count()` 保持一致。页码超出总页数时仍然返回空列表 —— 这个行为是对的，不要改。\n",
+  "issue_language": "zh",
+  "hints_text": null,
+  "install_command": "python -m pip install pytest",
+  "pre_test_command": null,
+  "test_command": "python -m pytest -p no:cacheprovider -p no:randomly --junitxml=report/junit.xml",
+  "test_framework": "pytest",
+  "test_report_path": "report/junit.xml",
+  "test_patch": "diff --git a/tests/test_paginate.py b/tests/test_paginate.py\nindex 9479510..c01a96d 100644\n--- a/tests/test_paginate.py\n+++ b/tests/test_paginate.py\n@@ -28,3 +28,18 @@ def test_page_count_rounds_up():\n def test_page_count_rejects_zero_per_page():\n     with pytest.raises(ValueError):\n         page_count(7, 0)\n+\n+\n+def test_page_zero_is_rejected():\n+    with pytest.raises(ValueError):\n+        page_slice(ITEMS, 0, 3)\n+\n+\n+def test_negative_page_is_rejected():\n+    with pytest.raises(ValueError):\n+        page_slice(ITEMS, -1, 3)\n+\n+\n+def test_page_slice_rejects_zero_per_page():\n+    with pytest.raises(ValueError):\n+        page_slice(ITEMS, 1, 0)\n",
+  "test_patch_paths": [
+    "tests/test_paginate.py"
+  ],
+  "fail_to_pass": [
+    "tests/test_paginate.py::test_negative_page_is_rejected",
+    "tests/test_paginate.py::test_page_slice_rejects_zero_per_page",
+    "tests/test_paginate.py::test_page_zero_is_rejected"
+  ],
+  "pass_to_pass": [
+    "tests/test_paginate.py::test_first_page",
+    "tests/test_paginate.py::test_last_page_can_be_short",
+    "tests/test_paginate.py::test_middle_page",
+    "tests/test_paginate.py::test_page_count_rejects_zero_per_page",
+    "tests/test_paginate.py::test_page_count_rounds_up",
+    "tests/test_paginate.py::test_page_past_the_end_is_empty"
+  ],
+  "p2p_sampling": {
+    "strategy": "full",
+    "seed": null,
+    "total_pool": 6
+  },
+  "gold_patch": "diff --git a/pager/paginate.py b/pager/paginate.py\nindex 6b29adf..192fa9f 100644\n--- a/pager/paginate.py\n+++ b/pager/paginate.py\n@@ -15,7 +15,14 @@ def page_slice(items: list[T], page: int, per_page: int) -> list[T]:\n \n     >>> page_slice([1, 2, 3, 4, 5], 2, 2)\n     [3, 4]\n+\n+    页码从 1 开始。`page` 小于 1 会算出负的起始下标，Python 的负数切片会从列表\n+    尾部取值 —— 那样第 0 页会莫名其妙地返回最后一页的内容，所以这里直接拒绝。\n     \"\"\"\n+    if page < 1:\n+        raise ValueError(f\"页码从 1 开始：{page}\")\n+    if per_page <= 0:\n+        raise ValueError(f\"每页条数必须是正数：{per_page}\")\n     start = (page - 1) * per_page\n     return items[start : start + per_page]\n \n",
+  "agent_timeout_s": 300,
+  "test_timeout_s": 60,
+  "sandbox_cpu": 1.0,
+  "sandbox_memory_mb": 1536,
+  "sandbox_pids_limit": 512,
+  "source_issue_url": null,
+  "source_pr_url": null,
+  "created_at_upstream": null,
+  "language": "python",
+  "framework": null,
+  "difficulty": "medium",
+  "tags": [
+    "boundary",
+    "pagination"
+  ],
+  "content_hash": "sha256:0812264915983dca43d2dfc3687d628a4b69ddf71aa4914acd755bf3d59130a8",
+  "validation": null
+}

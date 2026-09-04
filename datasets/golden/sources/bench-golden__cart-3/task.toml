@@ -1,0 +1,23 @@
+# cart：折扣用 int() 截断，每单少收一分。
+# 这道题有两处改动（取整方式 + 入参校验），考的是"issue 里说了两件事，不能只做一件"。
+
+task_id = "bench-golden__cart-3"
+repo_name = "bench-golden/cart"
+difficulty = "medium"
+tags = ["money", "rounding"]
+framework = "none"
+
+fail_to_pass = [
+    "tests/test_pricing.py::test_half_cent_rounds_up",
+    "tests/test_pricing.py::test_repeated_half_cents_do_not_drift",
+    "tests/test_pricing.py::test_percent_above_hundred_rejected",
+    "tests/test_pricing.py::test_negative_percent_rejected",
+]
+
+pass_to_pass = [
+    "tests/test_pricing.py::test_no_discount_keeps_amount",
+    "tests/test_pricing.py::test_full_discount_is_free",
+    "tests/test_pricing.py::test_clean_ten_percent",
+    "tests/test_pricing.py::test_line_total",
+    "tests/test_pricing.py::test_negative_quantity_rejected",
+]

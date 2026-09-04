@@ -1,0 +1,21 @@
+# auth：verify_password 用 `or` 短路，空口令直接放行。
+# 这道题考的是"看懂一个布尔表达式的短路行为"，改动只有几行，但漏一个分支就通不过。
+
+task_id = "bench-golden__auth-2"
+repo_name = "bench-golden/auth"
+difficulty = "easy"
+tags = ["security", "auth"]
+framework = "none"
+
+fail_to_pass = [
+    "tests/test_password.py::test_empty_password_is_rejected",
+    "tests/test_password.py::test_none_password_is_rejected",
+    "tests/test_password.py::test_account_without_password_rejects_everything",
+]
+
+pass_to_pass = [
+    "tests/test_password.py::test_correct_password_is_accepted",
+    "tests/test_password.py::test_wrong_password_is_rejected",
+    "tests/test_password.py::test_hash_is_stable",
+    "tests/test_password.py::test_hash_is_not_the_raw_password",
+]

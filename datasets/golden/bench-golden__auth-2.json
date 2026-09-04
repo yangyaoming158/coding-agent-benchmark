@@ -1,0 +1,56 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bench-golden__auth-2",
+  "dataset_id": "golden-v1",
+  "repo_url": "golden://bench-golden/auth",
+  "repo_name": "bench-golden/auth",
+  "base_commit": "b0cf5d15c9d1933b4f7741e3843e1a8c8495c35a",
+  "environment_id": "bench-golden__auth__py311",
+  "issue_title": "提交空口令可以登录任何账号",
+  "issue_body": "## 现象\n\n登录接口收到空口令时，`auth.password.verify_password()` 直接返回 True，任何账号都能进去。\n\n这是我在排查另一个问题时偶然发现的：前端有个分支在网络超时后会重发一次登录请求，但请求体里的口令字段是空的，结果那次重发居然成功了。\n\n## 复现步骤\n\n```python\nfrom auth.password import Account, hash_password, verify_password\n\nalice = Account(username=\"alice\", password_hash=hash_password(\"hunter2\"))\nprint(verify_password(alice, \"\"))\n```\n\n期望输出 False，实际输出 True。口令传 None 也是一样的结果。\n\n## 影响\n\n只要知道用户名就能登录，等于整个口令校验形同虚设。这条必须马上修。\n\n## 另一处相关问题\n\n`password_hash` 为空串表示\"这个账号还没设过口令\"（比如刚从旧系统导过来、还没走过激活流程）。这种账号目前也是任何口令都能通过校验，包括空口令。这类账号在没设置口令之前应该一律拒绝登录，而不是放行。\n\n## 期望行为\n\n空口令、None、以及没设过口令的账号，三种情况都应当校验失败。正常口令的校验逻辑不要改动。\n",
+  "issue_language": "zh",
+  "hints_text": null,
+  "install_command": "python -m pip install pytest",
+  "pre_test_command": null,
+  "test_command": "python -m pytest -p no:cacheprovider -p no:randomly --junitxml=report/junit.xml",
+  "test_framework": "pytest",
+  "test_report_path": "report/junit.xml",
+  "test_patch": "diff --git a/tests/test_password.py b/tests/test_password.py\nindex 62534cf..40be5ca 100644\n--- a/tests/test_password.py\n+++ b/tests/test_password.py\n@@ -19,3 +19,17 @@ def test_hash_is_stable():\n \n def test_hash_is_not_the_raw_password():\n     assert hash_password(\"hunter2\") != \"hunter2\"\n+\n+\n+def test_empty_password_is_rejected():\n+    assert verify_password(account(\"hunter2\"), \"\") is False\n+\n+\n+def test_none_password_is_rejected():\n+    assert verify_password(account(\"hunter2\"), None) is False\n+\n+\n+def test_account_without_password_rejects_everything():\n+    never_set = Account(username=\"bob\", password_hash=\"\")\n+    assert verify_password(never_set, \"\") is False\n+    assert verify_password(never_set, \"anything\") is False\n",
+  "test_patch_paths": [
+    "tests/test_password.py"
+  ],
+  "fail_to_pass": [
+    "tests/test_password.py::test_account_without_password_rejects_everything",
+    "tests/test_password.py::test_empty_password_is_rejected",
+    "tests/test_password.py::test_none_password_is_rejected"
+  ],
+  "pass_to_pass": [
+    "tests/test_password.py::test_correct_password_is_accepted",
+    "tests/test_password.py::test_hash_is_not_the_raw_password",
+    "tests/test_password.py::test_hash_is_stable",
+    "tests/test_password.py::test_wrong_password_is_rejected"
+  ],
+  "p2p_sampling": {
+    "strategy": "full",
+    "seed": null,
+    "total_pool": 4
+  },
+  "gold_patch": "diff --git a/auth/password.py b/auth/password.py\nindex 4223ed1..ccd284b 100644\n--- a/auth/password.py\n+++ b/auth/password.py\n@@ -6,6 +6,7 @@\n from __future__ import annotations\n \n import hashlib\n+import hmac\n from dataclasses import dataclass\n \n \n@@ -23,5 +24,12 @@ def hash_password(raw: str) -> str:\n \n \n def verify_password(account: Account, provided: str | None) -> bool:\n-    \"\"\"校验用户提交的口令对不对。\"\"\"\n-    return not provided or hash_password(provided) == account.password_hash\n+    \"\"\"校验用户提交的口令对不对。\n+\n+    空口令、None、以及没设过口令的账号一律拒绝：这三种情况下没有任何凭据可比，\n+    放行等于不设防。\n+    \"\"\"\n+    if not provided or not account.password_hash:\n+        return False\n+    # 用 compare_digest 而不是 ==：定长比较，不会因为提前返回泄露前几位对了多少\n+    return hmac.compare_digest(hash_password(provided), account.password_hash)\n",
+  "agent_timeout_s": 300,
+  "test_timeout_s": 60,
+  "sandbox_cpu": 1.0,
+  "sandbox_memory_mb": 1536,
+  "sandbox_pids_limit": 512,
+  "source_issue_url": null,
+  "source_pr_url": null,
+  "created_at_upstream": null,
+  "language": "python",
+  "framework": null,
+  "difficulty": "easy",
+  "tags": [
+    "auth",
+    "security"
+  ],
+  "content_hash": "sha256:a01c4b863204deefd34992b0bec2b5e19dd5b19cc37b8ff46b9de24a3f6289bf",
+  "validation": null
+}

@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "task_id": "bench-golden__cart-3",
+  "dataset_id": "golden-v1",
+  "repo_url": "golden://bench-golden/cart",
+  "repo_name": "bench-golden/cart",
+  "base_commit": "7b2fdefd3cc76e35aa1e1a29e379eabc76512f56",
+  "environment_id": "bench-golden__cart__py311",
+  "issue_title": "打折之后每单少收一分钱",
+  "issue_body": "## 现象\n\n财务对账时发现，带折扣的订单实收金额比应收少，差额稳定是 1 分。不带折扣的订单没问题。\n\n追下去定位到 `cart.pricing.discounted_cents()`。商品原价 995 分（9.95 元）打九折，应该是 895.5 分，按四舍五入收 896 分，但函数返回的是 895。\n\n## 复现步骤\n\n```python\nfrom cart.pricing import discounted_cents\n\nprint(discounted_cents(995, 10))\n```\n\n期望输出 896，实际输出 895。\n\n## 影响\n\n促销期间大部分订单都带折扣，单笔差一分，一天几万单就是几百块的缺口，而且对账流水每条都不平，财务同事要手工核销。\n\n## 顺带发现的第二个问题\n\n这个函数对折扣百分比完全不校验。传 120 会算出负数金额，传 -5 会算出比原价还高的金额。上游接口理论上不会传这种值，但既然是算钱的函数，非法输入应该直接报错，不要静静地算出一个离谱的数。\n\n## 期望行为\n\n不足一分的部分按四舍五入处理，而不是直接截断。折扣百分比超出 0 到 100 的范围时抛 `ValueError`。已有的整数倍折扣（比如 1000 分打九折得 900）结果不要变。\n",
+  "issue_language": "zh",
+  "hints_text": null,
+  "install_command": "python -m pip install pytest",
+  "pre_test_command": null,
+  "test_command": "python -m pytest -p no:cacheprovider -p no:randomly --junitxml=report/junit.xml",
+  "test_framework": "pytest",
+  "test_report_path": "report/junit.xml",
+  "test_patch": "diff --git a/tests/test_pricing.py b/tests/test_pricing.py\nindex 85625e2..26c3c92 100644\n--- a/tests/test_pricing.py\n+++ b/tests/test_pricing.py\n@@ -22,3 +22,21 @@ def test_line_total():\n def test_negative_quantity_rejected():\n     with pytest.raises(ValueError):\n         line_total_cents(299, -1)\n+\n+\n+def test_half_cent_rounds_up():\n+    assert discounted_cents(995, 10) == 896\n+\n+\n+def test_repeated_half_cents_do_not_drift():\n+    assert sum(discounted_cents(995, 10) for _ in range(100)) == 89600\n+\n+\n+def test_percent_above_hundred_rejected():\n+    with pytest.raises(ValueError):\n+        discounted_cents(1000, 120)\n+\n+\n+def test_negative_percent_rejected():\n+    with pytest.raises(ValueError):\n+        discounted_cents(1000, -5)\n",
+  "test_patch_paths": [
+    "tests/test_pricing.py"
+  ],
+  "fail_to_pass": [
+    "tests/test_pricing.py::test_half_cent_rounds_up",
+    "tests/test_pricing.py::test_negative_percent_rejected",
+    "tests/test_pricing.py::test_percent_above_hundred_rejected",
+    "tests/test_pricing.py::test_repeated_half_cents_do_not_drift"
+  ],
+  "pass_to_pass": [
+    "tests/test_pricing.py::test_clean_ten_percent",
+    "tests/test_pricing.py::test_full_discount_is_free",
+    "tests/test_pricing.py::test_line_total",
+    "tests/test_pricing.py::test_negative_quantity_rejected",
+    "tests/test_pricing.py::test_no_discount_keeps_amount"
+  ],
+  "p2p_sampling": {
+    "strategy": "full",
+    "seed": null,
+    "total_pool": 5
+  },
+  "gold_patch": "diff --git a/cart/pricing.py b/cart/pricing.py\nindex a4a7389..79c3631 100644\n--- a/cart/pricing.py\n+++ b/cart/pricing.py\n@@ -5,14 +5,24 @@\n \n from __future__ import annotations\n \n+from decimal import ROUND_HALF_UP, Decimal\n+\n \n def discounted_cents(amount_cents: int, percent: int) -> int:\n-    \"\"\"按百分比打折后的金额（分）。\n+    \"\"\"按百分比打折后的金额（分），不足一分的部分四舍五入。\n \n     >>> discounted_cents(1000, 10)\n     900\n+    >>> discounted_cents(995, 10)\n+    896\n+\n+    用 Decimal 而不是 `int(...)`：`int()` 是向零截断，995 打九折得 895.5，\n+    截断成 895，比应收少一分。差一分在对账时就是一条不平的流水。\n     \"\"\"\n-    return int(amount_cents * (100 - percent) / 100)\n+    if not 0 <= percent <= 100:\n+        raise ValueError(f\"折扣百分比要在 0 到 100 之间：{percent}\")\n+    exact = Decimal(amount_cents) * Decimal(100 - percent) / Decimal(100)\n+    return int(exact.quantize(Decimal(\"1\"), rounding=ROUND_HALF_UP))\n \n \n def line_total_cents(unit_price_cents: int, quantity: int) -> int:\n",
+  "agent_timeout_s": 300,
+  "test_timeout_s": 60,
+  "sandbox_cpu": 1.0,
+  "sandbox_memory_mb": 1536,
+  "sandbox_pids_limit": 512,
+  "source_issue_url": null,
+  "source_pr_url": null,
+  "created_at_upstream": null,
+  "language": "python",
+  "framework": null,
+  "difficulty": "medium",
+  "tags": [
+    "money",
+    "rounding"
+  ],
+  "content_hash": "sha256:ff2733540a33dde8f6ef7f31569d7930bdf1141d836260839c1416d53f97e9d6",
+  "validation": null
+}

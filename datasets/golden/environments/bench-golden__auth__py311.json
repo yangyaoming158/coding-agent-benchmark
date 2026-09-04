@@ -1,0 +1,11 @@
+{
+  "environment_id": "bench-golden__auth__py311",
+  "extra_protected_paths": [],
+  "install_command": "python -m pip install pytest",
+  "pre_test_command": null,
+  "python_version": "3.11",
+  "repo_name": "bench-golden/auth",
+  "test_command": "python -m pytest -p no:cacheprovider -p no:randomly --junitxml=report/junit.xml",
+  "test_framework": "pytest",
+  "test_report_path": "report/junit.xml"
+}

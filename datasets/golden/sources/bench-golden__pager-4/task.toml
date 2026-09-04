@@ -1,0 +1,24 @@
+# pager：page_slice 不校验页码，page=0 走进负数切片，返回了最后一页。
+# 这道题的陷阱是 issue 里明确说了"页码超出总页数仍返回空列表，不要改"——
+# 一刀切成"所有越界都报错"会打挂 P2P 里的 test_page_past_the_end_is_empty。
+
+task_id = "bench-golden__pager-4"
+repo_name = "bench-golden/pager"
+difficulty = "medium"
+tags = ["pagination", "boundary"]
+framework = "none"
+
+fail_to_pass = [
+    "tests/test_paginate.py::test_page_zero_is_rejected",
+    "tests/test_paginate.py::test_negative_page_is_rejected",
+    "tests/test_paginate.py::test_page_slice_rejects_zero_per_page",
+]
+
+pass_to_pass = [
+    "tests/test_paginate.py::test_first_page",
+    "tests/test_paginate.py::test_middle_page",
+    "tests/test_paginate.py::test_last_page_can_be_short",
+    "tests/test_paginate.py::test_page_past_the_end_is_empty",
+    "tests/test_paginate.py::test_page_count_rounds_up",
+    "tests/test_paginate.py::test_page_count_rejects_zero_per_page",
+]
