@@ -1,0 +1,23 @@
+# textkit：CSV 单行解析没处理引号内的逗号。
+# 这道题考的是"把一个字符串扫描器写对"，改动集中在一个函数里。
+
+task_id = "bench-golden__textkit-1"
+repo_name = "bench-golden/textkit"
+difficulty = "easy"
+tags = ["parsing", "csv"]
+framework = "none"
+
+# 修好之后才会由失败变通过的用例。它们由 fix/ 里新增的测试提供。
+fail_to_pass = [
+    "tests/test_csvline.py::test_quoted_field_keeps_comma",
+    "tests/test_csvline.py::test_quoted_field_in_the_middle",
+    "tests/test_csvline.py::test_double_quote_inside_quoted_field",
+]
+
+# 回归护栏：base 上就通过、打完补丁还得通过。
+pass_to_pass = [
+    "tests/test_csvline.py::test_splits_plain_fields",
+    "tests/test_csvline.py::test_keeps_empty_fields",
+    "tests/test_csvline.py::test_single_field",
+    "tests/test_csvline.py::test_strips_trailing_newline",
+]

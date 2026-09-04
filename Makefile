@@ -4,7 +4,8 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
-        dev dev-api dev-web web-install web-lint web-build gen-api report schema
+        dev dev-api dev-web web-install web-lint web-build gen-api report schema \
+        golden golden-verify
 
 BACKEND := backend
 FRONTEND := frontend
@@ -103,6 +104,12 @@ report:              ## 重新生成规划报告 HTML
 
 schema:              ## 从 TaskDefinition 重新导出 schemas/task.schema.json
 	$(UV) python -m cli.task schema
+
+golden:              ## 从 datasets/golden/sources/ 生成任务 JSON 和本地镜像
+	$(UV) python -m cli.golden build
+
+golden-verify:       ## 对每道 Golden Task 跑六步验证
+	$(UV) python -m cli.golden verify
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

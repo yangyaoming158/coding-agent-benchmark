@@ -78,13 +78,20 @@
   迁移 0002 给 `benchmark_tasks` 补 `sandbox_pids_limit` 列、`content_hash` 前缀维持两边格式各异；
   详见 `03-benchmark-spec.md` §7.9。
 
-### E1-T2 Golden Tasks（3–5 道人工任务）
+### E1-T2 Golden Tasks（3–5 道人工任务）✅ 已于 2026-09-04 完成
 - **Goal**：不依赖挖掘、可在 60 秒内跑完的验证基石
 - **Req**：FR-04, MET-05 · **Deps**：E1-T1、E2-T1
 - **Output**：`fixtures/golden/` 下 3–5 道任务（含中文 Issue、test_patch、gold_patch），及其 env spec
 - **AC**：每道题手工验证 6 步全通过；Oracle 解决率 100%、Noop 解决率 0%
 - **Why**：**这是关键路径上唯一不依赖外部世界的输入**，Week 1 内核开发全靠它
 - **P0 · C:M · E:1.5d**
+- **实际交付**（2026-09-04）：四道题在 `datasets/golden/`，`python -m cli.golden {build,verify,list}`。
+  六步验证全过，Oracle 解决率 100%、Noop 解决率 0%，全流程 4.5 秒。
+  题目源码用 `base/` + `fix/` 两个目录手写，`build` 造出两提交的上游仓库再按受保护路径
+  把修复 PR 的 diff 劈成 `test_patch` 和 `gold_patch` —— 和从真实 PR 派生任务是同一套做法。
+  `base_commit` 确定性生成（提交人和时间写死），所以能进版本库；`build --check` 挡源码与 JSON 漂移。
+  新增 20 个测试（合计 376 全绿），含两条反向用例证明验证器不是空转。
+  落地方式记在 `03-benchmark-spec.md` §8.7。
 
 ### E1-T3 Task Validation Pipeline（8 步验证）
 - **Goal**：§7.3 流水线实现 + 证据制品
