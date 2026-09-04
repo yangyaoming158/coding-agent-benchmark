@@ -1,0 +1,189 @@
+{
+  "$defs": {
+    "Constraints": {
+      "additionalProperties": false,
+      "description": "这次运行的边界。",
+      "properties": {
+        "allow_network": {
+          "default": true,
+          "title": "Allow Network",
+          "type": "boolean"
+        },
+        "allow_run_tests": {
+          "default": true,
+          "title": "Allow Run Tests",
+          "type": "boolean"
+        },
+        "deadline_unix_ms": {
+          "exclusiveMinimum": 0,
+          "title": "Deadline Unix Ms",
+          "type": "integer"
+        },
+        "max_tokens_budget": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Tokens Budget"
+        },
+        "protected_paths": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Protected Paths",
+          "type": "array"
+        }
+      },
+      "required": [
+        "deadline_unix_ms"
+      ],
+      "title": "Constraints",
+      "type": "object"
+    },
+    "IssueInput": {
+      "additionalProperties": false,
+      "description": "交给被测 AI 的 issue。这是它**唯一**的需求来源。",
+      "properties": {
+        "body": {
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "language": {
+          "$ref": "#/$defs/IssueLanguage"
+        },
+        "title": {
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body",
+        "language"
+      ],
+      "title": "IssueInput",
+      "type": "object"
+    },
+    "IssueLanguage": {
+      "description": "Issue 正文的语言。zh 占比是本项目的公开指标之一，所以要单独存一列而不是靠事后检测。",
+      "enum": [
+        "zh",
+        "en",
+        "mixed"
+      ],
+      "title": "IssueLanguage",
+      "type": "string"
+    },
+    "ModelInput": {
+      "additionalProperties": false,
+      "description": "用哪个模型、什么温度。温度默认 0，评测要的是可复现。",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.0,
+          "maximum": 2.0,
+          "minimum": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "ModelInput",
+      "type": "object"
+    },
+    "RepoInput": {
+      "additionalProperties": false,
+      "description": "仓库标识。\n\n只给名字和 base commit，**不给 URL**：给了 URL，AI 一句 `git clone` 就能\n拉到官方修复（协议 C-44 的同类风险）。工作区里的 git 历史也已经剥离到只剩\n一个提交（E2-T1）。",
+      "properties": {
+        "base_commit": {
+          "pattern": "^[0-9a-f]{40}$",
+          "title": "Base Commit",
+          "type": "string"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "base_commit"
+      ],
+      "title": "RepoInput",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "喂给适配器标准输入的那一行 JSON（§9.2）。\n\n**这个对象里的每一个字段都会被被测 AI 看到。** 加字段之前先问一句：\n它能不能帮 AI 缩小搜索范围？能的话就不该加。",
+  "properties": {
+    "constraints": {
+      "$ref": "#/$defs/Constraints"
+    },
+    "extra": {
+      "additionalProperties": true,
+      "title": "Extra",
+      "type": "object"
+    },
+    "hints": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hints"
+    },
+    "issue": {
+      "$ref": "#/$defs/IssueInput"
+    },
+    "model": {
+      "$ref": "#/$defs/ModelInput"
+    },
+    "protocol_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "repo": {
+      "$ref": "#/$defs/RepoInput"
+    },
+    "task_id": {
+      "minLength": 1,
+      "title": "Task Id",
+      "type": "string"
+    },
+    "workspace_path": {
+      "default": "/workspace",
+      "title": "Workspace Path",
+      "type": "string"
+    }
+  },
+  "required": [
+    "task_id",
+    "issue",
+    "repo",
+    "constraints",
+    "model"
+  ],
+  "title": "AgentTaskInput",
+  "type": "object"
+}

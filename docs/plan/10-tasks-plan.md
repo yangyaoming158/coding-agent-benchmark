@@ -173,11 +173,23 @@
 
 ## E3 — Agent Runner Framework
 
-### E3-T1 Runner 协议与契约测试套件
+### E3-T1 Runner 协议与契约测试套件 ✅ 已于 2026-09-04 完成
 - **Goal**：`AgentRunner` Protocol、`AgentTaskInput`/`AgentRunResult` 模型、6 条契约测试
 - **Req**：FR-08, NFR-05 · **Deps**：E0-T3
 - **AC**：契约测试可对任意适配器复用运行；协议 JSON Schema 导出
 - **P0 · C:M · E:1d**
+- **实际交付**（2026-09-04）：`app/runner/protocol.py` + `cli/runner.py`，两份 JSON Schema
+  落在 `schemas/`（`make schema` 一起生成，有漂移测试盯着）。契约套件是一个给人继承的
+  基类 `tests/contract/runner_contract.py::AgentRunnerContract`——接新适配器只要写一个
+  `runner` fixture，六条自动跑。**配了六个坏适配器做反向验证**：没有这一半，
+  一个永远返回"通过"的套件也能让正向全绿。
+  两个和直觉相反的结论写进了代码注释：第 4 条要求适配器**保留**受保护路径的改动
+  （自己过滤掉的话，`protected_path_edit_attempted` 就没证据了，协议 C-08b），
+  过滤是平台在 E3-T3 做的事；`build_image` 拆成单独的 `ImageBuildingRunner`，
+  因为 Mock/Oracle/Noop 根本不需要镜像。
+  另外修了 import-linter 的分层配置：原来 runner 和 sandbox 并排写，等于"互不可见"，
+  和 `07-platform-architecture.md` §14.2 的"Runner 用 Sandbox"直接冲突，
+  真实适配器一调 `run_in_container` 就会红。新增 87 个测试（合计 500 全绿）。
 
 ### E3-T2 Mock / Oracle / Noop Runner
 - **Goal**：可编程行为的假 Agent（正确补丁 / 错误补丁 / 空补丁 / 超时 / 非法补丁 / 改受保护文件）

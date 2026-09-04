@@ -131,8 +131,13 @@ app/
 ```
 
 **依赖方向（写进 CI 的 import-linter 规则）**：
-`api → evaluation/benchmark/report → runner/sandbox/judge/attribution → storage/infrastructure → domain`
+`api → evaluation/benchmark/report → runner → sandbox/judge/attribution → storage/infrastructure → domain`
 `domain` 不依赖任何模块；`sandbox` 不依赖 `runner`（Runner 用 Sandbox，反之不行）。
+
+> **2026-09-04 修正（E3-T1）**：`runner` 原先和 `sandbox/judge/attribution` 并排写在同一层。
+> import-linter 里同层并排的含义是**互不可见**，于是"Runner 用 Sandbox"这句话在配置里
+> 反而是被禁止的——真实适配器一调 `run_in_container` 起容器就会让 CI 红。
+> 现在把 `runner` 单独提一层压在 `sandbox` 上面，两条规则才一致。
 
 ## 14.3 核心接口（签名级设计）
 ```python

@@ -87,10 +87,15 @@ root_packages = ["app"]
 [[tool.importlinter.contracts]]
 name = "分层依赖：上层可依赖下层，下层不可反向依赖"
 type = "layers"
+# runner 单独一层、压在 sandbox 上面：07-platform-architecture.md §14.2 写的是
+# "sandbox 不依赖 runner（Runner 用 Sandbox，反之不行）"，也就是 runner → sandbox 合法。
+# 但 import-linter 的 layers 里用 `|` 并排就是"互不可见"，这两条规则是冲突的：
+# 真实适配器要调 run_in_container 起容器，并排写法会让它一写就红（2026-09-04 实测）。
 layers = [
     "app.api",
     "app.evaluation | app.benchmark | app.report",
-    "app.runner | app.sandbox | app.judge | app.attribution",
+    "app.runner",
+    "app.sandbox | app.judge | app.attribution",
     "app.storage",
     "app.infrastructure",
     "app.domain",
