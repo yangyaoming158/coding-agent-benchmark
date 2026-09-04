@@ -122,6 +122,8 @@ FIELD_MUTATIONS: dict[str, Any] = {
     ),
     "fail_to_pass": ["tests/test_adapter.py::test_something_else"],
     "pass_to_pass": [],
+    # 抽样参数决定 P2P 名单，P2P 名单决定判定结论 —— 必须进哈希
+    "p2p_sampling": {"strategy": "module_and_random", "seed": 20260903, "total_pool": 1840},
     "gold_patch": (
         "diff --git a/nonebot/other.py b/nonebot/other.py\n"
         "--- a/nonebot/other.py\n"

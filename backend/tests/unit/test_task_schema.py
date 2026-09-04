@@ -212,6 +212,80 @@ def test_reject_malformed_test_patch() -> None:
 
 
 # ══════════════════════════════════════════════════════════
+# P2P 抽样记录（§7.7，2026-09-04 补入 §7.1，issue #60）
+# ══════════════════════════════════════════════════════════
+
+
+def test_p2p_sampling_is_optional() -> None:
+    """不填也行。
+
+    抽样记录是验证流水线（§7.3 S4~S8）跑完才产生的，手工造的金标题还没走过那条流水线。
+    """
+    assert TaskDefinition.model_validate(make_task()).p2p_sampling is None
+
+
+def test_p2p_sampling_roundtrips() -> None:
+    """带抽样记录的题目能双向序列化。"""
+    sampling = {"strategy": "module_and_random", "seed": 20260903, "total_pool": 1840}
+    task = TaskDefinition.model_validate(make_task(p2p_sampling=sampling))
+
+    assert task.p2p_sampling is not None
+    assert task.p2p_sampling.seed == 20260903
+    assert task.model_dump(mode="json")["p2p_sampling"] == sampling
+
+
+def test_reject_random_sampling_without_seed() -> None:
+    """随机抽样必须给种子，否则复现不出当初选了哪 200 条（§7.7）。
+
+    没有种子，这份记录就只剩"抽过样"三个字，而记录它的全部意义就是可复现。
+    """
+    reason = reject_reason(
+        p2p_sampling={"strategy": "module_and_random", "seed": None, "total_pool": 1840}
+    )
+    assert "必须给 seed" in reason
+
+
+def test_reject_full_strategy_with_seed() -> None:
+    """full 策略没有随机性，带种子说明这份记录是拼出来的。"""
+    assert "没有随机性" in reject_reason(
+        p2p_sampling={"strategy": "full", "seed": 42, "total_pool": 1}
+    )
+
+
+def test_reject_sampling_pool_smaller_than_selection() -> None:
+    """选出来的比候选池还多 —— 记录和实际名单对不上。"""
+    reason = reject_reason(
+        pass_to_pass=["tests/test_adapter.py::test_a", "tests/test_adapter.py::test_b"],
+        p2p_sampling={"strategy": "module_and_random", "seed": 1, "total_pool": 1},
+    )
+    assert "比候选池" in reason
+
+
+def test_reject_full_strategy_not_taking_whole_pool() -> None:
+    """full 表示候选池全都当了 P2P，数量对不上就是记录错了。"""
+    reason = reject_reason(
+        pass_to_pass=["tests/test_adapter.py::test_basic_register"],
+        p2p_sampling={"strategy": "full", "seed": None, "total_pool": 99},
+    )
+    assert "全都是 P2P" in reason
+
+
+def test_reject_unknown_sampling_strategy() -> None:
+    """策略只有 §7.7 定义的两种。"""
+    assert "p2p_sampling.strategy" in reject_reason(
+        p2p_sampling={"strategy": "guess", "seed": 1, "total_pool": 10}
+    )
+
+
+def test_p2p_sampling_not_visible_to_agent() -> None:
+    """抽样参数不下发给被测 AI —— 候选池大小会泄露测试套件的规模。"""
+    task = TaskDefinition.model_validate(
+        make_task(p2p_sampling={"strategy": "module_and_random", "seed": 1, "total_pool": 1840})
+    )
+    assert "p2p_sampling" not in task.agent_visible_dump()
+
+
+# ══════════════════════════════════════════════════════════
 # 需要人工复核（合法但可疑），和硬性拒收分开
 # ══════════════════════════════════════════════════════════
 

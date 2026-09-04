@@ -52,6 +52,41 @@ MIN_ISSUE_BODY_CHARS = 200
 REVIEW_F2P_MAX = 20
 
 
+class P2PSampling(BaseModel):
+    """P2P 用例是怎么选出来的（§7.7）。
+
+    全量套件跑一遍很贵（可能几千条用例），所以 P2P 不一定是"全部通过的用例"。
+    抽样规则必须记下来，因为**抽样参数决定 P2P 名单，而 P2P 名单直接决定判定结论**：
+    同一道题换一个随机种子，选中的回归护栏就不同，同一个补丁可能一次判过一次判挂。
+    所以这一段纳入 `content_hash`，不记的话"同一个数据集版本"给不出同样的判定。
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    #: full = 全量通过用例都当 P2P（套件 ≤ 3 分钟时）；
+    #: module_and_random = 同模块用例 ∪ 固定种子随机抽样。
+    strategy: Literal["full", "module_and_random"]
+    #: 随机抽样用的种子。`full` 策略没有随机性，必须为 null。
+    seed: int | None = None
+    #: 候选池大小 —— 抽样之前一共有多少条通过的用例。
+    total_pool: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def _check_seed_matches_strategy(self) -> Self:
+        """种子和策略要对得上。
+
+        `module_and_random` 缺种子是个真问题：没有种子就复现不出当初选了哪 200 条，
+        题目也就不可复现了 —— 而这正是记录这一段的全部意义。
+        """
+        if self.strategy == "module_and_random" and self.seed is None:
+            raise ValueError(
+                "strategy=module_and_random 必须给 seed，否则抽出来的 P2P 名单无法复现（§7.7）"
+            )
+        if self.strategy == "full" and self.seed is not None:
+            raise ValueError(f"strategy=full 没有随机性，不该有 seed：{self.seed}")
+        return self
+
+
 class TaskValidation(BaseModel):
     """题目验证的结论与证据（§7.3 八步流水线跑完写进来）。
 
@@ -112,6 +147,8 @@ class TaskDefinition(BaseModel):
     test_patch_paths: list[str] = Field(default_factory=list)
     fail_to_pass: list[str]
     pass_to_pass: list[str] = Field(default_factory=list)
+    #: P2P 是怎么抽出来的（§7.7）。全量套件小的时候可以不抽样，所以允许为 null。
+    p2p_sampling: P2PSampling | None = None
 
     # ── 参考解 ──
     #: 仅含非测试文件的 diff，**永不下发给被测 AI**（协议 C-44）。
@@ -187,6 +224,28 @@ class TaskDefinition(BaseModel):
             raise ValueError(
                 f"同一个用例不能既在 fail_to_pass 又在 pass_to_pass 里："
                 f"{overlap[:5]}（共 {len(overlap)} 条）"
+            )
+        self._check_p2p_sampling()
+
+    def _check_p2p_sampling(self) -> None:
+        """抽样记录要和实际的 P2P 名单对得上（§7.7）。
+
+        对不上说明这份记录是手写的或者过期的 —— 而它是"这批 P2P 怎么来的"的唯一凭据，
+        错了的话没人能复现当初的抽样。
+        """
+        sampling = self.p2p_sampling
+        if sampling is None:
+            return
+        selected = len(self.pass_to_pass)
+        if selected > sampling.total_pool:
+            raise ValueError(
+                f"pass_to_pass 有 {selected} 条，比候选池 total_pool={sampling.total_pool} 还多，"
+                f"抽样记录对不上（§7.7）"
+            )
+        if sampling.strategy == "full" and selected != sampling.total_pool:
+            raise ValueError(
+                f"strategy=full 表示候选池里的用例全都是 P2P，但 pass_to_pass 只有 {selected} 条，"
+                f"候选池有 {sampling.total_pool} 条（§7.7）"
             )
 
     def _check_patches(self) -> None:
@@ -302,6 +361,7 @@ __all__ = [
     "FULL_SHA_PATTERN",
     "MIN_ISSUE_BODY_CHARS",
     "TASK_ID_PATTERN",
+    "P2PSampling",
     "TaskDefinition",
     "TaskValidation",
 ]

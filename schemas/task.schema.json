@@ -10,6 +10,43 @@
       "title": "IssueLanguage",
       "type": "string"
     },
+    "P2PSampling": {
+      "additionalProperties": false,
+      "description": "P2P 用例是怎么选出来的（§7.7）。\n\n全量套件跑一遍很贵（可能几千条用例），所以 P2P 不一定是\"全部通过的用例\"。\n抽样规则必须记下来，因为**抽样参数决定 P2P 名单，而 P2P 名单直接决定判定结论**：\n同一道题换一个随机种子，选中的回归护栏就不同，同一个补丁可能一次判过一次判挂。\n所以这一段纳入 `content_hash`，不记的话\"同一个数据集版本\"给不出同样的判定。",
+      "properties": {
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "strategy": {
+          "enum": [
+            "full",
+            "module_and_random"
+          ],
+          "title": "Strategy",
+          "type": "string"
+        },
+        "total_pool": {
+          "minimum": 0,
+          "title": "Total Pool",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "strategy",
+        "total_pool"
+      ],
+      "title": "P2PSampling",
+      "type": "object"
+    },
     "TaskDifficulty": {
       "description": "题目难度。由 gold_patch 改动行数、改动文件数、F2P 用例数三个客观量派生，不靠拍脑袋。\n\n取值用小写，与任务 JSON（`docs/plan/03-benchmark-spec.md` §7.1）保持一致。",
       "enum": [
@@ -201,6 +238,17 @@
       "default": "python",
       "title": "Language",
       "type": "string"
+    },
+    "p2p_sampling": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/P2PSampling"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "pass_to_pass": {
       "items": {

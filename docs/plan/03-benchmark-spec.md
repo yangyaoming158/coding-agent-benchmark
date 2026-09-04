@@ -38,6 +38,12 @@
                                                  // 【禁止下发给被测 AI】详见协议 C-74 ~ C-76
   "fail_to_pass": ["tests/test_adapter.py::test_reconnect_no_duplicate_handler"],
   "pass_to_pass": ["tests/test_adapter.py::test_basic_register", "..."],   // 上限见 §7.7
+  "p2p_sampling": {                              // P2P 是怎么选出来的，见 §7.7
+    "strategy": "module_and_random",             // full | module_and_random
+    "seed": 20260903,                            // full 策略下为 null
+    "total_pool": 1840                           // 候选池里一共有多少条通过的用例
+  },                                             // 纳入 content_hash（抽样参数决定 P2P 名单，
+                                                 // 而 P2P 名单直接决定判定结论）
 
   // ---- 参考解 ----
   "gold_patch": "diff --git a/nonebot/... ",     // 仅含非测试文件的 diff，永不下发给 Agent
@@ -192,7 +198,7 @@ DISCOVERED → CANDIDATE → VALIDATING → ┬→ VALID ──→ PUBLISHED（�
 ## 7.7 P2P 规模控制
 全量 P2P 可能有数千条，跑一遍很贵。策略：
 - 若全量套件 ≤ 3 分钟 → P2P = 全量通过用例；
-- 否则 P2P = **与 gold_patch 改动文件同模块的用例** ∪ **随机抽样 200 条**（固定种子），并在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`；
+- 否则 P2P = **与 gold_patch 改动文件同模块的用例** ∪ **随机抽样 200 条**（固定种子），并在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`（字段定义见 §7.1，2026-09-04 补入，issue #60）；
 - 运行期用"只跑 F2P ∪ P2P 子集"的命令，显著缩短测试时长（对 MET-02 关键）。
 
 ## 7.8 难度分级
@@ -205,7 +211,7 @@ DISCOVERED → CANDIDATE → VALIDATING → ┬→ VALID ──→ PUBLISHED（�
 > **本节是追加的实现记录，没有改动 §7.1 ~ §7.8 的任何一条。**
 > 下面三处不一致需要走 §9 的变更流程定夺，在那之前代码按"当前写法"运行。
 
-`TaskDefinition`（`backend/app/benchmark/schema.py`）已按 §7.1 逐字段落地，
+`TaskDefinition`（`backend/app/benchmark/schema.py`）已按 §7.1 逐字段落地（含 2026-09-04 补入的 `p2p_sampling`），
 JSON Schema 导出在 `schemas/task.schema.json`（生成物，`make schema` 重出，
 CI 有漂移检查）。
 
@@ -228,13 +234,38 @@ CI 有漂移检查）。
 规范化留在数据里看得见。将来加一个顺序有意义的列表字段时，
 哈希不会悄悄把顺序抹平。
 
-### 三处待决的不一致
+### 三处不一致（2026-09-04 已全部处理，issue #60）
 
-| # | 现象 | 当前写法 |
+| # | 现象 | 结论 |
 |:--|:---|:---|
-| 1 | §7.1 的 `content_hash` 是 `"sha256:..."`（71 字符），迁移 0001 的 `benchmark_tasks.content_hash` 是 `CHAR(64)` | JSON 带前缀、数据库存裸十六进制，转换收在 `hashing.to_bare_hex()` 一个地方 |
-| 2 | §7.1 有 `sandbox_pids_limit`，`benchmark_tasks` 没有对应列（只有 `sandbox_cpu`、`sandbox_memory_mb`） | 模型保留该字段（冻结件为准），入库时落在 `raw_definition` JSONB 里 |
-| 3 | §7.7 说"在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`"，但 §7.1 的字段表里没有这个字段 | 模型**未**加该字段（`extra="forbid"`，多字段会被拒收）。E1-T3 做 P2P 抽样时需要先定夺 |
+| 1 | §7.1 的 `content_hash` 是 `"sha256:..."`（71 字符），迁移 0001 的 `benchmark_tasks.content_hash` 是 `CHAR(64)` | **两份文档都不改**：JSON 带前缀、数据库存裸十六进制，转换收在 `hashing.to_bare_hex()` 一处 |
+| 2 | §7.1 有 `sandbox_pids_limit`，`benchmark_tasks` 没有对应列（只有 `sandbox_cpu`、`sandbox_memory_mb`） | **迁移 0002 补列**。三个都是起容器时要读的限额，存法不一致的话 E2-T2 得为其中一个写特例，取不到还要兜默认值 —— 而 pids 上限挡的是 fork 炸弹，兜错了防线就没了 |
+| 3 | §7.7 说"在任务中记录 `p2p_sampling: {strategy, seed, total_pool}`"，但 §7.1 的字段表里没有这个字段 | **§7.1 补入该字段**（走协议 §9 流程，见下） |
+
+#### 关于第 3 条：为什么是补字段而不是别的做法
+
+抽样参数决定 `pass_to_pass` 名单，而 P2P 名单直接决定判定结论 —— 同一道题换个随机种子，
+选中的回归护栏就不同，同一个补丁可能一次判过一次判挂。所以它必须在题目定义里、
+必须被 `content_hash` 覆盖，否则"同一个数据集版本"给不出同样的判定，NFR-02 就是空的。
+
+§7.7 本来就要求记录它，所以这更像 §7.1 落笔时漏了一个字段，不是设计变更。
+
+**`PROTOCOL_VERSION` 保持 `v1.2`，不升版本**：`p2p_sampling` 不在 `docs/evaluation-protocol.md`
+正文里（协议管的是判定语义 C-01 ~ C-79），本次改的是任务规范这个冻结件，
+按 AGENTS.md 第 4 节"先说明理由再改"的要求走，变更记录在 issue #60。
+
+`schema_version` 也保持 `"1.0"`：新字段可选（默认 `null`），不带它的老 JSON 照样解析，
+属于向后兼容的追加；§7.1 标题写的是"Task Schema（v1，冻结项）"，这仍然是 v1。
+真到了删字段或改字段语义的时候再升，那时候升才有意义。
+
+**副作用（已实测）**：加字段会让所有已有题目的 `content_hash` 变掉，因为规范 JSON 多了一个键。
+现在改的成本是零 —— 还没发布任何数据集，仓库里只有一个测试样例。
+等到数据集发布之后再改，就要重算全部题目的哈希，`benchmark_set_items` 里冻结的快照会集体失配。
+**这一条本身就是"现在改而不是以后改"的理由。**
+
+抽样记录还带两条一致性校验（`schema.py::_check_p2p_sampling`）：
+`module_and_random` 必须给 `seed`（没有种子就复现不出当初选了哪 200 条，而这正是记录它的全部意义）；
+`full` 表示候选池全都当了 P2P，数量对不上说明记录是拼的。
 
 ### 校验规则落地情况
 

@@ -137,6 +137,12 @@ class BenchmarkTask(Base):
         sa.Numeric(4, 2), nullable=False, server_default=sa.text("2.0")
     )
     sandbox_memory_mb: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=2048)
+    #: 容器内最多能有几个进程。挡 fork 炸弹用的（§7.6、沙箱负例之一）。
+    #:
+    #: 和上面两个限额并列存一个独立列，而不是塞进 `raw_definition`：三个都是起容器时
+    #: 要读的资源限额，存法不一致的话 E2-T2 得为其中一个写特例，取不到还要兜默认值 ——
+    #: 又多一处"静默用错默认值"的地方。
+    sandbox_pids_limit: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=512)
 
     validation_state: Mapped[TaskValidationState] = mapped_column(
         pg_enum(TaskValidationState), nullable=False, default=TaskValidationState.DISCOVERED
