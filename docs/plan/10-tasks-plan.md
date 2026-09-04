@@ -121,11 +121,18 @@
 
 ## E2 — Sandbox Execution Engine
 
-### E2-T1 工作区物化与防泄题
+### E2-T1 工作区物化与防泄题 ✅ 已于 2026-09-04 完成
 - **Goal**：bare mirror 管理、`git archive` 物化、历史剥离、`.gitignore` 基线
 - **Req**：NFR-02, NFR-04 · **Deps**：E0-T1 · **Modules**：`sandbox/workspace`
 - **AC**：物化后 `git log --oneline | wc -l == 1`；`git log --all` 看不到 base 之后的提交；两次物化同一 commit 的目录树哈希一致
 - **P0 · C:M · E:1d · 🐳**
+- **实际交付**（2026-09-04）：`sandbox/{git_cli,mirror,workspace}.py`。三条 AC 全部达成，
+  并且拿到了比 AC 更强的结论：**工作区的树哈希等于上游 commit 的树哈希**（内容、路径、
+  权限位一处不差），连 base 提交的 SHA 都是确定的（提交人和时间写死为常量）。
+  新增 58 个测试（合计 356 全绿），不需要 Docker，跑完 2 秒。
+  三处实现决策记在 `05-sandbox.md` §10.7：基线忽略清单写 `.git/info/exclude` 而不是
+  工作区根的 `.gitignore`；base 提交用 `git add -A --force`；物化后自查树哈希，
+  `export-ignore` 导致的静默缺文件会被当场拦下。
 
 ### E2-T2 容器执行器与资源限额
 - **Goal**：`run_in_container()`：CPU/内存/pids/超时/网络策略/env 白名单/非 root/清理

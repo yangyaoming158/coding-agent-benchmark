@@ -763,7 +763,26 @@ Layer 3b 运行期容器                      从 Layer 2/3a 起容器，挂载�
 <p><strong>与 Windows 侧 Docker Desktop 共存的约束（实测确认，务必写进部署文档）</strong></p>
 <p>本机同时装有 Docker Desktop（供其他 Windows 项目使用）。二者可以共存，但有硬性前提：</p>
 <div class="tw"><table><thead><tr><th>约束</th><th>说明</th></tr></thead><tbody><tr><td><strong>禁止对本发行版启用 Docker Desktop 的 WSL 集成</strong></td><td>集成会把其 CLI 前置进 PATH 并接管 <code>/var/run/docker.sock</code>，导致 CLI 指向另一个 daemon。症状是镜像与容器"凭空消失"、正在跑的评测整体表现为失败，排查成本极高。当前状态：<code>/mnt/wsl/docker-desktop*</code> 不存在 → 集成已关闭 ✅</td></tr><tr><td><strong>最终实验期间退出 Docker Desktop</strong></td><td>所有 WSL2 发行版共用同一个工具 VM，其内存受 <code>.wslconfig</code> 的 <code>memory</code> 统一约束。Docker Desktop 运行时会占用本应留给测试容器的额度，直接影响 <code>SANDBOX_CONCURRENCY</code> 的可用上限（关联 R07）</td></tr><tr><td><strong>端口避让</strong></td><td>compose 发布的端口需避开 Docker Desktop 侧项目常用端口</td></tr><tr><td><strong>daemon 自检</strong></td><td><code>docker info --format '{{.Name}} {{.DockerRootDir}}'</code> 应返回本机名与 <code>/var/lib/docker</code>；<code>docker context</code> 必须停留在 <code>default</code>，切勿切到残留的 <code>desktop-linux</code></td></tr></tbody></table></div>
-<p>上述四条应作为 <code>scripts/check_env.py</code> 的检查项，在每次启动 EvaluationRun 前自动校验——<strong>在长跑实验开始前失败，远好过跑到一半才发现连错了 daemon</strong>。</p></section><section class="part" data-group="判定与归因"><h2 class="sec" id="sec-11"><span class="num">11</span><span class="t">Judge Design（判定引擎：怎么判断修好了没有）</span></h2>
+<p>上述四条应作为 <code>scripts/check_env.py</code> 的检查项，在每次启动 EvaluationRun 前自动校验——<strong>在长跑实验开始前失败，远好过跑到一半才发现连错了 daemon</strong>。</p>
+<hr>
+<h3 id="sec-10-7"><span class="sub-num">10.7</span> 工作区物化的实现决策（E2-T1 落地回填，2026-09-04）</h3>
+<p>代码在 <code>backend/app/sandbox/{git_cli,mirror,workspace}.py</code>。§10.2 的流程图和 §7.2(1) 的四步没有变，下面是实现时才浮出来的四个问题和处理方式。</p>
+<h4 id="sec--1-基线忽略清单写-git-info-exclude-不是工作">(1) 基线忽略清单写 <code>.git/info/exclude</code>，不是工作区根的 <code>.gitignore</code></h4>
+<p>ADR-007 的风险缓解写的是"工作区内置 <code>.gitignore</code> 基线"。实现时发现不能照字面做： 仓库自己往往就有一个 <code>.gitignore</code>，我们再写一个要么覆盖它、要么和它打架， 而且那是<strong>对被跟踪文件的改动</strong>——工作区的树哈希会因此和 base 树对不上。</p>
+<p><code>.git/info/exclude</code> 是 git 专门给"仓库本地、不入库"的忽略规则准备的位置， 效果一样，且不动工作树。清单本身放在 <code>workspace.DEFAULT_WORKSPACE_IGNORE</code>。</p>
+<p><strong>挑选原则：只挡确定是机器生成的东西，宁可漏挡不可错挡。</strong> 漏挡的代价是补丁里多点噪声； 错挡的代价是 Agent 真写的源文件被悄悄丢掉、判成"没修好"，而且不报错。 所以 <code>build/</code>、<code>dist/</code> 这种"通常是产物、但也可能是仓库里真实的源码目录"不进清单， 留给 E3-T3 的补丁归一化按大小和扩展名过滤。</p>
+<h4 id="sec--2-base-提交必须-git-add-all-force-">(2) base 提交必须 <code>git add --all --force</code></h4>
+<p>不加 <code>--force</code> 的话，仓库里<strong>本来就跟踪着</strong>的文件只要命中基线清单（比如一个被跟踪的 <code>debug.log</code> 命中 <code>*.log</code>）就会被漏掉。工作区因此比 base 少一个文件，没有任何报错。 忽略规则只应该作用于物化之后新出现的文件。</p>
+<h4 id="sec--3-物化后自查树哈希-export-ignore-会被当场拦下">(3) 物化后自查树哈希，<code>export-ignore</code> 会被当场拦下</h4>
+<p>物化完对比两个值：工作区 <code>HEAD^{tree}</code> 与镜像里 <code>&lt;base_commit&gt;^{tree}</code>。 git 的树哈希覆盖每个文件的路径、权限位和内容，相等就说明一处不差。</p>
+<p>这条自查挡住的是一类很阴的失败：仓库的 <code>.gitattributes</code> 里如果写了 <code>tests/ export-ignore</code>，<code>git archive</code> 会<strong>静默跳过</strong>这些路径。工作区少了 <code>tests/</code>， 一路跑到测试阶段才报"找不到用例"，排查方向全在测试执行器上。现在它在物化这一步就 失败，错误消息直接点名缺了哪些文件、以及 <code>export-ignore</code> 这个原因。</p>
+<p>带子模块的仓库同样会在这里被识别出来（gitlink 条目不会出现在工作区里）。</p>
+<h4 id="sec--4-所有-git-调用屏蔽开发机的全局配置">(4) 所有 git 调用屏蔽开发机的全局配置</h4>
+<p><code>git_cli.run_git()</code> 统一把 <code>GIT_CONFIG_GLOBAL</code> / <code>GIT_CONFIG_SYSTEM</code> 指向 <code>/dev/null</code>， 并设 <code>GIT_TERMINAL_PROMPT=0</code>、<code>TZ=UTC</code>、<code>LC_ALL=C.UTF-8</code>。</p>
+<p>理由是可复现（NFR-02）：开发机上一句 <code>core.autocrlf=true</code> 就会让 <code>git add</code> 改写换行符， 同一个 commit 在两台机器上物化出不同的树哈希；<code>commit.gpgsign=true</code> 更直接， 签名失败则物化整个报错。<code>GIT_TERMINAL_PROMPT=0</code> 则是防止无人值守时 git 停下来问密码。</p>
+<p><strong>只覆盖这几个变量，不清空环境</strong>：<code>HTTP_PROXY</code>/<code>HTTPS_PROXY</code> 要原样传下去， 这台机器上 git 出网靠它们。副作用是 <code>~/.gitconfig</code> 里的 <code>http.proxy</code> 不再生效， 需要改用环境变量——<code>scripts/check_env.py</code> 会检查 git ≥ 2.32（<code>GIT_CONFIG_GLOBAL</code> 的最低版本）。</p>
+<h4 id="sec-顺带确定下来的两件事">顺带确定下来的两件事</h4>
+<ul><li><strong>base 提交的 SHA 是确定的</strong>：提交人和作者/提交时间都写死成常量，<div class="cont">于是"两次物化结果一致"从"目录树相同"升级成"整个 <code>.git</code> 都相同"。</div></li><li><strong>工作区里预置了 git 身份</strong>（写在 <code>.git/config</code>）：有些 Agent 干完活会自己<div class="cont"><code>git commit</code>，没有身份会撞上 "Please tell me who you are" 白烧轮次。</div><div class="cont">代价是 E3-T3 抓改动时<strong>必须用 <code>git diff &lt;base_sha&gt;</code></strong>，不能用裸的 <code>git diff</code>——</div><div class="cont">Agent 提交过之后裸 diff 是空的。<code>Workspace.base_sha</code> 就是给这一步用的。</div></li></ul></section><section class="part" data-group="判定与归因"><h2 class="sec" id="sec-11"><span class="num">11</span><span class="t">Judge Design（判定引擎：怎么判断修好了没有）</span></h2>
 <h3 id="sec-11-1"><span class="sub-num">11.1</span> 第一条原则</h3>
 <blockquote><p><strong>判定必须完全确定，不能有随机性。禁止用大模型判断 bug 修没修好。</strong>
 大模型<strong>只能</strong>用在下一章"分析它为什么没修好"，而且它的输出不允许回写判定结果。</p></blockquote>
@@ -1310,8 +1329,8 @@ runs/{run_id}/report.html</code></pre></div>
 <ul><li><strong>Goal</strong>：官方数据集字段映射 + 官方镜像复用 + 固定种子分层抽样</li><li><strong>Req</strong>：MET-01 · <strong>Deps</strong>：E1-T1, E2-T2</li><li><strong>AC</strong>：导入 50 题，Oracle 解决率 = 100%（证明我们的 harness 对官方任务判定正确）</li><li><strong>P1 · C:L · E:2d · 🌐🐳</strong></li></ul>
 <hr>
 <h3 id="sec-e2-sandbox-execution-engine">E2 — Sandbox Execution Engine</h3>
-<h4 id="sec-e2-t1-工作区物化与防泄题">E2-T1 工作区物化与防泄题</h4>
-<ul><li><strong>Goal</strong>：bare mirror 管理、<code>git archive</code> 物化、历史剥离、<code>.gitignore</code> 基线</li><li><strong>Req</strong>：NFR-02, NFR-04 · <strong>Deps</strong>：E0-T1 · <strong>Modules</strong>：<code>sandbox/workspace</code></li><li><strong>AC</strong>：物化后 <code>git log --oneline | wc -l == 1</code>；<code>git log --all</code> 看不到 base 之后的提交；两次物化同一 commit 的目录树哈希一致</li><li><strong>P0 · C:M · E:1d · 🐳</strong></li></ul>
+<h4 id="sec-e2-t1-工作区物化与防泄题-已于-2026-09-04-完成">E2-T1 工作区物化与防泄题 ✅ 已于 2026-09-04 完成</h4>
+<ul><li><strong>Goal</strong>：bare mirror 管理、<code>git archive</code> 物化、历史剥离、<code>.gitignore</code> 基线</li><li><strong>Req</strong>：NFR-02, NFR-04 · <strong>Deps</strong>：E0-T1 · <strong>Modules</strong>：<code>sandbox/workspace</code></li><li><strong>AC</strong>：物化后 <code>git log --oneline | wc -l == 1</code>；<code>git log --all</code> 看不到 base 之后的提交；两次物化同一 commit 的目录树哈希一致</li><li><strong>P0 · C:M · E:1d · 🐳</strong></li><li><strong>实际交付</strong>（2026-09-04）：<code>sandbox/{git_cli,mirror,workspace}.py</code>。三条 AC 全部达成，<div class="cont">并且拿到了比 AC 更强的结论：<strong>工作区的树哈希等于上游 commit 的树哈希</strong>（内容、路径、</div><div class="cont">权限位一处不差），连 base 提交的 SHA 都是确定的（提交人和时间写死为常量）。</div><div class="cont">新增 58 个测试（合计 356 全绿），不需要 Docker，跑完 2 秒。</div><div class="cont">三处实现决策记在 <code>05-sandbox.md</code> §10.7：基线忽略清单写 <code>.git/info/exclude</code> 而不是</div><div class="cont">工作区根的 <code>.gitignore</code>；base 提交用 <code>git add -A --force</code>；物化后自查树哈希，</div><div class="cont"><code>export-ignore</code> 导致的静默缺文件会被当场拦下。</div></li></ul>
 <h4 id="sec-e2-t2-容器执行器与资源限额">E2-T2 容器执行器与资源限额</h4>
 <ul><li><strong>Goal</strong>：<code>run_in_container()</code>：CPU/内存/pids/超时/网络策略/env 白名单/非 root/清理</li><li><strong>Req</strong>：FR-05, FR-06, FR-07, NFR-03 · <strong>Deps</strong>：E0-T1</li><li><strong>AC</strong>：四条负例测试全过 —— ① 内存炸弹 → OOM_KILLED（<strong>判据用 <code>docker inspect .State.OOMKilled</code>，不能用 exit 137——超时强杀的退出码同样是 137</strong>）；② fork 炸弹 → 被 pids 限制拒绝；③ 死循环 → 按时被杀且无残留容器；④ <code>--network none</code> 下连接失败</li><li><strong>前置风险已消除</strong>：四条负例已于 2026-09-01 在本机手工验证全部通过（见 §10.3 实测结论），本任务只需将其固化为 pytest 用例并封装 API，<strong>不再有环境可行性风险</strong></li><li><strong>P0 · C:L · E:2d · 🐳</strong></li></ul>
 <h4 id="sec-e2-t3-镜像分层与构建器">E2-T3 镜像分层与构建器</h4>

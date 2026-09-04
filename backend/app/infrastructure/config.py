@@ -92,6 +92,16 @@ class Settings(BaseSettings):
     minio_secret_key: SecretStr | None = None
     minio_bucket: str = "bench-artifacts"
 
+    # ── 沙箱工作区（E2-T1）──
+    #: Git bare mirror 的存放根目录。评测不在运行时 clone GitHub，
+    #: 每个仓库在这里留一份镜像，物化工作区时从它 `git archive`（§7.2(1)）。
+    #: 和 `artifact_local_root` 一样，相对路径按**仓库根目录**解析。
+    mirror_root: Path = Path("var/mirrors")
+    #: 每次评测物化出来的代码工作区放这里。目录数随运行次数线性增长，已在 .gitignore 里排除。
+    workspace_root: Path = Path("var/workspaces")
+    #: 单条 git 命令的超时（秒）。最坏情况是第一次 clone 一个大仓库，还要过代理。
+    git_timeout_s: int = Field(default=1800, ge=1)
+
     # ── 并发（含义见 docs/plan/01-requirements.md §4.6）──
     #: 同时有几个被测 AI 在干活，受服务商限流约束。
     agent_concurrency: int = Field(default=10, ge=1)
@@ -153,7 +163,7 @@ class Settings(BaseSettings):
         """
         return value.upper() if isinstance(value, str) else value
 
-    @field_validator("artifact_local_root")
+    @field_validator("artifact_local_root", "mirror_root", "workspace_root")
     @classmethod
     def _resolve_root(cls, value: Path) -> Path:
         """相对路径按仓库根目录解析。
