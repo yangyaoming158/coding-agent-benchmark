@@ -191,12 +191,54 @@
   和 `07-platform-architecture.md` §14.2 的"Runner 用 Sandbox"直接冲突，
   真实适配器一调 `run_in_container` 就会红。新增 87 个测试（合计 500 全绿）。
 
-### E3-T2 Mock / Oracle / Noop Runner
+### E3-T2 Mock / Oracle / Noop Runner ✅ 已于 2026-09-05 完成
 - **Goal**：可编程行为的假 Agent（正确补丁 / 错误补丁 / 空补丁 / 超时 / 非法补丁 / 改受保护文件）
 - **Req**：NFR-01（可测性） · **Deps**：E3-T1
 - **AC**：6 种行为可通过配置精确触发；Oracle 在 Golden 集上 100%，Noop 0%
 - **Why**：**让整条评测链在完全不依赖外部 Agent 的情况下可测**
 - **P0 · C:S · E:0.5d**
+- **实际交付**（2026-09-05）：`app/runner/adapters/` 三个适配器 —— `OracleRunner`
+  （交官方补丁）、`NoopRunner`（交空补丁）、`MockRunner`（六种行为）。**都不碰工作区**，
+  直接在结果里交补丁字符串；真实适配器走"改文件 → git diff"那条路，两条路最后都汇到
+  `AgentRunResult.patch`。
+  官方补丁**由外部注入**（构造时喂 `task_id → gold_patch`），不自己去读题库：
+  `app.runner` 在分层里压在 `app.benchmark` 下面，import 不到 `TaskDefinition`；
+  而且编排层已经把题读出来了，再读一遍就是两份数据源。
+  Mock 的六种行为通过构造参数或 `MockRunner.from_params()`（读
+  `agent_configs.params` 那个 JSON）触发，还支持 `per_task` 逐题覆盖 —— 一次实验里
+  凑"有的解决、有的超时"的混合结果要靠它。行为名拼错当场抛错，不静默退回默认值：
+  静默退回的话一个写成 `timout` 的配置会让整批实验安静地跑成"正确补丁"。
+  几条实测确认的结论：
+  **① 假补丁一律造成"新建文件"的 diff**，因为它不引用仓库里任何一行现有内容，
+  在任何工作区上都能干净地 `git apply`；造成"修改已有文件"就得为每道题挑真实文件、
+  抄真实上下文。
+  **② `malformed_patch` 用"hunk 头行数写错"来保证打不上**（`git apply` 报
+  `corrupt patch at line 7`），这同样只取决于补丁自己。它必须仍是解析得出路径的 diff ——
+  协议第 109 行把 `INVALID_PATCH` 定义成"补丁非空但打不上去"，拿一段自然语言冒充
+  走的是别的判定分支。
+  **③ 成本报 `reported` + `0.0` 而不是 `unavailable`**：哨兵不调模型，成本确实是 0，
+  这是"报得出来的 0"。协议纪律 3 里"不要填 0"针对的是**拿不到**成本的情况。
+  **④ Oracle 不看 deadline**，输出只由 task_id 决定 —— 让它随时钟变化的话，
+  编排层哪天算错一次 deadline，"假阴性探针"就跟着失灵，而查的人会去翻判定引擎。
+  验收证据：契约套件八个类全过（Oracle、Noop、Mock 六种行为各一个类 —— 契约第 2 条
+  要求 `has_patch` 和 `produces_patch` 严格对上，合成一个类的话只能验一种行为）；
+  `tests/sandbox/test_sentinel_golden.py` 真的物化工作区、真的打补丁、真的起 pytest，
+  Oracle 在四道 Golden 题上 4/4 解决、Noop 0/4，六种行为的落点逐一验过。
+  顺带把 `cli/golden.py` 的 `_apply_patch` / `_patch_applies` / `_run_pytest` 改成公开名 ——
+  `run_pytest` 里那套确定性环境变量（`PYTHONHASHSEED` 等）各处自己抄一份的话，
+  哪天漏了一个，同一个补丁两次判定可能得到不同结果。新增 92 条测试（合计 609，其中 16 条需 Docker、35 条需数据库）。
+- **顺带把 `04-runner-protocol.md` §9.3 和实现对齐了**（2026-09-05，讨论后进行）。
+  §9.2 的报文格式没动 —— 那才是 AGENTS.md §4.3 冻的东西；改的三处都在 §9.3
+  描述适配器长什么样的散文里：
+  ① 实现类清单里的 `MockAgentRunner` 改成 `MockRunner`，和 `cli/seed.py` 写进
+  `agents.adapter_class` 的那份对上（数据库里的真值）；`01-requirements.md` P0-06
+  同一个词一起改。
+  ② 契约第 4 条原文是"改了 protected_path 时该改动被剔除"，**没说谁剔除** ——
+  照字面写新适配器就会让它自己过滤，而那正是这一条要抓的 bug（过滤掉之后
+  `protected_path_edit_attempted` 没证据了，协议 C-08b）。改成"留在原始补丁里，
+  剔除由平台做"。
+  ③ `AgentRunner` 草图里还挂着 `build_image`，拆成 `ImageBuildingRunner`（E3-T1 的
+  改动，E3-T2 证实了 Mock/Oracle/Noop 三个都不需要镜像）。
 
 ### E3-T3 Patch 捕获与归一化
 - **Goal**：`git diff` → 剔除受保护路径/噪声文件 → 统计 → NormalizedPatch

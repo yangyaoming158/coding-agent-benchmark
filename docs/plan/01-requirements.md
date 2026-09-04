@@ -334,7 +334,7 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 | P0-03 | Environment / 镜像三层构建 | base → repo-env → task container |
 | P0-04 | Docker Sandbox 执行器（CPU/mem/pids/timeout/network） | |
 | P0-05 | AgentRunner 抽象 + stdin/stdout JSON 契约 | |
-| P0-06 | MockAgentRunner（可产出：正确补丁/错误补丁/空补丁/超时/非法补丁） | |
+| P0-06 | MockRunner（可产出：正确补丁/错误补丁/空补丁/超时/非法补丁） | |
 | P0-07 | Patch 捕获与归一化（`git diff` + 剔除测试路径） | |
 | P0-08 | Test Runner + JUnit-XML/日志双通道解析 | 逐用例状态 |
 | P0-09 | Judge（F2P/P2P 确定性判定） | |

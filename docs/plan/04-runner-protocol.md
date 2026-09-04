@@ -90,15 +90,30 @@ harness ──stdin(JSON: AgentTaskInput)──▶ [Adapter 进程] ──stdout
 ```python
 class AgentRunner(Protocol):
     name: str
-    def probe(self) -> ProbeResult: ...                 # 检查 CLI 存在、鉴权可用、版本号
-    def build_image(self, env: EnvironmentSpec) -> str: # 产出含该 Agent 的镜像 tag
+
+    def probe(self) -> ProbeResult: ...  # 检查 CLI 存在、鉴权可用、版本号
     def run(self, task: AgentTaskInput, ws: Workspace, cfg: AgentConfig) -> AgentRunResult: ...
+
+
+# 需要自带镜像层的适配器才实现这一个（Aider 要 pip 装、Claude Code 要 npm 装）。
+# Mock / Oracle / Noop 不需要镜像，拆开是为了不让它们背一个只会 raise 的死方法 ——
+# 那种方法契约测试永远测不到。
+class ImageBuildingRunner(AgentRunner, Protocol):
+    def build_image(self, environment_id: str, base_image: str) -> str: ...
 ```
 
-实现类：`MockAgentRunner`、`OracleRunner`(直接返回 gold patch，用于验证 harness 无假阴性)、`NoopRunner`(返回空补丁，解决率下界)、`AiderRunner`、`ClaudeCodeRunner`、`QwenCodeRunner`、`MiniAgentRunner`(自研)、`CodexRunner`(P2)。
+实现类：`MockRunner`、`OracleRunner`(直接返回 gold patch，用于验证 harness 无假阴性)、`NoopRunner`(返回空补丁，解决率下界)、`AiderRunner`、`ClaudeCodeRunner`、`QwenCodeRunner`、`MiniAgentRunner`(自研)、`CodexRunner`(P2)。
 
 **适配器契约测试套件**（每个适配器必须通过，用最便宜的模型跑）：
-1. probe 成功；2. 在 golden task 上产出非空 patch；3. 触发 deadline 时优雅返回（不留孤儿进程）；4. 改了 protected_path 时该改动被剔除；5. token/cost 字段格式正确或明确 unavailable；6. stdout 含大量噪声时结果仍能解析。
+1. probe 成功；2. 在 golden task 上产出非空 patch；3. 触发 deadline 时优雅返回（不留孤儿进程）；4. 改了 protected_path 时该改动**留在原始补丁里**（剔除由平台做，见协议 C-08b）；5. token/cost 字段格式正确或明确 unavailable；6. stdout 含大量噪声时结果仍能解析。
+
+> **2026-09-05 按实现回填**（E3-T1 / E3-T2）：本节的类名、`AgentRunner` 的形状、
+> 契约第 4 条的方向，已对齐 `backend/app/runner/protocol.py` 和
+> `backend/app/runner/adapters/`。第 4 条那句原来只写"被剔除"、没说谁剔除，照字面写
+> 新适配器会让它自己过滤，而那正是这一条要抓的 bug —— 过滤掉之后
+> `protected_path_edit_attempted` 就没有证据了。
+> **§9.2 的报文格式（stdin 一行 JSON 任务 / stdout 最后一行 JSON 结果 / 结果里带
+> unified diff）没有任何改动。**
 
 ## 9.4 真实 Agent 选型与顺序（关键决策）
 

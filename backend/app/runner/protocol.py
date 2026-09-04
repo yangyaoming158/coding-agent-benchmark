@@ -414,8 +414,9 @@ class AgentConfig:
 class AgentRunner(Protocol):
     """一个被测 AI 的适配器（§9.3）。
 
-    实现类：`MockAgentRunner` / `OracleRunner` / `NoopRunner`（E3-T2）、
-    `AiderRunner` / `ClaudeCodeRunner` / `MiniAgentRunner`（Week 2–3）。
+    实现类：`MockRunner` / `OracleRunner` / `NoopRunner`（E3-T2，在
+    `app.runner.adapters` 里）、`AiderRunner` / `ClaudeCodeRunner` /
+    `MiniAgentRunner`（Week 2–3）。
 
     每个实现都必须跑通契约测试套件（`tests/contract/runner_contract.py` 的
     `AgentRunnerContract`），一共六条。
