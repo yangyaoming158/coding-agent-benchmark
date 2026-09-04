@@ -1,0 +1,224 @@
+{
+  "$defs": {
+    "AgentError": {
+      "additionalProperties": false,
+      "description": "适配器报上来的错误。`code` 给机器看，`message` 给人看。",
+      "properties": {
+        "code": {
+          "minLength": 1,
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "default": "",
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code"
+      ],
+      "title": "AgentError",
+      "type": "object"
+    },
+    "CostSource": {
+      "description": "费用数字是怎么来的。\n\nunavailable 在订阅制 CLI 上很常见（它不报 token 用量），\n这时平台按 token_usage × 配置单价估算并标成 estimated，报告里必须区分显示。",
+      "enum": [
+        "reported",
+        "estimated",
+        "unavailable"
+      ],
+      "title": "CostSource",
+      "type": "string"
+    },
+    "TokenUsage": {
+      "additionalProperties": false,
+      "description": "token 用量。拿不到就整个字段传 null，不要填 0 —— 0 和\"不知道\"是两回事，\n填 0 会让成本统计悄悄偏低。",
+      "properties": {
+        "cache_read": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Cache Read",
+          "type": "integer"
+        },
+        "input": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Input",
+          "type": "integer"
+        },
+        "output": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Output",
+          "type": "integer"
+        },
+        "total": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Total",
+          "type": "integer"
+        }
+      },
+      "title": "TokenUsage",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "适配器 stdout 最后一行的那个 JSON（§9.2）。\n\n**这里没有 `resolved` 字段，也不许加**（协议纪律 2）。判定必须 100% 由测试结果\n推导，让适配器报\"我修好了\"等于把判定权交给被测方。`extra=\"forbid\"` 会让多写的\n字段直接报错。",
+  "properties": {
+    "agent_name": {
+      "minLength": 1,
+      "title": "Agent Name",
+      "type": "string"
+    },
+    "agent_version": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Agent Version"
+    },
+    "cost_source": {
+      "$ref": "#/$defs/CostSource",
+      "default": "unavailable"
+    },
+    "cost_usd": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Cost Usd"
+    },
+    "duration_ms": {
+      "minimum": 0,
+      "title": "Duration Ms",
+      "type": "integer"
+    },
+    "error": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AgentError"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "exit_code": {
+      "default": 0,
+      "title": "Exit Code",
+      "type": "integer"
+    },
+    "finished_at": {
+      "format": "date-time",
+      "title": "Finished At",
+      "type": "string"
+    },
+    "model": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Model"
+    },
+    "patch": {
+      "default": "",
+      "title": "Patch",
+      "type": "string"
+    },
+    "patch_source": {
+      "default": "git_diff",
+      "enum": [
+        "git_diff",
+        "agent_stdout"
+      ],
+      "title": "Patch Source",
+      "type": "string"
+    },
+    "protocol_version": {
+      "const": "1.0",
+      "default": "1.0",
+      "title": "Protocol Version",
+      "type": "string"
+    },
+    "raw_stderr_bytes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Raw Stderr Bytes",
+      "type": "integer"
+    },
+    "raw_stdout_bytes": {
+      "default": 0,
+      "minimum": 0,
+      "title": "Raw Stdout Bytes",
+      "type": "integer"
+    },
+    "started_at": {
+      "format": "date-time",
+      "title": "Started At",
+      "type": "string"
+    },
+    "token_usage": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TokenUsage"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "trajectory_uri": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Trajectory Uri"
+    },
+    "turns": {
+      "anyOf": [
+        {
+          "minimum": 0,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Turns"
+    }
+  },
+  "required": [
+    "agent_name",
+    "started_at",
+    "finished_at",
+    "duration_ms"
+  ],
+  "title": "AgentRunResult",
+  "type": "object"
+}

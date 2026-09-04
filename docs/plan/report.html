@@ -984,7 +984,11 @@ evaluation_task_runs 1─n test_results / 1─n patch_artifacts / 1─1 failure_
   storage/          ArtifactStore 抽象与实现
   infrastructure/   DB、队列、配置、日志、指标
   worker/           Worker 进程入口与 job handler</code></pre></div>
-<p><strong>依赖方向（写进 CI 的 import-linter 规则）</strong>： <code>api → evaluation/benchmark/report → runner/sandbox/judge/attribution → storage/infrastructure → domain</code> <code>domain</code> 不依赖任何模块；<code>sandbox</code> 不依赖 <code>runner</code>（Runner 用 Sandbox，反之不行）。</p>
+<p><strong>依赖方向（写进 CI 的 import-linter 规则）</strong>： <code>api → evaluation/benchmark/report → runner → sandbox/judge/attribution → storage/infrastructure → domain</code> <code>domain</code> 不依赖任何模块；<code>sandbox</code> 不依赖 <code>runner</code>（Runner 用 Sandbox，反之不行）。</p>
+<blockquote><p><strong>2026-09-04 修正（E3-T1）</strong>：<code>runner</code> 原先和 <code>sandbox/judge/attribution</code> 并排写在同一层。
+import-linter 里同层并排的含义是<strong>互不可见</strong>，于是"Runner 用 Sandbox"这句话在配置里
+反而是被禁止的——真实适配器一调 <code>run_in_container</code> 起容器就会让 CI 红。
+现在把 <code>runner</code> 单独提一层压在 <code>sandbox</code> 上面，两条规则才一致。</p></blockquote>
 <h3 id="sec-14-3"><span class="sub-num">14.3</span> 核心接口（签名级设计）</h3>
 <div class="cw"><pre class="code" data-lang="python"><code># benchmark
 def validate_task(task: TaskDefinition, *, sandbox: Sandbox) -&gt; ValidationReport
@@ -1380,8 +1384,8 @@ runs/{run_id}/report.html</code></pre></div>
 <ul><li><strong>Goal</strong>：Agent 阶段只放行 LLM API 域名，禁止 github.com</li><li><strong>Req</strong>：FR-07, NFR-04 · <strong>Deps</strong>：E2-T2</li><li><strong>AC</strong>：容器内 <code>curl https://github.com</code> 失败、<code>curl &lt;LLM API&gt;</code> 成功</li><li><strong>Risk</strong>：中（HTTPS 代理配置）→ 降级方案见 §10.5</li><li><strong>P1 · C:M · E:1d · 🐳</strong></li></ul>
 <hr>
 <h3 id="sec-e3-agent-runner-framework">E3 — Agent Runner Framework</h3>
-<h4 id="sec-e3-t1-runner-协议与契约测试套件">E3-T1 Runner 协议与契约测试套件</h4>
-<ul><li><strong>Goal</strong>：<code>AgentRunner</code> Protocol、<code>AgentTaskInput</code>/<code>AgentRunResult</code> 模型、6 条契约测试</li><li><strong>Req</strong>：FR-08, NFR-05 · <strong>Deps</strong>：E0-T3</li><li><strong>AC</strong>：契约测试可对任意适配器复用运行；协议 JSON Schema 导出</li><li><strong>P0 · C:M · E:1d</strong></li></ul>
+<h4 id="sec-e3-t1-runner-协议与契约测试套件-已于-2026-0">E3-T1 Runner 协议与契约测试套件 ✅ 已于 2026-09-04 完成</h4>
+<ul><li><strong>Goal</strong>：<code>AgentRunner</code> Protocol、<code>AgentTaskInput</code>/<code>AgentRunResult</code> 模型、6 条契约测试</li><li><strong>Req</strong>：FR-08, NFR-05 · <strong>Deps</strong>：E0-T3</li><li><strong>AC</strong>：契约测试可对任意适配器复用运行；协议 JSON Schema 导出</li><li><strong>P0 · C:M · E:1d</strong></li><li><strong>实际交付</strong>（2026-09-04）：<code>app/runner/protocol.py</code> + <code>cli/runner.py</code>，两份 JSON Schema<div class="cont">落在 <code>schemas/</code>（<code>make schema</code> 一起生成，有漂移测试盯着）。契约套件是一个给人继承的</div><div class="cont">基类 <code>tests/contract/runner_contract.py::AgentRunnerContract</code>——接新适配器只要写一个</div><div class="cont"><code>runner</code> fixture，六条自动跑。<strong>配了六个坏适配器做反向验证</strong>：没有这一半，</div><div class="cont">一个永远返回"通过"的套件也能让正向全绿。</div><div class="cont">两个和直觉相反的结论写进了代码注释：第 4 条要求适配器<strong>保留</strong>受保护路径的改动</div><div class="cont">（自己过滤掉的话，<code>protected_path_edit_attempted</code> 就没证据了，协议 C-08b），</div><div class="cont">过滤是平台在 E3-T3 做的事；<code>build_image</code> 拆成单独的 <code>ImageBuildingRunner</code>，</div><div class="cont">因为 Mock/Oracle/Noop 根本不需要镜像。</div><div class="cont">另外修了 import-linter 的分层配置：原来 runner 和 sandbox 并排写，等于"互不可见"，</div><div class="cont">和 <code>07-platform-architecture.md</code> §14.2 的"Runner 用 Sandbox"直接冲突，</div><div class="cont">真实适配器一调 <code>run_in_container</code> 就会红。新增 87 个测试（合计 500 全绿）。</div></li></ul>
 <h4 id="sec-e3-t2-mock-oracle-noop-runner">E3-T2 Mock / Oracle / Noop Runner</h4>
 <ul><li><strong>Goal</strong>：可编程行为的假 Agent（正确补丁 / 错误补丁 / 空补丁 / 超时 / 非法补丁 / 改受保护文件）</li><li><strong>Req</strong>：NFR-01（可测性） · <strong>Deps</strong>：E3-T1</li><li><strong>AC</strong>：6 种行为可通过配置精确触发；Oracle 在 Golden 集上 100%，Noop 0%</li><li><strong>Why</strong>：<strong>让整条评测链在完全不依赖外部 Agent 的情况下可测</strong></li><li><strong>P0 · C:S · E:0.5d</strong></li></ul>
 <h4 id="sec-e3-t3-patch-捕获与归一化">E3-T3 Patch 捕获与归一化</h4>

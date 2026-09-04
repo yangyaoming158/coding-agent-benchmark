@@ -105,8 +105,9 @@ env:                 ## 开发环境自检
 report:              ## 重新生成规划报告 HTML
 	python3 docs/plan/_build_report.py .
 
-schema:              ## 从 TaskDefinition 重新导出 schemas/task.schema.json
+schema:              ## 重新导出 schemas/ 下的三份 JSON Schema（题目 + Runner 协议）
 	$(UV) python -m cli.task schema
+	$(UV) python -m cli.runner schema
 
 golden:              ## 从 datasets/golden/sources/ 生成任务 JSON 和本地镜像
 	$(UV) python -m cli.golden build
