@@ -2,7 +2,7 @@
 # 用 bash 不用 sh：dev 目标要用 trap 和 kill 0 一次收掉两个子进程。
 SHELL := /bin/bash
 
-.PHONY: help install lint format type imports test test-all check env clean \
+.PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify
@@ -40,6 +40,9 @@ imports:             ## 模块边界检查（§14.2 的依赖方向）
 
 test:                ## 快速测试（不含需要 Docker 和真实大模型的）
 	$(UV) pytest -m "not docker and not agent"
+
+test-docker:         ## 只跑需要 Docker 的沙箱测试（E2-T2 的四条负例）
+	$(UV) pytest -m docker
 
 test-all:            ## 全部测试
 	$(UV) pytest

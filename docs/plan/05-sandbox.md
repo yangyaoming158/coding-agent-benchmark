@@ -212,3 +212,75 @@ git 的树哈希覆盖每个文件的路径、权限位和内容，相等就说�
   `git commit`，没有身份会撞上 "Please tell me who you are" 白烧轮次。
   代价是 E3-T3 抓改动时**必须用 `git diff <base_sha>`**，不能用裸的 `git diff`——
   Agent 提交过之后裸 diff 是空的。`Workspace.base_sha` 就是给这一步用的。
+
+---
+
+## 10.8 容器执行器的实现决策（E2-T2 落地回填，2026-09-04）
+
+代码在 `backend/app/sandbox/container.py`，对外只有一个入口 `run_in_container()`。
+§10.2 的双容器流程和 §10.3 的能力清单没有变，下面是实现时才浮出来的几个问题。
+
+### (1) OOM 与超时的判定顺序写死在一个函数里
+
+`classify_outcome()` 先看 `oom_killed` 再看 `timed_out`，顺序不能换（协议 C-19b 第 1 步）。
+
+写成函数而不是散在调用处的 `if`，是因为这两件事的退出码都是 137，判反了不会报错，
+只会让排行榜偏低：内存超限按 C-18 要降配重试一次，超时则直接判 AI 没修好。
+`test_container_spec.py::test_oom_wins_over_timeout` 用一个"两个标记同时为真"的
+结果对象把顺序钉死——容器超内存被杀时，我们的墙钟可能正好也到点，这个组合是真会出现的。
+
+非零退出码在这一层**不翻译**。它在两个阶段的含义相反：测试阶段非零退出是正常的
+（有用例失败），Agent 阶段非零退出才算故障，而"Agent 算不算跑成功"要看它 stdout
+最后一行的 JSON（Runner 协议）。放进来等于让沙箱层去猜上层的语义。
+
+### (2) 不能开 `auto_remove`
+
+`auto_remove=True` 会让容器一退出就被 daemon 删掉，而 `.State.OOMKilled` 必须在退出
+**之后**读——容器没了就读不到，OOM 会被静默当成普通的非零退出。所以删容器手工写在
+`finally` 里，并且 `_remove_quietly()` 自己不抛异常：它在 `finally` 里跑，抛出来会把
+真正的失败原因（比如"镜像不存在"）盖掉。
+
+### (3) 环境变量白名单：名字不在名单里就报错，不是悄悄丢掉
+
+`build_env()` 拼两部分：固定的确定性变量（`TZ`、`PYTHONHASHSEED` 等，协议 C-37）
+加上 `AGENT_ENV_ALLOWLIST` 里的请求项。确定性变量不在白名单里，因此调用方覆盖不了。
+
+遇到不认识的名字**抛异常**。悄悄丢掉的表现是几分钟后 Agent 报 401，
+排查时根本想不到是这一层过滤的。反方向的例子是 `GITHUB_TOKEN`：它不在白名单里，
+进去了就等于把翻原修复 PR 的钥匙交给了被测 AI。
+
+### (4) 限额验证要从容器内部读 cgroup，不能只看传参
+
+只断言"参数传给了 docker"挡不住字段名拼错或者重构时漏掉一行——容器照样跑起来，
+只是不再受限，没有任何报错。cgroup v2 下 `/sys/fs/cgroup/{memory.max,pids.max,cpu.max}`
+就是内核实际执行的值，在容器里 `cat` 出来核对，才算限额真的生效。
+
+### (5) 镜像不在本地直接报错，不自动拉
+
+`containers.create()` 不会拉镜像，缺镜像抛 `ImageNotFoundError`。评测跑到一半去拉镜像
+会打爆 6 小时预算，也让结果不可复现（ADR-008）。预建镜像是 E2-T3 的事。
+
+### 四条负例的固化结果（Docker 29.7.2 / cgroup v2 / WSL2）
+
+| 负例 | 断言 | 实测 |
+|:---|:---|:---|
+| `--memory=256m` 下反复写 10 MB 块 | `oom_killed` 为真 → `OOM_KILLED` | ✅ ExitCode=137 |
+| `--pids-limit=32` + fork 循环 | 成功 fork 次数 < 上限 | ✅ 第 31 次抛 `BlockingIOError` |
+| 忽略 SIGTERM 的死循环 + 2 秒超时 | 到点被杀、容器不残留 | ✅ 宽限期过后升级到 SIGKILL |
+| `--network none` 下连 1.1.1.1:443 | 连不出去 | ✅ `Errno 101 Network is unreachable` |
+
+全部 16 条容器用例 12 秒跑完，带 `docker` 标记，`make test-docker` 触发，CI 不跑。
+
+### 顺带撞上的两件事
+
+- **Docker Desktop 会抢 `/run/docker.sock`。** 这台机器上原生 dockerd 由 systemd 托管，
+  Docker Desktop 的 WSL 集成启动后会用同一个路径覆盖掉那个 socket，于是 `docker` 命令
+  连到的是 Desktop 的引擎（27.5.1），镜像和容器看起来"凭空消失"，而且 Desktop 用的是
+  它自己的代理，`docker pull` 直接失败。`sudo systemctl restart docker.socket docker.service`
+  能把 socket 抢回来。
+  `scripts/check_env.py` 原来靠 `DockerRootDir == /var/lib/docker` 判断"连的是不是原生
+  引擎"，**这是个假绿灯**——Desktop 的引擎报的也是这个路径。已改成看 `Labels` 里有没有
+  `com.docker.desktop.*`。
+- **`docker run` 命令行会把 `~/.docker/config.json` 里的 `proxies` 注入每个容器**，
+  Python SDK 不读那份配置。我们走 SDK，所以容器里只有 `build_env()` 拼出来的变量。
+  这是有意的：起容器不要改成调命令行，否则代理变量会绕过白名单进到测试容器里。

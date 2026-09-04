@@ -65,7 +65,8 @@ plugins = ["pydantic.mypy"]
 exclude = ["^alembic/versions/"]
 
 [[tool.mypy.overrides]]
-module = ["docker.*"]
+# docker SDK 和它依赖的 requests 都没有随包发布类型信息
+module = ["docker.*", "requests.*"]
 ignore_missing_imports = true
 
 # ── 测试 ──

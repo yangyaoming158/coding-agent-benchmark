@@ -141,12 +141,19 @@
   工作区根的 `.gitignore`；base 提交用 `git add -A --force`；物化后自查树哈希，
   `export-ignore` 导致的静默缺文件会被当场拦下。
 
-### E2-T2 容器执行器与资源限额
+### E2-T2 容器执行器与资源限额 ✅ 已于 2026-09-04 完成
 - **Goal**：`run_in_container()`：CPU/内存/pids/超时/网络策略/env 白名单/非 root/清理
 - **Req**：FR-05, FR-06, FR-07, NFR-03 · **Deps**：E0-T1
 - **AC**：四条负例测试全过 —— ① 内存炸弹 → OOM_KILLED（**判据用 `docker inspect .State.OOMKilled`，不能用 exit 137——超时强杀的退出码同样是 137**）；② fork 炸弹 → 被 pids 限制拒绝；③ 死循环 → 按时被杀且无残留容器；④ `--network none` 下连接失败
 - **前置风险已消除**：四条负例已于 2026-09-01 在本机手工验证全部通过（见 §10.3 实测结论），本任务只需将其固化为 pytest 用例并封装 API，**不再有环境可行性风险**
 - **P0 · C:L · E:2d · 🐳**
+- **实际交付**（2026-09-04）：`sandbox/container.py`，单一入口 `run_in_container()`。
+  四条负例全部固化成 pytest（`tests/sandbox/test_container.py`，带 `docker` 标记，
+  `make test-docker` 跑，16 条 12 秒）。除 AC 之外还钉死了三件事：**限额从容器内部读
+  cgroup 文件核对**（只验"参数传出去了"挡不住字段名拼错）；**宿主机环境变量不进容器**
+  （含 `GITHUB_TOKEN`，进去了就等于把翻原 PR 的钥匙给了被测 AI）；**镜像不在本地直接
+  报错不自动拉**（ADR-008）。不需要 Docker 的那一半（白名单、结果分类、日志截断）
+  另有 37 条纯函数测试进 `make test`。实现决策记在 `05-sandbox.md` §10.8。
 
 ### E2-T3 镜像分层与构建器
 - **Goal**：`bench-base` / `bench-env:{environment_id}` / `bench-agent:{env}-{agent}` 三层；digest 记录；`bench images build/gc`
