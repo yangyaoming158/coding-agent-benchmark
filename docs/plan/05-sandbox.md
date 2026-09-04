@@ -151,3 +151,64 @@ Agent 阶段需要访问 LLM API，但**绝不能**访问 github.com（会搜到
 | **daemon 自检** | `docker info --format '{{.Name}} {{.DockerRootDir}}'` 应返回本机名与 `/var/lib/docker`；`docker context` 必须停留在 `default`，切勿切到残留的 `desktop-linux` |
 
 上述四条应作为 `scripts/check_env.py` 的检查项，在每次启动 EvaluationRun 前自动校验——**在长跑实验开始前失败，远好过跑到一半才发现连错了 daemon**。
+
+---
+
+## 10.7 工作区物化的实现决策（E2-T1 落地回填，2026-09-04）
+
+代码在 `backend/app/sandbox/{git_cli,mirror,workspace}.py`。§10.2 的流程图和 §7.2(1)
+的四步没有变，下面是实现时才浮出来的四个问题和处理方式。
+
+### (1) 基线忽略清单写 `.git/info/exclude`，不是工作区根的 `.gitignore`
+
+ADR-007 的风险缓解写的是"工作区内置 `.gitignore` 基线"。实现时发现不能照字面做：
+仓库自己往往就有一个 `.gitignore`，我们再写一个要么覆盖它、要么和它打架，
+而且那是**对被跟踪文件的改动**——工作区的树哈希会因此和 base 树对不上。
+
+`.git/info/exclude` 是 git 专门给"仓库本地、不入库"的忽略规则准备的位置，
+效果一样，且不动工作树。清单本身放在 `workspace.DEFAULT_WORKSPACE_IGNORE`。
+
+**挑选原则：只挡确定是机器生成的东西，宁可漏挡不可错挡。** 漏挡的代价是补丁里多点噪声；
+错挡的代价是 Agent 真写的源文件被悄悄丢掉、判成"没修好"，而且不报错。
+所以 `build/`、`dist/` 这种"通常是产物、但也可能是仓库里真实的源码目录"不进清单，
+留给 E3-T3 的补丁归一化按大小和扩展名过滤。
+
+### (2) base 提交必须 `git add --all --force`
+
+不加 `--force` 的话，仓库里**本来就跟踪着**的文件只要命中基线清单（比如一个被跟踪的
+`debug.log` 命中 `*.log`）就会被漏掉。工作区因此比 base 少一个文件，没有任何报错。
+忽略规则只应该作用于物化之后新出现的文件。
+
+### (3) 物化后自查树哈希，`export-ignore` 会被当场拦下
+
+物化完对比两个值：工作区 `HEAD^{tree}` 与镜像里 `<base_commit>^{tree}`。
+git 的树哈希覆盖每个文件的路径、权限位和内容，相等就说明一处不差。
+
+这条自查挡住的是一类很阴的失败：仓库的 `.gitattributes` 里如果写了
+`tests/ export-ignore`，`git archive` 会**静默跳过**这些路径。工作区少了 `tests/`，
+一路跑到测试阶段才报"找不到用例"，排查方向全在测试执行器上。现在它在物化这一步就
+失败，错误消息直接点名缺了哪些文件、以及 `export-ignore` 这个原因。
+
+带子模块的仓库同样会在这里被识别出来（gitlink 条目不会出现在工作区里）。
+
+### (4) 所有 git 调用屏蔽开发机的全局配置
+
+`git_cli.run_git()` 统一把 `GIT_CONFIG_GLOBAL` / `GIT_CONFIG_SYSTEM` 指向 `/dev/null`，
+并设 `GIT_TERMINAL_PROMPT=0`、`TZ=UTC`、`LC_ALL=C.UTF-8`。
+
+理由是可复现（NFR-02）：开发机上一句 `core.autocrlf=true` 就会让 `git add` 改写换行符，
+同一个 commit 在两台机器上物化出不同的树哈希；`commit.gpgsign=true` 更直接，
+签名失败则物化整个报错。`GIT_TERMINAL_PROMPT=0` 则是防止无人值守时 git 停下来问密码。
+
+**只覆盖这几个变量，不清空环境**：`HTTP_PROXY`/`HTTPS_PROXY` 要原样传下去，
+这台机器上 git 出网靠它们。副作用是 `~/.gitconfig` 里的 `http.proxy` 不再生效，
+需要改用环境变量——`scripts/check_env.py` 会检查 git ≥ 2.32（`GIT_CONFIG_GLOBAL` 的最低版本）。
+
+### 顺带确定下来的两件事
+
+- **base 提交的 SHA 是确定的**：提交人和作者/提交时间都写死成常量，
+  于是"两次物化结果一致"从"目录树相同"升级成"整个 `.git` 都相同"。
+- **工作区里预置了 git 身份**（写在 `.git/config`）：有些 Agent 干完活会自己
+  `git commit`，没有身份会撞上 "Please tell me who you are" 白烧轮次。
+  代价是 E3-T3 抓改动时**必须用 `git diff <base_sha>`**，不能用裸的 `git diff`——
+  Agent 提交过之后裸 diff 是空的。`Workspace.base_sha` 就是给这一步用的。

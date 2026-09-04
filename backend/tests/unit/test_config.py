@@ -161,6 +161,30 @@ def test_absolute_artifact_root_kept(monkeypatch: pytest.MonkeyPatch) -> None:
     assert make_settings().artifact_local_root == Path("/var/lib/bench/artifacts")
 
 
+@pytest.mark.parametrize(
+    ("env_name", "field", "default_suffix"),
+    [
+        ("MIRROR_ROOT", "mirror_root", "var/mirrors"),
+        ("WORKSPACE_ROOT", "workspace_root", "var/workspaces"),
+    ],
+)
+def test_sandbox_roots_are_anchored_to_repo(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, env_name: str, field: str, default_suffix: str
+) -> None:
+    """镜像根和工作区根也按仓库根目录解析，理由和制品目录一样。
+
+    这里更要命一点：Worker 从 `var/mirrors` 里 `git archive`，CLI 在别处把镜像
+    拉到另一个 `var/mirrors`，表现是"明明拉过了还说找不到 commit"。
+    """
+    monkeypatch.delenv(env_name, raising=False)
+    from_repo_root = getattr(make_settings(), field)
+
+    monkeypatch.chdir(tmp_path)
+    from_elsewhere = getattr(make_settings(), field)
+
+    assert from_repo_root == from_elsewhere == (REPO_ROOT / default_suffix).resolve()
+
+
 # ── 其他字段 ───────────────────────────────────────────────
 
 

@@ -100,6 +100,35 @@ def check_artifact_store() -> None:
     )
 
 
+#: 平台要求的最低 git 版本。
+#:
+#: 2.32 是硬门槛：工作区物化靠 `GIT_CONFIG_GLOBAL=/dev/null` 屏蔽开发机的全局配置
+#: （见 backend/app/sandbox/git_cli.py），这个环境变量是 2.32 才有的。
+#: 更低的版本不会报错，只会让 `core.autocrlf` 这类个人配置悄悄改掉物化结果。
+MIN_GIT_VERSION = (2, 32)
+
+
+def check_git() -> None:
+    """git 命令行的版本。评测的工作区物化全靠它（协议 C-43）。"""
+    if shutil.which("git") is None:
+        check("git 命令存在", False, "未找到", "工作区物化依赖 git 命令行")
+        return
+
+    code, out = run_cmd(["git", "--version"])
+    parts = out.split()
+    version = parts[2] if code == 0 and len(parts) >= 3 else "?"
+    try:
+        numbers = tuple(int(x) for x in version.split(".")[:2])
+    except ValueError:
+        numbers = ()
+    check(
+        f"git ≥ {MIN_GIT_VERSION[0]}.{MIN_GIT_VERSION[1]}",
+        numbers >= MIN_GIT_VERSION,
+        version,
+        "低版本不认 GIT_CONFIG_GLOBAL，工作区物化会被开发机的全局 git 配置影响",
+    )
+
+
 def main() -> int:
     print("=== 开发环境自检 ===\n")
 
@@ -156,6 +185,7 @@ def main() -> int:
     else:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
 
+    check_git()
     check_database()
     check_artifact_store()
 
