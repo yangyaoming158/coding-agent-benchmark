@@ -152,12 +152,18 @@ def main() -> int:
             f"v{info.get('CgroupVersion', '?')}",
             "资源限额依赖 cgroup v2，v1 下内存限制行为不同",
         )
-        root_dir = info.get("DockerRootDir", "")
+        # 不能靠 DockerRootDir 区分：Docker Desktop 的引擎报的也是 /var/lib/docker，
+        # 这个判据一直是假绿灯（2026-09-04 实测）。Desktop 会往 Labels 里塞
+        # com.docker.desktop.address，原生引擎的 Labels 是空的
+        labels = info.get("Labels") or []
+        desktop = [x for x in labels if str(x).startswith("com.docker.desktop")]
         check(
             "连的是原生引擎而非 Docker Desktop",
-            root_dir == "/var/lib/docker",
-            root_dir or "?",
-            "两套 docker 会抢 /var/run/docker.sock，导致镜像和容器'凭空消失'",
+            not desktop,
+            "原生引擎" if not desktop else f"Docker Desktop（{desktop[0]}）",
+            "两套 docker 会抢 /run/docker.sock：镜像和容器看起来'凭空消失'，"
+            "而且 Desktop 用的是它自己的代理，拉镜像会失败。"
+            "跑 `sudo systemctl restart docker.socket docker.service` 把 socket 抢回来",
         )
         check(
             "daemon 配了代理",
