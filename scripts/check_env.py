@@ -129,6 +129,29 @@ def check_git() -> None:
     )
 
 
+#: Golden 题的测试镜像。测试执行器（E4-T2）在它里面跑 pytest。
+#: 标签要和 Makefile 的 GOLDEN_IMAGE、app/evaluation/executor.py 的
+#: DEFAULT_GOLDEN_IMAGE 保持一致。
+GOLDEN_IMAGE = "bench-golden:py311"
+
+
+def check_golden_image() -> None:
+    """Golden 题的测试镜像在不在。
+
+    测试阶段必须断网（协议 C-31），容器里装不了 pytest，所以镜像得事先建好。
+    没有它，`make test-docker` 里 E4-T2 那组用例会整批跳过 —— **跳过不报错**，
+    看起来像"测试都过了"。
+    """
+    code, _ = run_cmd(["docker", "image", "inspect", GOLDEN_IMAGE])
+    check(
+        f"测试镜像 {GOLDEN_IMAGE} 已构建",
+        code == 0,
+        "已构建" if code == 0 else "不存在",
+        "跑 `make images` 建一个；没有它 E4-T2 的容器用例会静默跳过",
+        warn_only=True,
+    )
+
+
 def main() -> int:
     print("=== 开发环境自检 ===\n")
 
@@ -192,6 +215,7 @@ def main() -> int:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
 
     check_git()
+    check_golden_image()
     check_database()
     check_artifact_store()
 

@@ -5,10 +5,12 @@ SHELL := /bin/bash
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
-        golden golden-verify
+        golden golden-verify images
 
 BACKEND := backend
 FRONTEND := frontend
+# Golden 题的测试镜像标签。测试执行器的默认值和这里对齐（app/evaluation/test_executor.py）。
+GOLDEN_IMAGE := bench-golden:py311
 UV := cd $(BACKEND) && uv run
 
 help:                ## 显示这份帮助
@@ -114,6 +116,9 @@ golden:              ## 从 datasets/golden/sources/ 生成任务 JSON 和本地
 
 golden-verify:       ## 对每道 Golden Task 跑六步验证
 	$(UV) python -m cli.golden verify
+
+images:              ## 建 Golden 题的测试镜像（E4-T2 用，E2-T3 到位后由构建器接管）
+	docker build -t $(GOLDEN_IMAGE) images/golden
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

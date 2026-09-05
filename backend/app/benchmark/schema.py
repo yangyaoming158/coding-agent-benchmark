@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.benchmark.hashing import compute_content_hash
 from app.domain.enums import IssueLanguage, TaskDifficulty, TaskValidationState
+from app.domain.execution_plan import ExecutionPlan
 from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import (
     DEFAULT_PROTECTED_PATTERNS,
@@ -173,6 +174,37 @@ class TaskDefinition(BaseModel):
     # ── 完整性 ──
     #: `sha256:` 开头。缺省时自动算出来；给了就校验，对不上直接拒收。
     content_hash: str | None = None
+
+    def execution_plan(self, *, extra_protected_paths: tuple[str, ...] = ()) -> ExecutionPlan:
+        """导出测试执行器要的那部分（E4-T2）。
+
+        为什么要转一道手：`app.evaluation` 和 `app.benchmark` 在模块边界里是并排的，
+        并排就是互不可见，执行器 import 不到 `TaskDefinition`。转换只有这一处，
+        两边各写一份的话迟早会漂。
+
+        **刻意不带 `gold_patch` 和 `issue_body`**：跑一轮测试用不着官方答案，
+        传进去只是多一条泄漏路径。
+
+        `extra_protected_paths` 来自环境规格（`environment_specs.extra_protected_paths`），
+        题目本身不带这个字段，由调用方从环境里取来传进来。
+        """
+        return ExecutionPlan(
+            base_commit=self.base_commit,
+            test_patch=self.test_patch,
+            test_patch_paths=tuple(self.test_patch_paths),
+            fail_to_pass=tuple(self.fail_to_pass),
+            pass_to_pass=tuple(self.pass_to_pass),
+            test_command=self.test_command,
+            test_report_path=self.test_report_path,
+            pre_test_command=self.pre_test_command,
+            extra_protected_paths=extra_protected_paths,
+            test_timeout_s=self.test_timeout_s,
+            sandbox_cpu=self.sandbox_cpu,
+            sandbox_memory_mb=self.sandbox_memory_mb,
+            sandbox_pids_limit=self.sandbox_pids_limit,
+            task_id=self.task_id,
+        )
+
     validation: TaskValidation | None = None
 
     # ── 校验与规范化 ────────────────────────────────────────

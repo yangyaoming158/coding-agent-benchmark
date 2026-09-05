@@ -25,6 +25,19 @@
 
 **第 3 步为什么还要再还原一次**：生成补丁时其实已经按路径过滤掉测试文件了。这里再强制还原一遍，是第二道防线。两处实现只要有一处写出 bug，基准都不会被攻破。
 
+> **实现回填（E4-T2，2026-09-05）**：第 3 步分两半，缺一不可。
+>
+> - **已跟踪的文件** → `git checkout HEAD -- <具体路径>`，还原被改的和被删的。
+> - **AI 新增的文件** → 逐个删。`git checkout` 只管已跟踪的文件，删不掉新建的未跟踪文件，而 AI 完全可以新建一个 `conftest.py` 做猴子补丁（C-63）。扫的时候要带 `include_ignored=True`，否则 `tests/__pycache__/*.pyc` 列不出来也删不掉。
+>
+> **踩到的坑：`git apply --3way` 会动索引。** 它走三方合并那条路时会把结果**暂存进索引**，于是 AI 新建的 `conftest.py` 变成"已暂存的新增文件"。这时 `git diff --name-only HEAD` 会列出它，可它在 HEAD 里根本不存在，`git checkout HEAD -- conftest.py` 当场报 `pathspec did not match any file(s) known to git` —— **整条防作弊防线崩在这里**。
+>
+> 修法是打完补丁立刻 `git reset --quiet HEAD`（只拨索引，不动工作区）。reset 之后状态是统一的：改过的跟踪文件 = 未暂存改动，新建的文件 = 未跟踪文件，正好对应还原那两半；重命名也收敛成"旧路径被删 + 新路径未跟踪"。
+>
+> 这个坑**只在真的走 `git apply` 时才出现**——直接把文件写进工作区测不出来（那样它只是个普通的未跟踪文件）。回归用例是 `tests/sandbox/test_protected_restore.py::test_patch_added_protected_file_is_deleted`。
+>
+> 代码在 `backend/app/evaluation/executor.py`。**它不在 `app/judge/`**：import-linter 的分层里 `app.sandbox | app.judge` 是并排的，并排就是互不可见，judge 看不到 sandbox，起不了容器。`app.evaluation` 在 runner 之上，两边都看得见。
+
 **第 5 步为什么只跑部分用例**：`pytest 用例ID1 用例ID2 ...` 可以只跑指定的几条。好处是快（这对 6 小时的目标很关键），代价是发现不了 `fail_to_pass` 和 `pass_to_pass` 之外的问题。
 
 这是有意的取舍：`pass_to_pass` 这个集合本身就是我们定义的"回归检查范围"。题目验证阶段会跑全量测试，评测阶段只跑子集。
