@@ -108,6 +108,40 @@ class Settings(BaseSettings):
     #: 同时跑几个测试容器，受 CPU 和内存约束。
     sandbox_concurrency: int = Field(default=5, ge=1)
 
+    # ── 队列与 Worker（E5-T1，含义见 07-platform-architecture.md §15.2）──
+    #: 这个 Worker 进程的标识，写进 `job_queue.lease_owner` 和
+    #: `evaluation_task_runs.worker_id`。留空就用 `主机名-进程号`。
+    #:
+    #: 一台机器上跑多个 Worker 时**建议显式设成固定值**（worker-1、worker-2……）：
+    #: 进程号每次重启都变，而启动时回收自己的残留容器要靠这个标识认领。
+    worker_id: str | None = None
+    #: 租约时长（秒）。必须大于最慢的一道题跑完的时间，否则作业会在还没跑完的时候
+    #: 被回收器判成僵尸，交给另一个 Worker 重跑一遍。默认 30 分钟。
+    job_lease_s: int = Field(default=1800, ge=1)
+    #: 心跳间隔（秒）。心跳线程每隔这么久把租约往后推一次。
+    #: 要显著小于 `job_lease_s`，留出网络抖动和 GC 停顿的余量。
+    job_heartbeat_s: int = Field(default=60, ge=1)
+    #: 队列空的时候隔多久再看一眼（秒）。没有 LISTEN/NOTIFY，就是简单轮询——
+    #: 一次评测十几分钟，轮询几秒的延迟可以忽略。
+    job_poll_interval_s: float = Field(default=5.0, gt=0)
+    #: 一条**作业**最多被领取几次。注意这和评测的重试次数是两回事：
+    #: 这个管的是"Worker 崩了 / 处理函数抛异常"，评测的重试次数由协议 C-18
+    #: 的映射表决定，见 `app.domain.retry`。
+    job_max_attempts: int = Field(default=3, ge=1)
+    #: 作业重试的退避基数（秒）。实际等待 `2^attempts × base`，封顶 `job_retry_backoff_cap_s`。
+    job_retry_backoff_base_s: float = Field(default=30.0, gt=0)
+    job_retry_backoff_cap_s: float = Field(default=3600.0, gt=0)
+    #: 收到 SIGTERM 之后，最多再等当前这道题多久（秒）。等不到就放弃等待去做收尾——
+    #: 收尾包括回收残留容器，所以宁可等不到也不能跳过。
+    worker_shutdown_grace_s: float = Field(default=1200.0, gt=0)
+    #: 启动时先回收一遍带 bench 标签的残留容器。
+    #: Worker 被 `kill -9` 时容器删不掉，留着会一直占内存和 pid。
+    worker_reap_on_start: bool = True
+    #: 回收时只删创建超过这么久的容器（秒）。0 表示不管年龄全删。
+    #: **一台机器上跑多个 Worker 时必须设成大于最长容器寿命的值**，
+    #: 否则新起的 Worker 会把别人正在用的容器删掉。
+    worker_reap_min_age_s: float = Field(default=0.0, ge=0)
+
     # ── 被测 AI 的密钥 ──
     anthropic_api_key: SecretStr | None = None
     openai_api_key: SecretStr | None = None

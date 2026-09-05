@@ -1,4 +1,4 @@
-"""三个哨兵适配器：Oracle / Noop / Mock（E3-T2）。
+"""三个哨兵适配器：Oracle / Noop / Mock（E3-T2），加一个补丁重放适配器（E5-T1）。
 
 它们**不调用任何外部服务**，所以在没有大模型额度、没有网络、甚至没有 Docker 的
 情况下，整条评测链都能自测。这是它们存在的全部理由。
@@ -35,12 +35,20 @@
     app.runner.adapters.mock.MockRunner
 
 编排层（E5）按这个字符串反射出类，再把官方补丁和行为配置喂进去。
+
+## 第四个：StoredPatchRunner
+
+`StoredPatchRunner` 不是哨兵，它是协议 C-54 的执行者：测试阶段的故障重试时，
+必须复用上一次那份标准化补丁，**禁止**重新调用被测 AI（重调等于多采一次样，
+还白花一次钱）。它不进 `agents` 表——没人会拿它去跑排行榜，
+只有 Worker 在重排 attempt 时临时构造一个。
 """
 
 from app.runner.adapters.base import PatchLookup, PatchSource, as_lookup, sentinel_result
 from app.runner.adapters.mock import MockBehavior, MockRunner
 from app.runner.adapters.noop import NoopRunner
 from app.runner.adapters.oracle import OracleRunner
+from app.runner.adapters.stored import StoredPatchRunner
 
 __all__ = [
     "MockBehavior",
@@ -49,6 +57,7 @@ __all__ = [
     "OracleRunner",
     "PatchLookup",
     "PatchSource",
+    "StoredPatchRunner",
     "as_lookup",
     "sentinel_result",
 ]

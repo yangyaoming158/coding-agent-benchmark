@@ -92,7 +92,9 @@ type = "layers"
 # 但 import-linter 的 layers 里用 `|` 并排就是"互不可见"，这两条规则是冲突的：
 # 真实适配器要调 run_in_container 起容器，并排写法会让它一写就红（2026-09-04 实测）。
 layers = [
-    "app.api",
+    # api 和 worker 并排：`|` 的语义是"互不可见"，正好表达两个启动入口互不 import。
+    # worker 要投作业、api 也要投作业，走的都是下面的 app.infrastructure.queue。
+    "app.api | app.worker",
     "app.evaluation | app.benchmark | app.report",
     "app.runner",
     "app.sandbox | app.judge | app.attribution",
