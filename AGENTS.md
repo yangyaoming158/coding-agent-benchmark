@@ -13,7 +13,7 @@
 
 参考 SWE-Bench 的做法（这是学术界评测 AI 编程能力的通用基准）。
 
-**当前阶段：E0 基础设施全部完成（T1–T4），下一批是 E1-T1 / E2-T1 / E2-T2 / E3-T1。**
+**当前阶段：M1（评测内核）已达成 —— Golden Task 全链路跑通并落库，Oracle 哨兵 100% / Noop 哨兵 0%。**
 
 仓库里现在有：评测协议正文（`docs/evaluation-protocol.md`，FROZEN v1.2）、后端骨架
 （FastAPI + SQLAlchemy + Alembic，17 张表）、前端骨架（Next.js，类型从 OpenAPI 生成）、

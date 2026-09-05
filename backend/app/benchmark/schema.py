@@ -30,8 +30,17 @@ from app.domain.execution_plan import ExecutionPlan
 from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import (
     DEFAULT_PROTECTED_PATTERNS,
+    agent_visible_patterns,
     is_protected,
     protected_hits,
+)
+from app.runner.protocol import (
+    AgentTaskInput,
+    Constraints,
+    IssueInput,
+    ModelInput,
+    RepoInput,
+    assert_no_leak,
 )
 
 #: `{owner}__{repo}-{pr_number}`，与 SWE-bench 的命名兼容。
@@ -204,6 +213,56 @@ class TaskDefinition(BaseModel):
             sandbox_pids_limit=self.sandbox_pids_limit,
             task_id=self.task_id,
         )
+
+    def agent_task_input(
+        self,
+        *,
+        deadline_unix_ms: int,
+        model: str = "none",
+        temperature: float = 0.0,
+        max_tokens_budget: int | None = None,
+        allow_network: bool = True,
+        workspace_path: str = "/workspace",
+        extra: dict[str, Any] | None = None,
+    ) -> AgentTaskInput:
+        """导出下发给被测 AI 的任务输入（E4-T4，Runner 协议 §9.2）。
+
+        **这个对象里的每一个字段都会被被测 AI 看到**，所以防泄题的规矩全在这一处，
+        别处不许自己拼一个：
+
+        - `protected_paths` 用 `agent_visible_patterns()`，**不是**
+          `enforcement_patterns()` —— 后者含该题的 `test_patch_paths`，
+          下发出去等于告诉 AI 官方改了哪几个文件来验证（协议 C-76）。
+        - `gold_patch`（官方答案）、`test_patch`、`fail_to_pass`、`pass_to_pass`、
+          `test_command` 一个都不进去。
+        - `repo` 只给名字和 base commit，**不给 URL**：给了 URL，AI 一句
+          `git clone` 就能拉到官方修复。
+        - 组装完再过一遍 `assert_no_leak()` 兜底 —— 前面几条靠"记得别写"，
+          这一条靠机器检查。
+
+        `deadline_unix_ms` 用绝对时刻不用"还剩几秒"：适配器可能几秒后才真正开始
+        干活，传相对值的话这段启动时间就被白送给了 AI，两次运行的预算不一样。
+        """
+        task_input = AgentTaskInput(
+            task_id=self.task_id,
+            workspace_path=workspace_path,
+            issue=IssueInput(
+                title=self.issue_title, body=self.issue_body, language=self.issue_language
+            ),
+            repo=RepoInput(name=self.repo_name, base_commit=self.base_commit),
+            hints=self.hints_text,
+            constraints=Constraints(
+                deadline_unix_ms=deadline_unix_ms,
+                max_tokens_budget=max_tokens_budget,
+                protected_paths=list(agent_visible_patterns()),
+                allow_network=allow_network,
+                allow_run_tests=True,
+            ),
+            model=ModelInput(name=model, temperature=temperature),
+            extra=extra or {},
+        )
+        assert_no_leak(task_input.model_dump(mode="json"))
+        return task_input
 
     validation: TaskValidation | None = None
 

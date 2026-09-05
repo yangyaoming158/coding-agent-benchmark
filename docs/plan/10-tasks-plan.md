@@ -386,11 +386,29 @@
   **② `RESOLVED` 优先于 `EMPTY_PATCH`**（Noop 哨兵靠这个发现坏题）；
   **③ `TEST_TIMEOUT` 不传对照组结论就抛异常，不猜**（猜错的两个方向后果相反）。
 
-### E4-T4 端到端评测单元 `execute_task_run()`
+### E4-T4 端到端评测单元 `execute_task_run()` ✅ 已于 2026-09-05 完成（**M1 达成**）
 - **Goal**：把 PREPARING→…→COMPLETED 串起来，含状态持久化、制品落盘、异常映射、清理
 - **Req**：FR-06, NFR-06, NFR-09 · **Deps**：E2-*, E3-T2/T3, E4-T3
 - **AC**：**Golden Task × MockAgent 全链路跑通并落库**（= M1 里程碑）
 - **P0 · C:L · E:2d · 🐳**
+- **实际交付**（2026-09-05）：`app/evaluation/task_run.py` 的 `execute_task_run()`
+  跑编排，`app/evaluation/persistence.py` 的 `persist_task_run()` 落库。
+  **两半刻意分开**：编排要 Docker 不要数据库，落库要数据库不要 Docker。
+  合成一个的话，本地少起一样，整片测试就被跳过 —— 而跳过是不报错的，看起来像全过了。
+  **哨兵结果**：Oracle 四道题 4/4 全 RESOLVED，Noop 四道题 0/4，都是真起容器跑出来的。
+  确定性哨兵（同补丁跑 3 次逐条状态一致）也过了。
+  另外补了 `TaskDefinition.agent_task_input()` —— 下发给被测 AI 的任务输入的正式
+  构造口，**防泄题的规矩全在这一处**（受保护清单用 agent_visible 那份、
+  gold_patch/test_patch/F2P 名单/test_command 一个都不进去、repo 不给 URL、
+  组装完再过一遍 `assert_no_leak()`）。此前只有哨兵测试里一份"够用的最小实现"。
+  两个实测踩到的坑：
+  **① `patch_source` 不是"补丁从哪拿"的路由信号**，它是归因用的元数据
+  （"这段 diff 是跑 git diff 得来的，还是 AI 自己打印的"）。Oracle 标的是 `git_diff`
+  却根本不碰工作区，照它分流会抓到空 diff，**Oracle 哨兵会从 100% 变成 0%**。
+  改成按内容判：适配器报了非空补丁就用它，否则去工作区 `git diff`。
+  **② 适配器错误码不能按子串猜。** Mock 的超时报的是 `deadline_exceeded`，里面没有
+  "timeout" 这个词，超时被错判成运行时错误。规范错误码收进了
+  `app/runner/protocol.py`，评测单元查表，认不出的一律算 AI 侧。
 
 ---
 

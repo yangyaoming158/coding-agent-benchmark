@@ -316,6 +316,18 @@ class AgentRunResult(_Strict):
 # 解析适配器的输出
 # ══════════════════════════════════════════════════════════════
 
+#: 规范的错误码。`AgentError.code` 本身是自由字符串（第三方适配器爱写什么写什么），
+#: 但**我们自己写的适配器必须用这几个**——评测单元要靠它把错误翻译成 `infra_outcome`
+#: （`app.evaluation.task_run`），而按子串猜（"code 里有没有 timeout"）是不可靠的：
+#: Mock 报的是 `deadline_exceeded`，里面根本没有 "timeout" 这个词，
+#: 于是超时被错判成了运行时错误（2026-09-05 实测踩到）。
+#:
+#: 认不出来的错误码一律当成 `AGENT_RUNTIME_ERROR` —— 责任落在被测 AI 这一侧，
+#: 不会冤枉平台，代价只是多重试一次。
+DEADLINE_EXCEEDED = "deadline_exceeded"
+AUTH_FAILED = "auth_failed"
+RUNTIME_ERROR = "runtime_error"
+
 #: 报错时截取多长的原文。太短看不出问题，太长会把日志刷爆。
 _ERROR_EXCERPT_CHARS = 200
 

@@ -47,6 +47,7 @@ from app.runner.adapters.base import (
     sentinel_result,
 )
 from app.runner.protocol import (
+    DEADLINE_EXCEEDED,
     AgentConfig,
     AgentError,
     AgentRunResult,
@@ -84,8 +85,8 @@ DEFAULT_PROTECTED_TARGET = "tests/test_mock_agent.py"
 #: 想测 harness 的墙钟强杀（§9.6），把它调大，或者把 deadline 调近。
 DEFAULT_MAX_SLEEP_S = 0.05
 
-#: `timeout` 行为报的错误码。
-DEADLINE_EXCEEDED = "deadline_exceeded"
+#: `timeout` 行为报的错误码。值从协议那边来 —— 评测单元靠这个码把错误翻译成
+#: `infra_outcome`，各适配器各写一个字符串的话，那张翻译表就永远对不齐。
 
 
 def new_file_diff(path: str, lines: Sequence[str]) -> str:

@@ -126,8 +126,12 @@ def run_sentinel(
 
     测试工作区是**新物化的一份**，不复用 Agent 那份（协议 C-15）。
     Agent 可能在自己那份里装过东西、留过临时文件，拿它跑测试，
-    测出来的就不只是"补丁对不对"了。哨兵其实不碰工作区，但流程要照着真的走
-    —— 这段代码将来会被 E4 换成真家伙，形状先对上。
+    测出来的就不只是"补丁对不对"了。哨兵其实不碰工作区，但流程要照着真的走。
+
+    **真家伙是 `app.evaluation.task_run.execute_task_run()`（E4-T4）**，
+    端到端验收在 `tests/sandbox/test_task_run.py`。这里保留一份不进容器的轻量版：
+    它只用 git 和子进程，几百毫秒跑完，能在 Docker 出问题时告诉我们
+    "是链路坏了还是容器坏了"。
     """
     mirror = MirrorManager(mirror_root).path_for(task.repo_name)
     agent_ws = materialize_workspace(
