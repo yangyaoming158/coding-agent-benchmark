@@ -45,8 +45,8 @@ from pathlib import Path
 
 import pytest
 
-from app.benchmark.patch_paths import derive_patch_paths
 from app.domain.enums import CostSource, IssueLanguage
+from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import agent_visible_patterns, enforcement_patterns, protected_hits
 from app.runner.protocol import (
     AgentConfig,

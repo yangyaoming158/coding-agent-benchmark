@@ -70,9 +70,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from app.benchmark.patch_paths import derive_patch_paths
 from app.benchmark.schema import P2PSampling, TaskDefinition
 from app.domain.enums import IssueLanguage, TaskDifficulty
+from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import DEFAULT_PROTECTED_PATTERNS, is_protected
 from app.sandbox.git_cli import run_git
 from app.sandbox.mirror import MirrorManager, mirror_dir_name

@@ -39,8 +39,8 @@ from pathlib import Path
 
 import pytest
 
-from app.benchmark.patch_paths import derive_patch_paths
 from app.benchmark.schema import TaskDefinition
+from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import agent_visible_patterns, enforcement_patterns, protected_hits
 from app.runner.adapters import MockBehavior, MockRunner, NoopRunner, OracleRunner
 from app.runner.protocol import (

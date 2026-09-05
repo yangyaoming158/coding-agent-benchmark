@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.benchmark.patch_paths import derive_patch_paths
+from app.domain.patch_paths import derive_patch_paths
 
 
 def test_simple_modification() -> None:

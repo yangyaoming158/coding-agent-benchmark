@@ -25,8 +25,8 @@ from typing import Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.benchmark.hashing import compute_content_hash
-from app.benchmark.patch_paths import derive_patch_paths
 from app.domain.enums import IssueLanguage, TaskDifficulty, TaskValidationState
+from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import (
     DEFAULT_PROTECTED_PATTERNS,
     is_protected,
