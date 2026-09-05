@@ -1,0 +1,35 @@
+..FFEsxXF......                                                          [100%]
+==================================== ERRORS ====================================
+______________________ ERROR at setup of test_setup_error ______________________
+
+    @pytest.fixture
+    def broken_fixture():
+>       raise ValueError("fixture blew up")
+E       ValueError: fixture blew up
+
+tests/test_shapes.py:19: ValueError
+=================================== FAILURES ===================================
+_______________________________ test_assert_fail _______________________________
+
+    def test_assert_fail():
+>       assert 1 == 2, "one is not two"
+E       AssertionError: one is not two
+E       assert 1 == 2
+
+tests/test_shapes.py:9: AssertionError
+_____________________________ test_raises_runtime ______________________________
+
+    def test_raises_runtime():
+        """函数体里抛异常 —— junitxml 记成 <failure>，不是 <error>。"""
+>       raise RuntimeError("boom in body")
+E       RuntimeError: boom in body
+
+tests/test_shapes.py:14: RuntimeError
+______________________________ test_xpass_strict _______________________________
+[XPASS(strict)] strict one
+=========================== short test summary info ============================
+FAILED tests/test_shapes.py::test_assert_fail - AssertionError: one is not two
+FAILED tests/test_shapes.py::test_raises_runtime - RuntimeError: boom in body
+FAILED tests/test_shapes.py::test_xpass_strict - [XPASS(strict)] strict one
+ERROR tests/test_shapes.py::test_setup_error - ValueError: fixture blew up
+3 failed, 8 passed, 1 skipped, 1 xfailed, 1 xpassed, 1 error in 0.10s

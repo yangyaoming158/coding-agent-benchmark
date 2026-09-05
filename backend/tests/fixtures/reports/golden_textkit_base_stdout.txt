@@ -1,0 +1,74 @@
+============================= test session starts ==============================
+platform linux -- Python 3.x, pytest-9.x
+rootdir: /repo
+plugins: (stabilized)
+collecting ... collected 7 items
+
+tests/test_csvline.py::test_double_quote_inside_quoted_field FAILED      [ 14%]
+tests/test_csvline.py::test_quoted_field_in_the_middle FAILED            [ 28%]
+tests/test_csvline.py::test_quoted_field_keeps_comma FAILED              [ 42%]
+tests/test_csvline.py::test_keeps_empty_fields PASSED                    [ 57%]
+tests/test_csvline.py::test_single_field PASSED                          [ 71%]
+tests/test_csvline.py::test_splits_plain_fields PASSED                   [ 85%]
+tests/test_csvline.py::test_strips_trailing_newline PASSED               [100%]
+
+=================================== FAILURES ===================================
+____________________ test_double_quote_inside_quoted_field _____________________
+
+    def test_double_quote_inside_quoted_field():
+>       assert parse_line('"he said ""hi""",done') == ['he said "hi"', "done"]
+E       assert ['"he said ""hi"""', 'done'] == ['he said "hi"', 'done']
+E         
+E         At index 0 diff: '"he said ""hi"""' != 'he said "hi"'
+E         
+E         Full diff:
+E           [
+E         -     'he said "hi"',
+E         +     '"he said ""hi"""',...
+E         
+E         ...Full output truncated (3 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:29: AssertionError
+_______________________ test_quoted_field_in_the_middle ________________________
+
+    def test_quoted_field_in_the_middle():
+>       assert parse_line('x,"y,z",w') == ["x", "y,z", "w"]
+E       assert ['x', '"y', 'z"', 'w'] == ['x', 'y,z', 'w']
+E         
+E         At index 1 diff: '"y' != 'y,z'
+E         Left contains one more item: 'w'
+E         
+E         Full diff:
+E           [
+E               'x',...
+E         
+E         ...Full output truncated (7 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:25: AssertionError
+________________________ test_quoted_field_keeps_comma _________________________
+
+    def test_quoted_field_keeps_comma():
+>       assert parse_line('"a,b",c') == ["a,b", "c"]
+E       assert ['"a', 'b"', 'c'] == ['a,b', 'c']
+E         
+E         At index 0 diff: '"a' != 'a,b'
+E         Left contains one more item: 'c'
+E         
+E         Full diff:
+E           [
+E         -     'a,b',...
+E         
+E         ...Full output truncated (6 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:21: AssertionError
+==================================== PASSES ====================================
+- generated xml file: /repo/report/junit.xml -
+=========================== short test summary info ============================
+PASSED tests/test_csvline.py::test_keeps_empty_fields
+PASSED tests/test_csvline.py::test_single_field
+PASSED tests/test_csvline.py::test_splits_plain_fields
+PASSED tests/test_csvline.py::test_strips_trailing_newline
+FAILED tests/test_csvline.py::test_double_quote_inside_quoted_field - assert ...
+FAILED tests/test_csvline.py::test_quoted_field_in_the_middle - assert ['x', ...
+FAILED tests/test_csvline.py::test_quoted_field_keeps_comma - assert ['"a', '...
+========================= 3 failed, 4 passed in 0.10s ==========================

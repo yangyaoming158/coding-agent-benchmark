@@ -1,0 +1,70 @@
+============================= test session starts ==============================
+platform linux -- Python 3.x, pytest-9.x
+rootdir: /repo
+plugins: (stabilized)
+collecting ... collected 15 items
+
+tests/sub/test_nested.py::test_deep PASSED                               [  6%]
+tests/test_shapes.py::test_ok PASSED                                     [ 13%]
+tests/test_shapes.py::test_assert_fail FAILED                            [ 20%]
+tests/test_shapes.py::test_raises_runtime FAILED                         [ 26%]
+tests/test_shapes.py::test_setup_error ERROR                             [ 33%]
+tests/test_shapes.py::test_skipped SKIPPED (not today)                   [ 40%]
+tests/test_shapes.py::test_xfail XFAIL (known bug)                       [ 46%]
+tests/test_shapes.py::test_xpass XPASS (already fixed)                   [ 53%]
+tests/test_shapes.py::test_xpass_strict FAILED                           [ 60%]
+tests/test_shapes.py::test_param[1] PASSED                               [ 66%]
+tests/test_shapes.py::test_param[2] PASSED                               [ 73%]
+tests/test_shapes.py::test_param[\u5e26\u7a7a\u683c \u7684] PASSED       [ 80%]
+tests/test_shapes.py::TestGroup::test_method PASSED                      [ 86%]
+tests/test_shapes.py::TestGroup::test_method_param[0] PASSED             [ 93%]
+tests/test_shapes.py::TestGroup::test_method_param[1] PASSED             [100%]
+
+==================================== ERRORS ====================================
+______________________ ERROR at setup of test_setup_error ______________________
+
+    @pytest.fixture
+    def broken_fixture():
+>       raise ValueError("fixture blew up")
+E       ValueError: fixture blew up
+
+tests/test_shapes.py:19: ValueError
+=================================== FAILURES ===================================
+_______________________________ test_assert_fail _______________________________
+
+    def test_assert_fail():
+>       assert 1 == 2, "one is not two"
+E       AssertionError: one is not two
+E       assert 1 == 2
+
+tests/test_shapes.py:9: AssertionError
+_____________________________ test_raises_runtime ______________________________
+
+    def test_raises_runtime():
+        """函数体里抛异常 —— junitxml 记成 <failure>，不是 <error>。"""
+>       raise RuntimeError("boom in body")
+E       RuntimeError: boom in body
+
+tests/test_shapes.py:14: RuntimeError
+______________________________ test_xpass_strict _______________________________
+[XPASS(strict)] strict one
+==================================== PASSES ====================================
+=================================== XPASSES ====================================
+-------- generated xml file: /repo/x2.xml --------
+=========================== short test summary info ============================
+PASSED tests/sub/test_nested.py::test_deep
+PASSED tests/test_shapes.py::test_ok
+PASSED tests/test_shapes.py::test_param[1]
+PASSED tests/test_shapes.py::test_param[2]
+PASSED tests/test_shapes.py::test_param[\u5e26\u7a7a\u683c \u7684]
+PASSED tests/test_shapes.py::TestGroup::test_method
+PASSED tests/test_shapes.py::TestGroup::test_method_param[0]
+PASSED tests/test_shapes.py::TestGroup::test_method_param[1]
+SKIPPED [1] tests/test_shapes.py:28: not today
+XFAIL tests/test_shapes.py::test_xfail - known bug
+XPASS tests/test_shapes.py::test_xpass - already fixed
+ERROR tests/test_shapes.py::test_setup_error - ValueError: fixture blew up
+FAILED tests/test_shapes.py::test_assert_fail - AssertionError: one is not two
+FAILED tests/test_shapes.py::test_raises_runtime - RuntimeError: boom in body
+FAILED tests/test_shapes.py::test_xpass_strict - [XPASS(strict)] strict one
+==== 3 failed, 8 passed, 1 skipped, 1 xfailed, 1 xpassed, 1 error in 0.10s =====

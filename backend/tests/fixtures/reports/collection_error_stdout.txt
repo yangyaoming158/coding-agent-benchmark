@@ -1,0 +1,22 @@
+============================= test session starts ==============================
+platform linux -- Python 3.x, pytest-9.x
+rootdir: /repo
+plugins: (stabilized)
+collecting ... collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+_____________________ ERROR collecting brk/test_broken.py ______________________
+ImportError while importing test module '/repo/brk/test_broken.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/py/importlib/__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+brk/test_broken.py:1: in <module>
+    import nonexistent_module_xyz
+E   ModuleNotFoundError: No module named 'nonexistent_module_xyz'
+-------- generated xml file: /repo/x2.xml --------
+=========================== short test summary info ============================
+ERROR brk/test_broken.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+=============================== 1 error in 0.10s ===============================

@@ -33,10 +33,12 @@
 
 ```python
 class TestReportParser(Protocol):
-    def parse(
-        self, report_path: Path | None, stdout: str, stderr: str
-    ) -> dict[str, TestStatus]: ...
+    def parse(self, report_path: Path | None, stdout: str, stderr: str) -> ParsedReport: ...
 ```
+
+> **实现回填（E4-T1，2026-09-05）**：返回值原本写的是 `dict[str, TestStatus]`，实现时改成了 `ParsedReport`。原因是协议 C-13b 要求出现 `MISSING` 时先自检三件事（报告是否完整、ID 归一化对不对、有没有收集错误），光给一个状态字典交不出这些信息，判定引擎就只能无条件判 `UNRESOLVED`——那正是 C-13 在 v1.1 修掉的顺序错误。想要原来那个形状，取 `ParsedReport.statuses`。
+>
+> 代码在 `backend/app/judge/report_parser.py` 和 `backend/app/judge/test_ids.py`。
 
 | 实现 | 首选方式 | 备用方式 |
 |:---|:---|:---|
@@ -55,9 +57,58 @@ pytest 的用例 ID 长这样：`路径::类名::方法名[参数]`。但同一�
 
 所以必须实现 `normalize_test_id()`，统一成"仓库相对路径 + `::` 分隔"，并且写单元测试覆盖至少 6 种写法：相对路径、绝对路径、带 `./` 前缀、参数化用例、类方法、多层目录。
 
+#### 实测：junitxml 的 classname 是点分模块名，不是文件路径
+
+E4-T1 实现时在开发机上用 pytest 9.1.1 跑出来的结论（2026-09-05）。这几条决定了解析器长什么样：
+
+**① `classname` 有歧义。** `tests/sub/test_nested.py::test_deep` 在 XML 里是 `classname="tests.sub.test_nested" name="test_deep"`；类方法把类名接在后面，`classname="tests.test_shapes.TestGroup" name="test_method"`。于是 `a.b.C` 既可能是 `a/b/C.py`，也可能是 `a/b.py` 里的类 `C`，**光看这一个字符串分不出来**。
+
+**② `junit_family` 决定有没有 `file` 属性。** 默认的 `xunit2` 没有；`-o junit_family=xunit1` 会额外写 `file="tests/sub/test_nested.py" line="0"`，歧义当场消失。**解析器两种都支持**：有 `file` 就用它，没有就按 pytest 的默认收集规则（模块叫 `test_*.py`、类以 `Test` 开头）打分挑最可能的切分，其余切法留作备选 ID 一起匹配。
+
+> **已决定不加（2026-09-05）**：`test_command` 保持现状，不加 `-o junit_family=xunit1`。
+>
+> 两条理由。一是**不需要**：`test_both_junit_families_agree` 证明了两种 family 解析出来逐条相同，加了只是省掉 classname 的猜测环节。二是**保不住**：真实仓库的 `test_command` 是从上游推导的，未必带得上这个参数；只给 Golden 题加，等于让开发时走的路径和真实评测走的不是同一条——那种"本地全绿、真跑才炸"的差异最难查。
+>
+> 改主意的话要动三处：`backend/cli/golden.py` 的 `DEFAULT_ENVIRONMENT`、`datasets/golden/environments/*.json`（跑 `make golden` 重新生成）、以及本节这段。
+
+**③ 参数化用例里的非 ASCII 会被转义。** `test_param["带空格 的"]` 在 XML 里是 `name="test_param[\u5e26\u7a7a\u683c \u7684]"`，是字面的反斜杠 u 序列，不是中文。题目里的 F2P ID 写中文原文就对不上，要先还原。这是第 7 种 ID 形态。
+
+#### 实测：状态怎么映射
+
+**① `<error>` 和 `<failure>` 不按直觉分。** 测试函数体里 `raise RuntimeError` 记成 `<failure>`（不是 error）；只有 fixture / setup / teardown 里抛异常和收集失败才是 `<error>`。协议 C-10 的 `ERROR` 对应的是后两种。
+
+**② 收集失败的条目长得完全不一样**：`classname=""`、`name="brk.test_broken"`（点分模块名）、`<error message="collection failure">`，pytest 退出码 2。它不是一条用例，要单独摘出来（`ParsedReport.collection_errors`）。
+
+**③ XFAIL 认得出，非 strict 的 XPASS 认不出。** `<skipped type="pytest.xfail">` 是 XFAIL；但非 strict 的 XPASS 在 XML 里就是一个**没有子元素的普通 testcase**，和 PASSED 一模一样。协议 C-10 要求 XPASS 是独立状态，junitxml 表达不了。
+
+解析器**不装作能分出来**：只有 XML 时如实报成 `PASSED`，并把 `ParsedReport.xpass_may_read_as_passed` 置为 True。`strict=True` 的 XPASS 是例外，两边都算成失败但带 `[XPASS(strict)]` 标记，按标记纠正。文本输出反而分得清（`… XPASS (reason)`），所以两边都有时用文本把 `PASSED` 升级成 `XPASS`——**只升这一种**，其余一律以 XML 为准，免得给判定引入第二个真相来源。
+
+#### 实测：文本兜底只能兜住一半
+
+`-v` 的逐条行（`tests/test_a.py::test_x PASSED [ 33%]`）和 `-rA` 的短摘要（`PASSED tests/test_a.py::test_x`）都能解析，但**两种都要靠参数才有**。默认输出的进度点里没有用例 ID；短摘要那一节默认只打印失败和错误——实测 15 条用例的默认 `-q` 输出只捞得到 4 条，8 条通过的一条也看不见。
+
+短摘要还有一个坑：`SKIPPED [1] tests/test_a.py:26: reason` 给的是**文件:行号**，拿不到用例 ID，只能计数不能猜。
+
+所以 `check_integrity()` 把文本兜底一律记成"报告不完整"。理由是"这条用例没出现"既可能是它没跑，也可能是它通过了但没被打印——分不出来的时候记 `MISSING` 再罚 AI，罚的其实是我们自己的 `test_command` 少写了参数（C-13a）。
+
 ### `MISSING` 的处理
 
 题目里列了但报告里找不到的用例，状态记为 `MISSING`，**不算通过**（§6.4 已定）。
+
+**`MISSING` 由判定引擎（E4-T3）产生，不是解析器。** 它的定义是"题目里列了、报告里找不到"（协议 C-11），是一次**比对**的结果，只有同时拿着题目和报告才判得出来。解析器只报它看见的东西——`test_parser_never_emits_missing` 把这条钉住了。
+
+解析器要交出来的是自检材料（C-13b 三项），`ParsedReport.check_integrity(expected_ids)` 返回 `IntegrityCheck`：
+
+| 字段 | 对应 C-13b 第几项 | 干什么用 |
+|:---|:---|:---|
+| `report_complete` / `report_problem` | ① 报告是否完整生成 | 只有完整解析成功的 junitxml 才算完整；截断的和文本兜底的都不算 |
+| `reported_ids` / `missing_ids` | ② ID 归一化对不对 | 两边的 ID 摆在一起给人对照 |
+| `near_misses` | ② 同上 | 直接指出"节点部分一样、只有路径不同"的嫌疑对，非空基本就是解析器的锅 |
+| `collection_error_modules` | ③ 有没有收集错误 | 如实记录，**不判责** |
+
+`IntegrityCheck.blames_harness` 为 True 时走 C-13 的 (a) 分支：`FAILED` + `HARNESS_ERROR`，`agent_outcome = NULL`，计入平台故障率，不罚 AI。
+
+**收集错误不算进 `blames_harness`**：它既可能是 AI 改坏了 import（分支 b），也可能是题目坏了（分支 a），解析器分不出来。那一步归 E4-T3——它手里有"补丁改了哪些文件"，能拿 C-13c 要求的实际证据去判。
 
 ## 11.4 补丁归一化
 

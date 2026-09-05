@@ -667,17 +667,28 @@ def run_pytest(workspace: Workspace, cases: Sequence[str]) -> int:
         capture_output=True,
         timeout=GOLDEN_TEST_TIMEOUT_S,
         check=False,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": str(workspace.path),
-            "TZ": "UTC",
-            "LC_ALL": "C.UTF-8",
-            # 确定性三件套：哈希种子固定、不写 .pyc、不让用户的 PYTHONPATH 混进来
-            "PYTHONHASHSEED": "0",
-            "PYTHONDONTWRITEBYTECODE": "1",
-        },
+        env=pytest_env(workspace.path),
     )
     return completed.returncode
+
+
+def pytest_env(cwd: Path) -> dict[str, str]:
+    """跑 pytest 用的环境变量，**只此一份**。
+
+    单独抽出来是因为它有第二个调用方：`tests/fixtures/reports/_record.py` 录制
+    报告解析器的 fixture 时，要拿到 stdout（`run_pytest` 只返回退出码），
+    于是自己起子进程。两边各写一份环境的话，哪天有人漏了 `PYTHONHASHSEED`，
+    录出来的 fixture 和真实评测跑出来的报告就会不一样，而且看不出是从哪来的。
+    """
+    return {
+        "PATH": "/usr/bin:/bin",
+        "HOME": str(cwd),
+        "TZ": "UTC",
+        "LC_ALL": "C.UTF-8",
+        # 确定性三件套：哈希种子固定、不写 .pyc、不让用户的 PYTHONPATH 混进来
+        "PYTHONHASHSEED": "0",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
 
 
 def apply_patch(workspace: Workspace, patch_file: Path, patch: str) -> None:

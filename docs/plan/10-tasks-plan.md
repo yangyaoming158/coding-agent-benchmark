@@ -311,12 +311,35 @@
 
 ## E4 — Evaluation & Judge Engine
 
-### E4-T1 测试报告解析器（pytest junitxml + 文本兜底）
+### E4-T1 测试报告解析器（pytest junitxml + 文本兜底）✅ 已于 2026-09-05 完成
 - **Goal**：`{test_id: status}`；`normalize_test_id()` 覆盖 6+ 种 ID 形态
 - **Req**：FR-12, NFR-01 · **Deps**：E0-T2
 - **AC**：录制的 10 份真实报告 fixture 全部解析正确；ID 归一化单测覆盖相对/绝对路径、参数化、类方法、嵌套目录
 - **Risk**：中（**最易出静默 bug 的模块**，见 §11.3）
 - **P0 · C:M · E:1.5d**
+- **实际交付**（2026-09-05）：`app/judge/test_ids.py`（ID 归一化）+
+  `app/judge/report_parser.py`（报告解析）。12 份 fixture 录在
+  `backend/tests/fixtures/reports/`，139 条单测。
+  **fixture 是真跑出来的，不是手写的 XML** —— `_record.py` 用真 pytest 生成，
+  其中 4 份来自真实 Golden 题（textkit）。手写只会包含"我以为 pytest 会输出什么"，
+  而漏掉的怪癖恰恰是出静默 bug 的地方。跑 `python -m tests.fixtures.reports._record --check`
+  可以验证 fixture 还能被重新录出来。
+  ID 归一化单测覆盖 9 种写法（超出 AC 要求的 6 种）：相对路径、`./` 前缀、绝对路径、
+  反斜杠、重复斜杠、多层目录、类方法、参数化、转义的非 ASCII 参数。
+  实测确认的结论全部回填进了 §11.3，三条最要紧的：
+  **① junitxml 的 `classname` 是点分模块名，`a.b.C` 有歧义**，默认的 xunit2 没有
+  `file` 属性可以裁决，所以两种 family 都要能解析，有 `file` 就优先用。
+  **② 非 strict 的 XPASS 在 junitxml 里和 PASSED 一模一样**，协议 C-10 要求它是独立
+  状态但 XML 表达不了 —— 解析器如实报 `PASSED` 并把盲区标出来，不装作能分。
+  **③ 文本兜底天生残缺**：默认输出里 8 条通过的用例一条也看不见，所以一律记成
+  "报告不完整"，免得把我们自己 `test_command` 少写参数的锅算到 AI 头上（C-13a）。
+  顺手改掉了 `app/judge/__init__.py` 里"judge 负责补丁归一化"那句 —— 补丁归一化在
+  E3-T3 放进了 `app/runner/patch.py`，而 import-linter 有一条"judge 不依赖 runner"。
+- **决策**（2026-09-05）：`test_command` **不加** `-o junit_family=xunit1`。
+  两种 family 解析结果已证明逐条相同（`test_both_junit_families_agree`），加了只省掉
+  classname 的猜测环节；而真实仓库的 `test_command` 从上游推导，保不住这个参数——
+  只给 Golden 题加，会让开发时走的路径和真实评测走的不是同一条。
+  理由和改主意时要动哪几处，见 §11.3。
 
 ### E4-T2 测试执行器
 - **Goal**：纯净工作区 → apply agent_patch → 强制还原受保护路径 → apply test_patch → 容器内跑子集 → 收报告
