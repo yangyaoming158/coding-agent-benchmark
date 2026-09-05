@@ -367,11 +367,24 @@
   `scripts/check_env.py` 加了一条检查：镜像不在就提示跑 `make images`，
   否则那 6 条容器用例会**静默跳过**，看起来像全过了。
 
-### E4-T3 Judge（F2P/P2P 判定）
+### E4-T3 Judge（F2P/P2P 判定）✅ 已于 2026-09-05 完成
 - **Goal**：§11.2 判定逻辑 + `agent_outcome`/`infra_outcome` 映射表
 - **Req**：FR-12, NFR-01, NFR-09 · **Deps**：E4-T2
 - **AC**：真值表单测全过；同补丁重判 3 次结果与逐用例状态完全一致
 - **P0 · C:M · E:1d**
+- **实际交付**（2026-09-05）：`app/judge/decision.py` 的 `judge()`，纯函数，69 条单测。
+  映射表**不用新建** —— `INFRA_TO_AGENT_MAPPING` 和 `LEGAL_COMBINATIONS` 在 E0-T3
+  就随 `app/domain/protocol.py` 建好了，这里只查表（C-19 禁止把那张表的逻辑
+  散落到 if 分支里）。
+  真值表单测是**穷举**的：`InfraOutcome`（13 个）× "AI 启没启动"（2 种）全跑一遍，
+  每一格要么产出协议 §4.3 认可的合法组合，要么因为输入自相矛盾而拒绝。
+  穷举当场抓到两个 bug：`CANCELLED` 被错判成 `FAILED`（终态该是 `CANCELLED`），
+  以及 `lifecycle_status` 原本是硬写的、没法覆盖全部六行合法组合 ——
+  改成从映射表的"责任方"那一列推导之后就都对上了。
+  三条写进 §11.2 的结论：**① 责任在 AI 的故障判 `COMPLETED` 不是 `FAILED`**
+  （否则 AI 把自己搞崩就能从解决率分母里消失）；
+  **② `RESOLVED` 优先于 `EMPTY_PATCH`**（Noop 哨兵靠这个发现坏题）；
+  **③ `TEST_TIMEOUT` 不传对照组结论就抛异常，不猜**（猜错的两个方向后果相反）。
 
 ### E4-T4 端到端评测单元 `execute_task_run()`
 - **Goal**：把 PREPARING→…→COMPLETED 串起来，含状态持久化、制品落盘、异常映射、清理
