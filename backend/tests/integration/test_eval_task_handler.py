@@ -317,12 +317,15 @@ def test_queued_at_comes_from_the_job_not_from_now(
 
     用当前时间的话这个字段永远约等于 `completed_at`，等于没记 ——
     而它要回答的是"这道题排了多久队"，是容量模型的输入。
+
+    所以直接跟作业行的 `created_at` 对齐。**不要**改成跟 `completed_at` 比大小：
+    这个测试里的 `completed_at` 是写死的假时间戳（`START`），而 `queued_at`
+    走的是数据库真实时钟，两者比大小只是在比"现在几点"，CI 上必然翻车。
     """
     record(factory, settings, ids, InfraOutcome.SUCCESS)
     row = attempts_of(factory)[0]
     assert row.queued_at is not None
-    assert row.completed_at is not None
-    assert row.queued_at <= row.completed_at
+    assert row.queued_at == eval_jobs(factory)[0].created_at
 
 
 # ── 可重试的故障 ────────────────────────────────────────────
