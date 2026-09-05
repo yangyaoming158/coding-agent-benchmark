@@ -341,11 +341,31 @@
   只给 Golden 题加，会让开发时走的路径和真实评测走的不是同一条。
   理由和改主意时要动哪几处，见 §11.3。
 
-### E4-T2 测试执行器
+### E4-T2 测试执行器 ✅ 已于 2026-09-05 完成
 - **Goal**：纯净工作区 → apply agent_patch → 强制还原受保护路径 → apply test_patch → 容器内跑子集 → 收报告
 - **Req**：FR-06, FR-12, NFR-04 · **Deps**：E2-T1, E2-T2, E4-T1
 - **AC**：Agent 改测试的用例被证明无效（防作弊集成测试）
 - **P0 · C:L · E:2d · 🐳**
+- **实际交付**（2026-09-05）：`app/evaluation/executor.py` 的 `execute_tests()`，
+  跑协议 C-14 的第 1–6 步。22 条测试（16 条纯 git，6 条真起容器）。
+  AC 用真实 Golden 题验：作弊补丁把 `tests/test_csvline.py` 整个换成 `assert True`，
+  三条 F2P 照样全挂；新塞 `conftest.py` 把用例全跳过，也照样全挂。
+  喂进去的是**没经过 E3-T3 过滤的原始补丁** —— 故意的，C-16 要求第二道防线单独成立。
+  **它不在 `app/judge/`**：import-linter 里 `app.sandbox | app.judge` 并排＝互不可见，
+  judge 看不到 sandbox，起不了容器。放 `app.evaluation`，它在 runner 之上，两边都看得见。
+  同理执行器收的是 `app.domain.execution_plan.ExecutionPlan` 而不是 `TaskDefinition`
+  （evaluation 也看不见 benchmark），转换口是 `TaskDefinition.execution_plan()`，
+  **刻意不带 `gold_patch` 和 `issue_body`** —— 跑测试用不着答案，带上只是多一条泄漏路径。
+  最要命的一个坑回填进了 §11.2：**`git apply --3way` 会把结果暂存进索引**，
+  于是 AI 新建的 `conftest.py` 成了"已暂存的新增文件"，
+  `git checkout HEAD -- conftest.py` 报 pathspec 不匹配，防作弊直接崩在这里。
+  修法是打完补丁立刻 `git reset --quiet HEAD`。这个坑只在真走 `git apply` 时出现，
+  直接把文件写进工作区测不出来。
+- **临时方案**：测试镜像用 `images/golden/Dockerfile`（`python:3.11-slim` + pytest 9.1.1），
+  `make images` 建。**这不是 E2-T3**——执行器只收 `image` 参数，不关心镜像哪来的，
+  E2-T3 的分层构建器到位后换个来源就行，代码一行不用改。
+  `scripts/check_env.py` 加了一条检查：镜像不在就提示跑 `make images`，
+  否则那 6 条容器用例会**静默跳过**，看起来像全过了。
 
 ### E4-T3 Judge（F2P/P2P 判定）
 - **Goal**：§11.2 判定逻辑 + `agent_outcome`/`infra_outcome` 映射表
