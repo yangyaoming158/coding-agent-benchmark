@@ -12,8 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from app.benchmark.patch_paths import derive_patch_paths
 from app.domain.enums import CostSource
+from app.domain.patch_paths import derive_patch_paths
 from app.domain.protected_paths import enforcement_patterns, is_protected, protected_hits
 from app.runner.adapters import MockBehavior, MockRunner, NoopRunner, OracleRunner
 from app.runner.adapters.base import GOLD_PATCH_MISSING

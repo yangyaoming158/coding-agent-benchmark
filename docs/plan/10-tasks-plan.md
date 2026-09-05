@@ -240,11 +240,44 @@
   ③ `AgentRunner` 草图里还挂着 `build_image`，拆成 `ImageBuildingRunner`（E3-T1 的
   改动，E3-T2 证实了 Mock/Oracle/Noop 三个都不需要镜像）。
 
-### E3-T3 Patch 捕获与归一化
+### E3-T3 Patch 捕获与归一化 ✅ 已于 2026-09-05 完成
 - **Goal**：`git diff` → 剔除受保护路径/噪声文件 → 统计 → NormalizedPatch
 - **Req**：FR-08, NFR-04 · **Deps**：E2-T1
 - **AC**：Agent 改测试文件时该改动被剔除；`__pycache__`/`.aider*` 被忽略；输出可 `git apply --3way`
 - **P0 · C:M · E:1d**
+- **实际交付**（2026-09-05）：`app/runner/patch.py`。
+  `capture_workspace_diff()` 抓补丁（`git add -A` → `git diff --cached <base_sha>`），
+  `normalize_patch()` 按 §11.4 过滤，产出 `NormalizedPatch`（补丁正文 + 统计 +
+  被丢弃改动的清单）。两份补丁都留：只留标准化的，"AI 试图改测试文件"就再也查不到了。
+  **取舍的最小单位是文件段，不是行。** 删掉 hunk 里的几行之后，hunk 头声明的行数
+  和实际行数就对不上，`git apply` 报 `corrupt patch` —— 一个打不上的"标准化补丁"
+  会被判成 `INVALID_PATCH`，而责任其实在平台。这类 bug 最难查，因为它看起来
+  像 AI 交了个坏补丁。为此给 `app.domain.patch_paths` 加了 `iter_diff_sections()`，
+  留下来的段逐字节不动。
+  几条实测确认的结论：
+  **① 噪声只判新建文件。** 真有仓库跟踪着 `debug.log`、`*.so`，改它是合法修复，
+  当噪声丢掉就是把 AI 的修复悄悄删了。这和工作区那边是同一套语义 ——
+  `.git/info/exclude` 只管物化之后新出现的文件，base 提交用的是 `git add -A --force`。
+  **② 行尾只归一化结构行，内容行原样保留。** `+foo\r` 有两种可能：补丁文件本身是
+  CRLF 存的，或者这一行真的要写一个 CR。从补丁里分不出来，猜错第二种就是悄悄改掉了
+  AI 的修改内容。结构行没有这个歧义。
+  **③ 受保护路径排在分类顺序最前面。** `tests/` 下的二进制文件要报成 `protected_path`
+  而不是 `binary` —— 报成 binary 就把"AI 动了测试目录"这条证据盖掉了，
+  而那是要触发人工复核的信号（C-13d）。
+  **④ `protected_patterns` 是必填的，没有默认值。** 完整清单要含该题的
+  `test_patch_paths`（C-42 最后一条、C-74）；给个"通用规则"的默认值，等于让
+  "忘了传该题清单"变成一个不报错的选项，而后果是解决率静悄悄偏高。
+  **⑤ `git apply --3way` 对新建文件会打印 "Falling back to direct application..."
+  然后正常应用**（blob 不在本地对象库里），退出码 0。实测确认，判 `--3way` 成功
+  要看退出码，不能看有没有 stderr 输出。
+  验收证据：三条 AC 各有对应用例，`tests/sandbox/test_patch_capture.py` 真的物化工作区、
+  真的改文件、真的 `git apply --3way` 打回一份干净工作区，打完确认作弊的测试改动
+  没落地、Agent 新建的源文件落地了。新增 60 条测试（合计 669，其中 16 条需 Docker）。
+- **顺带把 `app/benchmark/patch_paths.py` 移到了 `app/domain/`**：`app.runner` 在
+  分层里压在 `app.benchmark` 下面，import 不到它，而归一化要用同一套 diff 解析规则。
+  各写一份的话两个 diff 解析器一定会漂，而"解析漏一个文件"的表现是那个文件不受保护、
+  AI 改了也生效。这个模块本来就只依赖 `app.domain.protected_paths`，放 domain 合适。
+  原有 14 条解析用例一行没改就全过，等于证明了搬家没改行为。
 
 ### E3-T4 AiderRunner（第一个真实 Agent）
 - **Goal**：容器内非交互运行 Aider，采集 patch/token/cost/轨迹
