@@ -235,6 +235,42 @@ RETURNING *;
 
 **万一走不通怎么办**：如果自己写的队列出现查不出原因的可靠性问题，并且卡了超过 1 天，就换成 RQ。因为队列实现被隔离在 `infrastructure/queue.py` 一个文件里，作业处理的代码不用动，切换大概 0.5~1 天。这条写进 ADR-003 的风险栏。
 
+### 15.2.1 实测回填（E5-T1，2026-09-05）
+
+上面那段 SQL 落地成 `app/infrastructure/queue.py` 之后，有四处和"照着写就行"不一样：
+
+**① `UPDATE ... RETURNING` 要加 `populate_existing`。** 用 SQLAlchemy 的 ORM 版
+`update(JobQueue).returning(JobQueue)` 时，如果这条作业已经在当前 session 的身份映射里
+（比如刚 `enqueue` 完就 `lease`），RETURNING 回来的是那份**旧**属性 —— `state` 还写着
+`PENDING`、`attempts` 还是 0，而数据库里其实已经改了。要显式加
+`execution_options(populate_existing=True)`。Worker 每次都开新 session 碰不到这个，
+但测试和编排层会。
+
+**② 租约归属要写进 SQL 的 WHERE，不能只在 Python 里判。** `renew_lease` 和 `finish`
+都带 `lease_owner = :worker_id`，改不到行就抛 `LeaseLostError`，调用方必须让事务回滚。
+挡的场景是：Worker 卡住超过租约时长 → 回收器把作业交给了另一个 Worker → 第一个醒过来
+接着写结果。不拦的话同一道题会落两条 attempt 记录、成本被重复计一次。
+
+**③ 时间全部用数据库时钟。** `lease_expires_at`、`available_at` 都写成
+`now() + CAST('N seconds' AS INTERVAL)`，不在 Python 端算绝对时间。判断租约是否过期
+用的是数据库的 `now()`，两边时钟差几秒就会出现"没到期就被回收"或者"过期很久没人收"。
+
+**④ 僵尸回收之后有退避窗口。** 回收器把作业退回 `PENDING` 时会设
+`available_at = now() + 2^attempts × base`，所以**不是**立刻可领。这是有意的：
+立刻可领的话，一个必然把 Worker 搞崩的作业会在几毫秒内把重试次数烧光，
+而重试的意义正是给外部故障留出恢复时间。
+
+**处理函数跑在独立线程里。** 跑在主线程的话主线程会卡在处理函数里，
+`worker_shutdown_grace_s` 就成了摆设 —— 而 docker daemon 偶尔会假死，那时唯一的出路是
+`kill -9`，一 `kill -9` 就会留下残留容器，正好是验收标准要挡的那件事。
+主线程改成 `join(timeout=1s)` 轮询，信号才处理得到（Python 的信号处理器只在主线程跑）。
+
+**两种重试不能混。** `job_queue.attempts` 管的是"Worker 崩了 / 处理函数抛异常"，
+协议 C-18 的映射表管的是"评测本身遇到平台故障"。`execute_task_run()` 不抛异常，
+所以跑出 `ENV_BUILD_FAILED` 对队列来说是一次**成功的作业**；评测的重试是**另投一条
+作业**（新 `attempt_no`），不是把这条作业重来。混用会让重试预算从 C-18 的 1 次
+变成 `max_attempts` 的 3 次。规则实现在 `app/domain/retry.py`。
+
 ## 15.3 全局限流与退避
 LLM 提供方 429 是长跑实验的头号杀手。设计一个 `RateLimiter`（按 `agent_config_id` 分桶的令牌桶 + 自适应退避）：连续 429 时自动降低该配置的有效并发（`AGENT_CONCURRENCY -= 1`，下限 1），成功一段时间后缓慢恢复。**所有等待时间累加到 `external_wait_ms`**，用于性能报告中把"平台吞吐"和"外部限流"分开（§4.6 Plan B）。
 

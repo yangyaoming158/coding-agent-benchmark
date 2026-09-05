@@ -4,6 +4,7 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
+        seed-tasks worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images
 
@@ -25,6 +26,10 @@ install:             ## 安装前后端依赖并装好提交钩子
 # scripts/ 和 docs/ 下的 Python 也要检查。原来只在 backend/ 里跑 ruff，
 # 那两个目录是盲区 —— scripts/check_commit_msg.py 里的中文标识符就是这么活下来的
 LINT_PATHS := . ../scripts ../docs
+
+# `make enqueue` 的默认参数，命令行可以覆盖：make enqueue AGENT=noop NAME=noop-smoke
+AGENT ?= oracle
+NAME ?= adhoc
 
 lint:                ## 代码检查（含 scripts/ 和 docs/ 下的脚本）
 	$(UV) ruff check $(LINT_PATHS)
@@ -100,6 +105,18 @@ migrate-check:       ## 检查模型和迁移有没有对不上
 
 seed:                ## 写入哨兵 Agent 的种子数据
 	$(UV) python -m cli.seed
+
+seed-tasks:          ## 把 Golden 题写进库（开发用，不跑验证流水线）
+	$(UV) python -m cli.queue seed-golden
+
+worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
+	$(UV) python -m app.worker
+
+enqueue:             ## 建一次实验并把库里的题全投进队列（AGENT=oracle NAME=adhoc）
+	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME)
+
+queue:               ## 看作业队列现状
+	$(UV) python -m cli.queue status
 
 env:                 ## 开发环境自检
 	python3 scripts/check_env.py

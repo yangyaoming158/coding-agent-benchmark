@@ -414,11 +414,62 @@
 
 ## E5 — Evaluation Orchestration
 
-### E5-T1 Postgres 队列与 Worker 框架
+### E5-T1 Postgres 队列与 Worker 框架 ✅ 已于 2026-09-05 完成
 - **Goal**：SKIP LOCKED 领取、租约续期、僵尸回收、退避重试、优雅停机、孤儿容器回收
 - **Req**：FR-11 · **Deps**：E0-T3
 - **AC**：杀死 Worker 后作业能被另一 Worker 接管；重试次数与退避符合配置；SIGTERM 后无残留容器
 - **P0 · C:L · E:2d · ⚙DB**
+- **实际交付**（2026-09-05）：`app/infrastructure/queue.py`（通用队列，不认识"评测"，
+  ADR-003 说的"换 RQ 只改一个文件"由它保证）、`app/domain/retry.py`（C-24/C-71 的纯函数）、
+  `app/worker/`（主循环 + 心跳 + 优雅停机 + 容器回收 + `EVAL_TASK` 处理函数）、
+  `app/runner/adapters/stored.py`（C-54 的补丁重放）、`cli/queue.py`（投作业/看队列）。
+  验收证据：Oracle 跑四道 Golden 题 4/4 全 RESOLVED 且全部 `is_canonical`，
+  作业全部 DONE，SIGTERM 之后 `docker ps -a --filter label=bench.owner=...` 为空。
+
+**三个设计决定，每个都是为了挡一类具体的错：**
+
+**① 两种重试严格分开。** `job_queue.attempts`（Worker 崩了 / 处理函数抛异常，
+按 `max_attempts` 和 `2^n×base` 退避）和 `evaluation_task_runs.attempt_no`
+（协议 C-18 按故障类型规定次数）是两件事。`execute_task_run()` **不抛异常**，
+每种失败都返回一个 `infra_outcome` —— 所以"跑出 `ENV_BUILD_FAILED`"对队列来说是一次
+**成功的作业**（DONE），评测层面的重试是**另投一条作业**（C-32 要求重试新建记录）。
+混用的话，`ENV_BUILD_FAILED` 的重试次数会从 C-18 规定的 1 次变成 `max_attempts` 的 3 次。
+
+**② `evaluation_task_runs` 行跑完才建，不在领取时建。** 领取时就建的话，
+Worker 被 `kill -9` 会留下一条卡在 `AGENT_RUNNING` 的记录，接手的 Worker 只有两条路
+且都不通：复用它要把状态退回 `PREPARING`（C-32 禁止），新建一条会撞
+`uq_task_run_attempt`。跑完才建就没这问题，代价是跑的过程中要去
+`job_queue`（`state='LEASED'`）看"现在哪道题在跑"——这正是 ADR-003 选 Postgres
+队列的第四条理由。
+
+**③ 事务边界是三段短的，不是一段长的。** 领取一段、干活不在事务里（十几分钟）、
+落库+决定重试+收尾一段。第三段那几件事必须一起提交：结果写了但没人接着重试，
+这道题永远停在一个可重试的故障上；作业标了完成但结果没写，这道题凭空消失。
+
+**四个实测踩到的坑：**
+
+**① `update(...).returning(JobQueue)` 会命中 session 的身份映射。** 同一个 session
+里刚 `enqueue` 完再 `lease`，RETURNING 回来的是那份**旧**属性（`state` 还写着
+`PENDING`、`attempts` 还是 0），而数据库里其实已经改了。加
+`execution_options(populate_existing=True)` 才对。Worker 每次都开新 session 所以
+碰不到，但测试和以后的编排层会。
+
+**② 租约归属必须在 SQL 的 WHERE 里校验，不能只在 Python 里判。** `renew_lease` 和
+`finish` 都带 `lease_owner = :worker_id`，改不到行就抛 `LeaseLostError`。挡的是
+"Worker 卡住超过租约 → 被回收器交给别人 → 它醒过来接着写结果"，不拦的话同一道题
+会落两条 attempt、成本重复计一次。
+
+**③ 时间一律用数据库的 `now()`。** 租约是否过期由回收器按数据库时钟判断，
+Worker 用自己的时钟写、数据库用自己的时钟读，差几秒就会出现"没到期就被回收"。
+
+**④ 回收之后有退避窗口，不是立刻可领。** 写测试时以为回收完马上能领到，
+实际要等 `2^attempts × base`。这是有意的：立刻可领的话，一个必然把 Worker 搞崩的
+作业会在几毫秒内把重试次数烧光。
+
+**明确没做（留给后续任务）**：C-20 的对照组执行（`needs_control_run` 只落库不消费，
+C-72 规定它不算一次 attempt，够单开一个任务）；双层并发信号量、进度聚合、取消
+（E5-T2）；限流令牌桶（E5-T3）。`cli/queue.py` 的 `seed-golden` 只是把题原样写进库，
+**不是** E1-T3 的验证流水线，`validation_state` 停在 `DISCOVERED`。
 
 ### E5-T2 EvaluationRun 编排与双层并发
 - **Goal**：展开 N 个 task_run、双层信号量、进度聚合、取消、失败重跑
