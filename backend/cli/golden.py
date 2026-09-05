@@ -544,15 +544,15 @@ def verify_task(task: TaskDefinition, *, mirror_root: Path | None = None) -> lis
         steps.append(_step_patch_hygiene(task, agent_ws, root))
 
         # Noop 侧：只打测试补丁，等价于"被测 AI 交了个空补丁"
-        _apply_patch(agent_ws, root / "test.patch", task.test_patch)
+        apply_patch(agent_ws, root / "test.patch", task.test_patch)
         steps.append(_step_f2p_all_fail(task, agent_ws))
         steps.append(
             _step_all_pass(agent_ws, 4, "P2P 在 base + test_patch 上全过", task.pass_to_pass)
         )
 
         # Oracle 侧：先打官方补丁，再打测试补丁（顺序同协议 C-14 的第 2 步和第 4 步）
-        _apply_patch(oracle_ws, root / "gold.patch", task.gold_patch)
-        _apply_patch(oracle_ws, root / "test2.patch", task.test_patch)
+        apply_patch(oracle_ws, root / "gold.patch", task.gold_patch)
+        apply_patch(oracle_ws, root / "test2.patch", task.test_patch)
         steps.append(
             _step_all_pass(oracle_ws, 5, "F2P 在 base + gold + test 上全过", task.fail_to_pass)
         )
@@ -584,8 +584,8 @@ def _step_patch_hygiene(task: TaskDefinition, workspace: Workspace, tmp: Path) -
     non_test_in_test_patch = [
         p for p in task.test_patch_paths if not is_protected(p, DEFAULT_PROTECTED_PATTERNS)
     ]
-    appliable = _patch_applies(workspace, tmp / "check-gold.patch", task.gold_patch) and (
-        _patch_applies(workspace, tmp / "check-test.patch", task.test_patch)
+    appliable = patch_applies(workspace, tmp / "check-gold.patch", task.gold_patch) and (
+        patch_applies(workspace, tmp / "check-test.patch", task.test_patch)
     )
     passed = not protected_in_gold and not non_test_in_test_patch and appliable
     detail = (
@@ -607,7 +607,7 @@ def _step_f2p_all_fail(task: TaskDefinition, workspace: Workspace) -> StepResult
     passing = []
     missing = []
     for case in task.fail_to_pass:
-        code = _run_pytest(workspace, [case])
+        code = run_pytest(workspace, [case])
         if code == PYTEST_OK:
             passing.append(case)
         elif code in (PYTEST_USAGE_ERROR, PYTEST_NO_TESTS):
@@ -631,7 +631,7 @@ def _step_all_pass(workspace: Workspace, number: int, name: str, cases: list[str
     这里可以一次跑完：pytest 只有在**全部**通过时才返回 0，任何一条挂了、
     或者任何一个用例 ID 不存在（退出码 4），都不是 0。
     """
-    code = _run_pytest(workspace, cases)
+    code = run_pytest(workspace, cases)
     if code == PYTEST_OK:
         return StepResult(number, name, True, f"{len(cases)} 条全部通过")
     if code in (PYTEST_USAGE_ERROR, PYTEST_NO_TESTS):
@@ -639,8 +639,12 @@ def _step_all_pass(workspace: Workspace, number: int, name: str, cases: list[str
     return StepResult(number, name, False, f"有用例没通过（pytest 退出码 {code}）")
 
 
-def _run_pytest(workspace: Workspace, cases: Sequence[str]) -> int:
+def run_pytest(workspace: Workspace, cases: Sequence[str]) -> int:
     """在工作区里跑指定用例，返回 pytest 的退出码。
+
+    公开接口：E3-T2 的哨兵验证也用它。里面那套环境变量是**确定性的一部分**，
+    各处自己写一份的话，哪天有人漏了 `PYTHONHASHSEED`，同一个补丁两次判定
+    可能得到不同结果，而且没人看得出来是从哪来的。
 
     用 `python -m pytest` 而不是 `pytest`：前者会把当前工作目录放进 sys.path，
     工作区里的 `textkit`、`auth` 这些包才 import 得到。换成 `pytest` 会以
@@ -676,12 +680,12 @@ def _run_pytest(workspace: Workspace, cases: Sequence[str]) -> int:
     return completed.returncode
 
 
-def _apply_patch(workspace: Workspace, patch_file: Path, patch: str) -> None:
+def apply_patch(workspace: Workspace, patch_file: Path, patch: str) -> None:
     patch_file.write_text(patch, encoding="utf-8")
     run_git(["apply", "--whitespace=nowarn", str(patch_file)], cwd=workspace.path)
 
 
-def _patch_applies(workspace: Workspace, patch_file: Path, patch: str) -> bool:
+def patch_applies(workspace: Workspace, patch_file: Path, patch: str) -> bool:
     patch_file.write_text(patch, encoding="utf-8")
     result = run_git(
         ["apply", "--check", "--whitespace=nowarn", str(patch_file)],

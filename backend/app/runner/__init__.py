@@ -7,6 +7,10 @@
     line = task_input.to_stdin_line()          # 喂给适配器的 stdin
     result = read_result(stdout, result_file=cfg.result_file)   # 读回结果
 
+三个哨兵适配器在 `app.runner.adapters`（E3-T2）：Oracle 交官方补丁、
+Noop 交空补丁、Mock 按配置在六种行为里挑一种。它们不调用任何外部服务，
+所以整条评测链在没有大模型额度、没有网络的情况下也能自测。
+
 写一个新适配器要做三件事：
 
 1. 实现 `AgentRunner`（`name` / `probe()` / `run()`）；要自带镜像层再实现
