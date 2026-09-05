@@ -65,7 +65,11 @@ E4-T1 实现时在开发机上用 pytest 9.1.1 跑出来的结论（2026-09-05�
 
 **② `junit_family` 决定有没有 `file` 属性。** 默认的 `xunit2` 没有；`-o junit_family=xunit1` 会额外写 `file="tests/sub/test_nested.py" line="0"`，歧义当场消失。**解析器两种都支持**：有 `file` 就用它，没有就按 pytest 的默认收集规则（模块叫 `test_*.py`、类以 `Test` 开头）打分挑最可能的切分，其余切法留作备选 ID 一起匹配。
 
-> 待决策：要不要给 `test_command` 统一加 `-o junit_family=xunit1`。加了要同步改 `backend/cli/golden.py` 的 `DEFAULT_ENVIRONMENT` 和 `datasets/golden/environments/*.json`，而真实仓库的 `test_command` 是从上游推导的，未必保得住这个参数。**不加也能跑**——`test_both_junit_families_agree` 证明了两种 family 解析结果逐条相同。
+> **已决定不加（2026-09-05）**：`test_command` 保持现状，不加 `-o junit_family=xunit1`。
+>
+> 两条理由。一是**不需要**：`test_both_junit_families_agree` 证明了两种 family 解析出来逐条相同，加了只是省掉 classname 的猜测环节。二是**保不住**：真实仓库的 `test_command` 是从上游推导的，未必带得上这个参数；只给 Golden 题加，等于让开发时走的路径和真实评测走的不是同一条——那种"本地全绿、真跑才炸"的差异最难查。
+>
+> 改主意的话要动三处：`backend/cli/golden.py` 的 `DEFAULT_ENVIRONMENT`、`datasets/golden/environments/*.json`（跑 `make golden` 重新生成）、以及本节这段。
 
 **③ 参数化用例里的非 ASCII 会被转义。** `test_param["带空格 的"]` 在 XML 里是 `name="test_param[\u5e26\u7a7a\u683c \u7684]"`，是字面的反斜杠 u 序列，不是中文。题目里的 F2P ID 写中文原文就对不上，要先还原。这是第 7 种 ID 形态。
 

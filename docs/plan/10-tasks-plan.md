@@ -335,8 +335,11 @@
   "报告不完整"，免得把我们自己 `test_command` 少写参数的锅算到 AI 头上（C-13a）。
   顺手改掉了 `app/judge/__init__.py` 里"judge 负责补丁归一化"那句 —— 补丁归一化在
   E3-T3 放进了 `app/runner/patch.py`，而 import-linter 有一条"judge 不依赖 runner"。
-- **待决策**：要不要给 `test_command` 统一加 `-o junit_family=xunit1`（见 §11.3）。
-  不加也能跑，加了能去掉 classname 的猜测环节。
+- **决策**（2026-09-05）：`test_command` **不加** `-o junit_family=xunit1`。
+  两种 family 解析结果已证明逐条相同（`test_both_junit_families_agree`），加了只省掉
+  classname 的猜测环节；而真实仓库的 `test_command` 从上游推导，保不住这个参数——
+  只给 Golden 题加，会让开发时走的路径和真实评测走的不是同一条。
+  理由和改主意时要动哪几处，见 §11.3。
 
 ### E4-T2 测试执行器
 - **Goal**：纯净工作区 → apply agent_patch → 强制还原受保护路径 → apply test_patch → 容器内跑子集 → 收报告
