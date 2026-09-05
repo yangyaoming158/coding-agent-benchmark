@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="3" skipped="0" tests="7" time="0.100" timestamp="2026-09-05T00:00:00+00:00" hostname="fixture-host"><testcase classname="tests.test_csvline" name="test_double_quote_inside_quoted_field" time="0.01"><failure message="assert ['&quot;he said &quot;&quot;hi&quot;&quot;&quot;', 'done'] == ['he said &quot;hi&quot;', 'done']&#10;  &#10;  At index 0 diff: '&quot;he said &quot;&quot;hi&quot;&quot;&quot;' != 'he said &quot;hi&quot;'&#10;  &#10;  Full diff:&#10;    [&#10;  -     'he said &quot;hi&quot;',&#10;  +     '&quot;he said &quot;&quot;hi&quot;&quot;&quot;',...&#10;  &#10;  ...Full output truncated (3 lines hidden), use '-vv' to show">def test_double_quote_inside_quoted_field():
+&gt;       assert parse_line('"he said ""hi""",done') == ['he said "hi"', "done"]
+E       assert ['"he said ""hi"""', 'done'] == ['he said "hi"', 'done']
+E         
+E         At index 0 diff: '"he said ""hi"""' != 'he said "hi"'
+E         
+E         Full diff:
+E           [
+E         -     'he said "hi"',
+E         +     '"he said ""hi"""',...
+E         
+E         ...Full output truncated (3 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:29: AssertionError</failure></testcase><testcase classname="tests.test_csvline" name="test_quoted_field_in_the_middle" time="0.01"><failure message="assert ['x', '&quot;y', 'z&quot;', 'w'] == ['x', 'y,z', 'w']&#10;  &#10;  At index 1 diff: '&quot;y' != 'y,z'&#10;  Left contains one more item: 'w'&#10;  &#10;  Full diff:&#10;    [&#10;        'x',...&#10;  &#10;  ...Full output truncated (7 lines hidden), use '-vv' to show">def test_quoted_field_in_the_middle():
+&gt;       assert parse_line('x,"y,z",w') == ["x", "y,z", "w"]
+E       assert ['x', '"y', 'z"', 'w'] == ['x', 'y,z', 'w']
+E         
+E         At index 1 diff: '"y' != 'y,z'
+E         Left contains one more item: 'w'
+E         
+E         Full diff:
+E           [
+E               'x',...
+E         
+E         ...Full output truncated (7 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:25: AssertionError</failure></testcase><testcase classname="tests.test_csvline" name="test_quoted_field_keeps_comma" time="0.01"><failure message="assert ['&quot;a', 'b&quot;', 'c'] == ['a,b', 'c']&#10;  &#10;  At index 0 diff: '&quot;a' != 'a,b'&#10;  Left contains one more item: 'c'&#10;  &#10;  Full diff:&#10;    [&#10;  -     'a,b',...&#10;  &#10;  ...Full output truncated (6 lines hidden), use '-vv' to show">def test_quoted_field_keeps_comma():
+&gt;       assert parse_line('"a,b",c') == ["a,b", "c"]
+E       assert ['"a', 'b"', 'c'] == ['a,b', 'c']
+E         
+E         At index 0 diff: '"a' != 'a,b'
+E         Left contains one more item: 'c'
+E         
+E         Full diff:
+E           [
+E         -     'a,b',...
+E         
+E         ...Full output truncated (6 lines hidden), use '-vv' to show
+
+tests/test_csvline.py:21: AssertionError</failure></testcase><testcase classname="tests.test_csvline" name="test_keeps_empty_fields" time="0.01" /><testcase classname="tests.test_csvline" name="test_single_field" time="0.01" /><testcase classname="tests.test_csvline" name="test_splits_plain_fields" time="0.01" /><testcase classname="tests.test_csvline" name="test_strips_trailing_newline" time="0.01" /></testsuite></testsuites>

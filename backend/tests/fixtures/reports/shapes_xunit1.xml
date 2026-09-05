@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="1" failures="3" skipped="2" tests="15" time="0.100" timestamp="2026-09-05T00:00:00+00:00" hostname="fixture-host"><testcase classname="tests.sub.test_nested" name="test_deep" file="tests/sub/test_nested.py" line="0" time="0.01" /><testcase classname="tests.test_shapes" name="test_ok" file="tests/test_shapes.py" line="3" time="0.01" /><testcase classname="tests.test_shapes" name="test_assert_fail" file="tests/test_shapes.py" line="7" time="0.01"><failure message="AssertionError: one is not two&#10;assert 1 == 2">def test_assert_fail():
+&gt;       assert 1 == 2, "one is not two"
+E       AssertionError: one is not two
+E       assert 1 == 2
+
+tests/test_shapes.py:9: AssertionError</failure></testcase><testcase classname="tests.test_shapes" name="test_raises_runtime" file="tests/test_shapes.py" line="11" time="0.01"><failure message="RuntimeError: boom in body">def test_raises_runtime():
+        """函数体里抛异常 —— junitxml 记成 &lt;failure&gt;，不是 &lt;error&gt;。"""
+&gt;       raise RuntimeError("boom in body")
+E       RuntimeError: boom in body
+
+tests/test_shapes.py:14: RuntimeError</failure></testcase><testcase classname="tests.test_shapes" name="test_setup_error" file="tests/test_shapes.py" line="21" time="0.01"><error message="failed on setup with &quot;ValueError: fixture blew up&quot;">@pytest.fixture
+    def broken_fixture():
+&gt;       raise ValueError("fixture blew up")
+E       ValueError: fixture blew up
+
+tests/test_shapes.py:19: ValueError</error></testcase><testcase classname="tests.test_shapes" name="test_skipped" file="tests/test_shapes.py" line="26" time="0.01"><skipped type="pytest.skip" message="not today">/repo/tests/test_shapes.py:28: not today</skipped></testcase><testcase classname="tests.test_shapes" name="test_xfail" file="tests/test_shapes.py" line="30" time="0.01"><skipped type="pytest.xfail" message="known bug" /></testcase><testcase classname="tests.test_shapes" name="test_xpass" file="tests/test_shapes.py" line="35" time="0.01" /><testcase classname="tests.test_shapes" name="test_xpass_strict" file="tests/test_shapes.py" line="41" time="0.01"><failure message="[XPASS(strict)] strict one">[XPASS(strict)] strict one</failure></testcase><testcase classname="tests.test_shapes" name="test_param[1]" file="tests/test_shapes.py" line="47" time="0.01" /><testcase classname="tests.test_shapes" name="test_param[2]" file="tests/test_shapes.py" line="47" time="0.01" /><testcase classname="tests.test_shapes" name="test_param[\u5e26\u7a7a\u683c \u7684]" file="tests/test_shapes.py" line="47" time="0.01" /><testcase classname="tests.test_shapes.TestGroup" name="test_method" file="tests/test_shapes.py" line="53" time="0.01" /><testcase classname="tests.test_shapes.TestGroup" name="test_method_param[0]" file="tests/test_shapes.py" line="56" time="0.01" /><testcase classname="tests.test_shapes.TestGroup" name="test_method_param[1]" file="tests/test_shapes.py" line="56" time="0.01" /></testsuite></testsuites>

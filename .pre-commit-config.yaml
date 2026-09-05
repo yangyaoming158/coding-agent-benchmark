@@ -6,8 +6,15 @@ repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
+      # 录制的测试报告 fixture 不能被这三个钩子动。它们是 pytest 真实输出的
+      # 逐字节副本：stdout 里 `[ 33%]` 前面的空格是真的，truncated_*.xml 是
+      # 故意从标签中间切断的（模拟容器被杀）。"顺手清理"一下，它们就不再代表
+      # 真实工具的输出了 —— 而"别手写 XML"正是这批 fixture 存在的理由。
+      # 改完要能用 `python -m tests.fixtures.reports._record --check` 重新录出来。
       - id: trailing-whitespace
+        exclude: &recorded_reports ^backend/tests/fixtures/reports/.*\.(xml|txt)$
       - id: end-of-file-fixer
+        exclude: *recorded_reports
       - id: check-yaml
       - id: check-toml
       - id: check-json
@@ -16,6 +23,7 @@ repos:
         args: ["--maxkb=512"]     # 大文件走制品存储，不进仓库（AGENTS.md 第 7 节）
       - id: mixed-line-ending
         args: ["--fix=lf"]
+        exclude: *recorded_reports
 
   - repo: local
     hooks:
