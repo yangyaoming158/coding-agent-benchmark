@@ -240,14 +240,26 @@ def test_another_worker_takes_over_a_dead_workers_job(
     assert reload(factory, job_id).lease_owner == "dead-worker"
 
     seen: list[int] = []
+    # 退避基数在这条测试里特意放大到 5 秒。原来用的是夹具里的 0.01 秒，
+    # 而"回收"和"领取"是两个事务、各开一次连接 —— 机器一忙，这 20 毫秒的窗口
+    # 就在两次查询之间过完了，作业变成可领，断言翻车。CI 上真翻过一次（2026-09-06）
     survivor = make_worker(
-        settings, factory, {JobType.EVAL_TASK: lambda ctx: seen.append(ctx.job_id)}
+        settings.model_copy(update={"job_retry_backoff_base_s": 5.0}),
+        factory,
+        {JobType.EVAL_TASK: lambda ctx: seen.append(ctx.job_id)},
     )
 
-    # 回收之后要先过退避（2^1 × 0.01 秒）才能被再领走。立刻可领的话，
+    # 回收之后要先过退避（2^1 × base 秒）才能被再领走。立刻可领的话，
     # 一个必然把 Worker 搞崩的作业会在几毫秒内把重试次数烧光。
     assert survivor.run_once() is False, "刚回收就该在退避里，领不到"
-    time.sleep(0.1)
+
+    # 不 sleep 等退避过去，直接把 available_at 拨到现在：等墙钟的话，这条测试
+    # 要么慢、要么在慢机器上飘，而它要验的根本不是"退避到底多久"
+    with factory() as session:
+        session.execute(
+            sa.update(JobQueue).where(JobQueue.id == job_id).values(available_at=sa.func.now())
+        )
+        session.commit()
     assert survivor.run_once() is True
 
     assert seen == [job_id], "接手的 Worker 应该跑的是同一条作业"
