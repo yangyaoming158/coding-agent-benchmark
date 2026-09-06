@@ -77,6 +77,7 @@ from app.domain.enums import ArtifactKind, InfraOutcome, LifecycleStatus, PatchK
 from app.domain.execution_plan import ExecutionPlan
 from app.domain.protected_paths import enforcement_patterns
 from app.evaluation.executor import DEFAULT_GOLDEN_IMAGE, ExecutionOutcome, execute_tests
+from app.evaluation.gate import NULL_GATE, PhaseGate, TaskCancelledError
 from app.infrastructure.logging import get_logger
 from app.judge.decision import AgentFacts, ControlRunRequiredError, Verdict, judge
 from app.runner.patch import NormalizedPatch, capture_agent_patch, normalize_patch
@@ -265,6 +266,7 @@ def execute_task_run(
     store: ArtifactStore | None = None,
     agent_config: Any = None,
     client: Any = None,
+    gate: PhaseGate | None = None,
 ) -> TaskRunOutcome:
     """跑完一道题：物化 → 跑 AI → 抓补丁 → 跑测试 → 判定。
 
@@ -274,6 +276,10 @@ def execute_task_run(
 
     `agent_config` 原样透传给 `runner.run()`，不传就用 `AgentConfig()` 的默认值。
     `store` 为 None 时不落制品（单测用），真实评测必须给。
+
+    `gate` 是调度层的阶段闸门（E5-T2）：沙箱名额、Agent 名额、取消信号。
+    不传就用 `NULL_GATE`，行为和以前完全一样 —— 串行跑的调用方（单测、
+    `cli.runner`）不用关心它。
     """
     from app.runner.protocol import AgentConfig  # 局部导入：默认值要一个实例
 
@@ -281,6 +287,7 @@ def execute_task_run(
     # 制品往哪写由 harness 说了算，调用方给的值一律覆盖 —— 制品的位置和
     # `run_key` 是绑定的，让调用方决定的话，同一次运行的东西会散到几个地方去
     config = replace(config, artifact_dir=inputs.scratch_dir / "agent-io")
+    phases = gate or NULL_GATE
     plan = inputs.plan
     artifacts: dict[ArtifactKind, ArtifactRef] = {}
     patches: dict[PatchKind, ArtifactRef] = {}
@@ -290,36 +297,47 @@ def execute_task_run(
 
     try:
         # ── PREPARING：给 Agent 物化一份工作区 ──
-        try:
-            agent_ws = materialize_workspace(
-                mirror_path=inputs.mirror_path,
-                base_commit=plan.base_commit,
-                dest=inputs.scratch_dir / "agent",
-            )
-        except (WorkspaceError, OSError) as exc:
-            raise _AbortError(InfraOutcome.WORKSPACE_ERROR, f"工作区物化失败：{exc}") from exc
+        # 占沙箱名额：`git archive` 出一整棵代码树是磁盘 IO，和跑测试抢的是同一份资源
+        with phases.sandbox():
+            phases.raise_if_cancelled()
+            try:
+                agent_ws = materialize_workspace(
+                    mirror_path=inputs.mirror_path,
+                    base_commit=plan.base_commit,
+                    dest=inputs.scratch_dir / "agent",
+                )
+            except (WorkspaceError, OSError) as exc:
+                raise _AbortError(InfraOutcome.WORKSPACE_ERROR, f"工作区物化失败：{exc}") from exc
 
         # ── AGENT_RUNNING ──
-        try:
-            agent_result = runner.run(inputs.agent_input, agent_ws, config)
-        except SandboxError as exc:
-            # docker 连不上、镜像不在、容器起不来 —— 平台的锅，不是 AI 的。
-            # 这一条要排在下面那个 except Exception 前面：落到那里会被记成
-            # AGENT_RUNTIME_ERROR，也就是记在被测 AI 头上，白白拉低它的解决率。
-            # E3-T4 之前没有适配器会起容器，所以这条路径以前不存在
-            timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
-            raise _AbortError(InfraOutcome.SANDBOX_ERROR, f"Agent 容器起不来：{exc}") from exc
-        except ProtocolError as exc:
-            # 适配器输出的 JSON 读不出来。它确实跑起来了，只是没好好说话
-            timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
-            raise _AbortError(
-                InfraOutcome.AGENT_RUNTIME_ERROR, f"适配器输出不符合协议：{exc}"
-            ) from exc
-        except Exception as exc:  # 适配器什么都可能抛
-            timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
-            raise _AbortError(
-                InfraOutcome.AGENT_RUNTIME_ERROR, f"适配器崩了：{type(exc).__name__}: {exc}"
-            ) from exc
+        # 换成 Agent 名额，**不再持有沙箱名额**：这一段基本都在等大模型返回，
+        # 占着测试容器的额度纯属浪费（§15.2，同时持有两把会让双层退化成单层）
+        with phases.agent():
+            phases.raise_if_cancelled()
+            try:
+                agent_result = runner.run(inputs.agent_input, agent_ws, config)
+            except TaskCancelledError:
+                # 取消要原样往上抛。被下面那个兜底 except 收走的话，
+                # 一次人为取消会被记成"适配器崩了"，算在被测 AI 头上
+                raise
+            except SandboxError as exc:
+                # docker 连不上、镜像不在、容器起不来 —— 平台的锅，不是 AI 的。
+                # 这一条要排在下面那个 except Exception 前面：落到那里会被记成
+                # AGENT_RUNTIME_ERROR，也就是记在被测 AI 头上，白白拉低它的解决率。
+                # E3-T4 之前没有适配器会起容器，所以这条路径以前不存在
+                timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
+                raise _AbortError(InfraOutcome.SANDBOX_ERROR, f"Agent 容器起不来：{exc}") from exc
+            except ProtocolError as exc:
+                # 适配器输出的 JSON 读不出来。它确实跑起来了，只是没好好说话
+                timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
+                raise _AbortError(
+                    InfraOutcome.AGENT_RUNTIME_ERROR, f"适配器输出不符合协议：{exc}"
+                ) from exc
+            except Exception as exc:  # 适配器什么都可能抛
+                timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
+                raise _AbortError(
+                    InfraOutcome.AGENT_RUNTIME_ERROR, f"适配器崩了：{type(exc).__name__}: {exc}"
+                ) from exc
 
         timings = replace(
             timings,
@@ -376,17 +394,20 @@ def execute_task_run(
             )
 
         # ── TESTING ──
-        timings = replace(timings, test_started_at=_now())
-        execution = execute_tests(
-            plan,
-            patch.text,
-            mirror_path=inputs.mirror_path,
-            workspace_dir=inputs.scratch_dir / "test",
-            image=inputs.image,
-            run_id=inputs.run_key,
-            client=client,
-        )
-        timings = replace(timings, test_finished_at=_now())
+        # 回到沙箱名额上：测试容器吃 CPU 和内存，这里才是要卡死的那一层
+        with phases.sandbox():
+            phases.raise_if_cancelled()
+            timings = replace(timings, test_started_at=_now())
+            execution = execute_tests(
+                plan,
+                patch.text,
+                mirror_path=inputs.mirror_path,
+                workspace_dir=inputs.scratch_dir / "test",
+                image=inputs.image,
+                run_id=inputs.run_key,
+                client=client,
+            )
+            timings = replace(timings, test_finished_at=_now())
 
         if execution.container is not None:
             _store_text(
@@ -453,18 +474,49 @@ def execute_task_run(
             error_message_excerpt=execution.problem,
         )
 
+    except TaskCancelledError:
+        return _abort_outcome(_CANCELLED, timings, patch, agent_result, artifacts, patches)
     except _AbortError as abort:
-        return _abort_outcome(abort, timings, patch, agent_result, artifacts, patches)
+        return _abort_outcome(
+            _cancel_wins(phases, abort), timings, patch, agent_result, artifacts, patches
+        )
     except Exception as exc:  # 兜住一切，绝不让记录停在非终态
         logger.error("评测单元遇到未预料的异常", error=str(exc), tb=traceback.format_exc()[-2000:])
         return _abort_outcome(
-            _AbortError(InfraOutcome.HARNESS_ERROR, f"未预料的异常：{type(exc).__name__}: {exc}"),
+            _cancel_wins(
+                phases,
+                _AbortError(
+                    InfraOutcome.HARNESS_ERROR, f"未预料的异常：{type(exc).__name__}: {exc}"
+                ),
+            ),
             timings,
             patch,
             agent_result,
             artifacts,
             patches,
         )
+
+
+#: 取消收成的那个失败。它没有可变状态，一个实例够用。
+_CANCELLED = _AbortError(InfraOutcome.CANCELLED, "实验已取消，本次执行中止")
+
+
+def _cancel_wins(phases: PhaseGate, abort: _AbortError) -> _AbortError:
+    """取消期间冒出来的失败，一律记成 `CANCELLED`。
+
+    取消的做法是把这道题的容器杀掉（`app.worker.cancel`）。被杀的容器在适配器
+    那边表现为"进程非正常退出"，在执行器那边表现为"容器起不来"——照原样记录的话，
+    一次人为取消会变成一条 `AGENT_RUNTIME_ERROR`（算在被测 AI 头上，拉低解决率）
+    或者 `SANDBOX_ERROR`（算平台故障，拉高故障率）。两个都是假的。
+
+    所以收尾之前再问一次闸门：已经取消了就换成 `CANCELLED`，
+    协议里它的责任人是 `HUMAN`，既不罚 AI 也不算平台故障。
+    """
+    try:
+        phases.raise_if_cancelled()
+    except TaskCancelledError:
+        return _CANCELLED
+    return abort
 
 
 def _take_patch(

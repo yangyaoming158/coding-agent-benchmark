@@ -590,11 +590,67 @@ C-72 规定它不算一次 attempt，够单开一个任务）；双层并发信�
 （E5-T2）；限流令牌桶（E5-T3）。`cli/queue.py` 的 `seed-golden` 只是把题原样写进库，
 **不是** E1-T3 的验证流水线，`validation_state` 停在 `DISCOVERED`。
 
-### E5-T2 EvaluationRun 编排与双层并发
+### E5-T2 EvaluationRun 编排与双层并发 ✅
 - **Goal**：展开 N 个 task_run、双层信号量、进度聚合、取消、失败重跑
 - **Req**：FR-11, MET-03 · **Deps**：E5-T1, E4-T4
 - **AC**：8 并发下内存峰值 <80%；取消能在 30s 内停住；有效并发时间序列可导出
 - **P0 · C:L · E:2d**
+- **实际交付**（2026-09-06）：Worker 从"一次一条"改成多槽位
+  （`app/worker/loop.py`，`worker_slots` 默认 8）、两把信号量
+  （`app/worker/concurrency.py` + `app/evaluation/gate.py` 的闸门接口）、
+  编排层（`app/evaluation/orchestrator.py`：建实验 / 取消 / 补跑 / 兜底定案）、
+  进度聚合（`app/evaluation/progress.py`，协议 C-21/C-26/C-56 的口径）、
+  取消看门线程（`app/worker/cancel.py` + `sandbox/container.py` 的按标签杀容器）、
+  有效并发时序（`app/evaluation/concurrency.py`）、CLI（`cli/experiment.py`）。
+
+  **三条 AC 的实测**（Oracle × 4 道 Golden 题 × 30 轮 = 120 条作业，
+  `worker_slots=8 / agent=10 / sandbox=5`）：
+
+  | AC | 实测 |
+  |:---|:---|
+  | 8 并发下内存峰值 <80% | 在途峰值 **8**、P50 **8**；内存峰值 **28.2%**（11.7 GiB） |
+  | 取消能在 30s 内停住 | **0.87 秒**（下命令 0.04 秒，到没有活作业和残留容器） |
+  | 有效并发时间序列可导出 | `cli.experiment concurrency --csv`，三条曲线 + 峰值/P50 |
+
+  内存那个数字**受题目大小主导**：Golden 题的测试只占几十 MB，而按
+  `sandbox_memory_mb` 的硬上限算，5 × 1.5 GB + 3.2 GB 基线 = 91%，是超线的。
+  正式实验前要么把上限降到 1280、要么把沙箱并发降到 4，定档留给 E9-T2。
+
+**两个只有并发跑起来才撞得上的坑（都是实测撞出来的，不是想出来的）：**
+
+**① 落库事务的第一件事必须是锁住实验那一行。** 往 `evaluation_task_runs` 插一行，
+Postgres 会顺手在父行上加 `FOR KEY SHARE`；这把锁互相兼容，两条作业能同时拿到，
+等它们各自再要 `FOR UPDATE` 更新进度时就成了锁升级死锁。8 槽位实测必现
+（作业 #133，`DeadlockDetected`，白等 60 秒退避）。改成先锁父行再插子表。
+
+**② 槽位满的时候不能干等一个轮询周期。** 原来"没领到活就等 5 秒"，
+而"槽满"和"队列空"是两回事。实测：一批 8 道题一秒跑完、机器空转四秒，
+**70% 的时间在途数是 0，可峰值看起来还是满的 8**。改成等"有槽空出来"的事件后，
+同一批作业 77 秒 → 17 秒，P50 从 0 → 8。
+这条正好说明为什么 AC 要的是**时间序列**而不是峰值数字：只看峰值，改前改后都是 8。
+
+**三个协议边界，都写成了测试：**
+
+- **补跑只补洞**（`retry-failed`）：只处理"既没有认定结果、也没有活作业"的题，
+  也就是作业被判 DEAD 或者取消留下的窟窿。已经有 canonical attempt 的题一律不碰 ——
+  重跑它再换掉结论，就是 C-25 禁止的"取多次里最好的一次"；`COMPLETED` 的实验
+  直接拒绝，要再跑请新建实验（C-55）。attempt 到 4 次上限的题不补（C-71）。
+- **取消的 attempt 不打 canonical、不排重试**：落一条
+  `CANCELLED / CANCELLED / NULL` 的记录（协议里的合法组合，责任人 HUMAN），
+  但它不是这道题的结论。C-70 只约束 `COMPLETED`/`PARTIAL` 的实验，取消的不受约束。
+- **多轮取样 = 多个 EvaluationRun**（`--rounds N`）：C-55 要求人工重跑必须新建实验，
+  C-57 的部分唯一索引也限死了"每题至多一个认定结果"，同一个实验里跑两遍没地方放。
+
+**一处口径要记账：`TEST_TIMEOUT` 暂按平台故障算。** 它的责任归属要跑完 C-20 的
+对照组才能定，而对照组执行还没实现。在此之前保守算作平台故障（实验更容易被判
+`PARTIAL`、进不了排行榜），同时用 `pending_control_run` 单独报数。
+反过来算成"AI 的锅"会让平台故障率虚低 —— 那是往有利于自己的方向猜。
+
+**明确没做**：跨 Worker 的分布式信号量（§15.2 定的就是进程内两把）；
+C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `external_wait_ms`（E5-T3）；
+运行 manifest 和 `--allow-dirty` 的脏工作区标记（E5-T4）；前端的运行详情页（E7-T2）。
+被测 AI 是 in-process 适配器（Mock/Oracle/Noop）时，取消只能在阶段边界生效 ——
+杀容器那条路径只对真正起容器的适配器有用。
 
 ### E5-T3 限流与自适应退避
 - **Goal**：按 agent_config 分桶令牌桶；429 自动降并发；`external_wait_ms` 记账

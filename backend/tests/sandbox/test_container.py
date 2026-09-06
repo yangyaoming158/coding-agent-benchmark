@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+import threading
+import time
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -32,9 +34,11 @@ from app.domain.enums import InfraOutcome
 from app.sandbox.container import (
     BENCH_LABEL,
     BENCH_LABEL_VALUE,
+    BENCH_RUN_LABEL,
     DETERMINISM_ENV,
     WORKSPACE_TARGET,
     BindMount,
+    ContainerResult,
     ContainerSpec,
     ImageNotFoundError,
     NetworkMode,
@@ -43,6 +47,7 @@ from app.sandbox.container import (
     build_env,
     classify_outcome,
     get_docker_client,
+    kill_containers_by_run_prefix,
     reap_orphans,
     run_in_container,
 )
@@ -445,6 +450,52 @@ def test_reap_orphans_cleans_up_after_a_crash(spec_factory: Any, image: str, cli
 
     assert str(orphan.id) in removed
     assert client.containers.list(all=True, filters={"id": str(orphan.id)}) == []
+
+
+def test_kill_by_run_prefix_stops_only_that_run(spec_factory: Any, image: str, client: Any) -> None:
+    """按 `bench.run_id` 的前缀杀容器，别的实验的容器一根汗毛不动（E5-T2）。
+
+    取消一次实验时要打断的是"正卡在 `container.wait()` 上的那十几分钟"。
+    只置一个协作式的取消标志不够 —— 那一段里根本没有检查点。
+
+    这里同时验了另一半：**只 kill 不 remove**。删容器是 `run_in_container()`
+    的 `finally` 的事，这里抢着删的话，那边紧接着的 `container.reload()`
+    会撞上 404，一次干净的取消就变成一条 HARNESS_ERROR。
+    """
+    victim: dict[str, ContainerResult] = {}
+    spared = client.containers.create(
+        image=image,
+        command=["sleep", "30"],
+        labels={BENCH_LABEL: BENCH_LABEL_VALUE, BENCH_RUN_LABEL: "runs/99/tasks/1/attempt-1"},
+    )
+    spared.start()
+
+    def body() -> None:
+        victim["result"] = run_in_container(
+            spec_factory(["sleep", "120"], run_id="runs/77/tasks/1/attempt-1", timeout_s=120)
+        )
+
+    thread = threading.Thread(target=body, daemon=True)
+    thread.start()
+    try:
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline and not client.containers.list(
+            filters={"label": f"{BENCH_RUN_LABEL}=runs/77/tasks/1/attempt-1"}
+        ):
+            time.sleep(0.1)
+
+        killed = kill_containers_by_run_prefix("runs/77/", client=client)
+        assert len(killed) == 1, "该杀的那个没杀到"
+
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "容器被杀了，run_in_container 应该立刻返回"
+        assert victim["result"].exit_code != 0
+        assert client.containers.list(all=True, filters={"id": victim["result"].container_id}) == []
+
+        assert client.containers.list(filters={"id": str(spared.id)}), "别的实验的容器被误杀了"
+    finally:
+        spared.remove(force=True)
+        thread.join(timeout=30)
 
 
 def test_reap_orphans_spares_young_containers(spec_factory: Any, image: str, client: Any) -> None:

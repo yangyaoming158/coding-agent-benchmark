@@ -14,6 +14,12 @@
    抛异常的正确场合是"平台自己出问题了，重来一次可能就好了"，
    比如制品存储读不出来、数据库连不上。
 
+## 阶段闸门（E5-T2）
+
+`ctx.gate` 是双层并发名额和取消信号的入口。处理函数把它原样传给
+`execute_task_run()`，由后者在三个阶段边界上问"我能开始了吗"。
+Worker 之外的调用方（单测、CLI）拿到的是 `NULL_GATE`，什么都不限。
+
 ## 为什么收尾要由处理函数来做
 
 因为落库和"标记作业完成"必须在**同一个事务**里。分开提交会出现两种中间态：
@@ -37,6 +43,7 @@ from typing import Any
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.enums import JobState, JobType
+from app.evaluation.gate import NULL_GATE, PhaseGate
 from app.infrastructure import queue
 from app.infrastructure.config import Settings
 from app.infrastructure.db import session_scope
@@ -60,6 +67,8 @@ class JobContext:
         settings: Settings,
         session_factory: sessionmaker[Session],
         stop_event: threading.Event | None = None,
+        gate: PhaseGate | None = None,
+        cancel: threading.Event | None = None,
     ) -> None:
         self.job_id = job_id
         self.job_type = job_type
@@ -70,6 +79,12 @@ class JobContext:
         self.settings = settings
         self.session_factory = session_factory
         self._stop = stop_event or threading.Event()
+        #: 阶段闸门：双层并发名额 + 取消信号（E5-T2）。处理函数把它透传给
+        #: `execute_task_run()`。Worker 不给的话是 `NULL_GATE`，串行且不可取消。
+        self.gate = gate or NULL_GATE
+        #: 这条作业的取消标志。置位后闸门的等待和阶段检查都会抛 `TaskCancelled`。
+        #: 取消看门线程置它，处理函数发现"实验已经取消了"时也可以自己置。
+        self.cancel = cancel or threading.Event()
         self._completed = False
 
     @property

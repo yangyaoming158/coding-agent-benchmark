@@ -1,17 +1,30 @@
-"""EVAL_TASK 作业：跑一道题的一次 attempt，落库，决定要不要再来一次（E5-T1）。
+"""EVAL_TASK 作业：跑一道题的一次 attempt，落库，决定要不要再来一次（E5-T1、E5-T2）。
 
     ┌─ 事务 1（毫秒级）─────────────────────────────────────┐
     │ 读题、读实验配置、读环境规格                            │  ← 只读
     └───────────────────────────────────────────────────────┘
        ↓
-      不在事务里：execute_task_run()                            ← 十几分钟
+    ┌─ 事务 1b（毫秒级）────────────────────────────────────┐
+    │ 实验推到 RUNNING；已经取消的话置取消标志                │  ← E5-T2
+    └───────────────────────────────────────────────────────┘
        ↓
+      不在事务里：execute_task_run(gate=ctx.gate)               ← 十几分钟
+       ↓                    两层并发名额和取消都从闸门进来
     ┌─ 事务 2（毫秒级，ctx.complete 发起）──────────────────┐
-    │ 建 attempt 行 → persist_task_run()                     │
+    │ 锁住实验那一行（必须最先做，见下）                       │
+    │ → 建 attempt 行 → persist_task_run()                   │
     │ → decide_next() → 要重试就投下一条作业                  │
     │              → 不重试就给 canonical 那条打标            │
+    │ → 重算实验进度，最后一道题跑完时定案                     │  ← E5-T2
     │ → 把这条作业标成 DONE                                   │
     └───────────────────── 一次提交 ─────────────────────────┘
+
+## 事务 2 为什么第一件事是锁实验那一行
+
+往 `evaluation_task_runs` 插一行，Postgres 会顺手在父行（`evaluation_runs`）上加一把
+`FOR KEY SHARE`。这把锁互相兼容，两条作业能同时持有；等它们各自再去要
+`FOR UPDATE` 更新进度时，就变成两边都在等对方放开 —— 锁升级死锁。
+先要 `FOR UPDATE` 就没有升级这一步。细节在 `app.evaluation.progress.lock_run`。
 
 ## 为什么中间那段不能在事务里
 
@@ -28,6 +41,13 @@
 跑完才建就没这个问题：Worker 死了，库里干干净净，作业退回队列重新领走，
 `attempt_no` 还是 1。代价是跑的过程中 `evaluation_task_runs` 里查不到"正在跑"，
 但 `SELECT * FROM job_queue WHERE state='LEASED'` 看得到，payload 里就写着是哪道题。
+
+## 取消的 attempt 不打 canonical、不排重试
+
+被取消的执行会照样落一条 `CANCELLED` 记录（协议里 `lifecycle=CANCELLED /
+infra=CANCELLED / agent=NULL` 是合法组合，责任人是 HUMAN），但它**不是这道题的结论**。
+打上 canonical 等于人工制造了一个认定结果（C-25 禁止），排重试等于取消完还接着跑。
+C-70 只要求 `COMPLETED`/`PARTIAL` 的实验每题恰好一个 canonical，被取消的实验不受这条约束。
 
 ## 重试怎么算，谁来重试
 
@@ -59,11 +79,20 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.benchmark.schema import TaskDefinition
-from app.domain.enums import JobType, LifecycleStatus, PatchKind
+from app.domain.enums import EvaluationRunStatus, InfraOutcome, LifecycleStatus, PatchKind
 from app.domain.retry import AttemptRecord, decide_next
+from app.evaluation import progress as progress_mod
+from app.evaluation.jobs import (
+    EvalTaskPayload,
+    PayloadError,
+    enqueue_eval_task,
+    run_key_for,
+)
+from app.evaluation.orchestrator import mark_running
 from app.evaluation.persistence import persist_task_run
 from app.evaluation.task_run import TaskRunInputs, TaskRunOutcome, deadline_ms, execute_task_run
 from app.infrastructure import queue
+from app.infrastructure.db import session_scope
 from app.infrastructure.logging import get_logger
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import BenchmarkTask, EnvironmentSpec
@@ -83,58 +112,6 @@ from app.worker.registry import JobContext
 logger = get_logger(__name__)
 
 
-class PayloadError(ValueError):
-    """作业的 payload 不合法。投作业的那一方写错了，重试多少次都一样。"""
-
-
-@dataclass(frozen=True, slots=True)
-class EvalTaskPayload:
-    """EVAL_TASK 作业的 payload。
-
-    只装**外键和编号**，不装题目内容。题目内容跟着 `benchmark_tasks` 走，
-    payload 里再存一份就有了两个真相，哪天两边不一致，
-    "这次评测到底跑的是哪个版本的题"说不清楚。
-    """
-
-    evaluation_run_id: int
-    benchmark_task_id: int
-    attempt_no: int = 1
-    #: 上一次 attempt 的 `evaluation_task_runs.id`，第一次跑为 None。
-    retry_of_id: int | None = None
-    #: 上一次那份标准化补丁的制品 key。有值就走 C-54 的重放路径，不再调 AI。
-    reuse_patch_key: str | None = None
-
-    @classmethod
-    def from_payload(cls, payload: Mapping[str, Any]) -> EvalTaskPayload:
-        try:
-            return cls(
-                evaluation_run_id=int(payload["evaluation_run_id"]),
-                benchmark_task_id=int(payload["benchmark_task_id"]),
-                attempt_no=int(payload.get("attempt_no", 1)),
-                retry_of_id=_opt_int(payload.get("retry_of_id")),
-                reuse_patch_key=_opt_str(payload.get("reuse_patch_key")),
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise PayloadError(f"EVAL_TASK 的 payload 不合法：{payload!r}（{exc}）") from exc
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "evaluation_run_id": self.evaluation_run_id,
-            "benchmark_task_id": self.benchmark_task_id,
-            "attempt_no": self.attempt_no,
-            "retry_of_id": self.retry_of_id,
-            "reuse_patch_key": self.reuse_patch_key,
-        }
-
-
-def _opt_int(value: Any) -> int | None:
-    return None if value is None else int(value)
-
-
-def _opt_str(value: Any) -> str | None:
-    return None if value is None else str(value)
-
-
 @dataclass(frozen=True, slots=True)
 class _Loaded:
     """事务 1 从库里读出来的东西。都是纯数据，出了事务还能用。"""
@@ -149,19 +126,6 @@ class _Loaded:
     repo_name: str
 
 
-def run_key_for(payload: EvalTaskPayload) -> str:
-    """制品 key 的前缀，也是容器标签里的 run_id。
-
-    做成确定的一段路径（而不是随机 id），是为了拿着一条 `evaluation_task_runs`
-    记录就能推出它的制品在哪，不用先去 `artifacts` 表查一次。
-    """
-    return (
-        f"runs/{payload.evaluation_run_id}"
-        f"/tasks/{payload.benchmark_task_id}"
-        f"/attempt-{payload.attempt_no}"
-    )
-
-
 def handle_eval_task(ctx: JobContext) -> None:
     """跑一道题的一次 attempt。这就是注册到 `JobType.EVAL_TASK` 上的处理函数。"""
     payload = EvalTaskPayload.from_payload(ctx.payload)
@@ -170,6 +134,23 @@ def handle_eval_task(ctx: JobContext) -> None:
     # ── 事务 1：把要用的东西读出来 ──
     with ctx.session_factory() as session:
         loaded = _load(session, payload)
+
+    # ── 事务 1b：把实验推到 RUNNING。单独一个短事务，立刻提交 ──
+    # 不合并进事务 1：那个是只读的（没 commit）。而这一下要马上让别人看见 ——
+    # `cli.experiment status` 和前端的进度条靠它区分"还在排队"和"已经在跑了"
+    with session_scope(ctx.session_factory) as session:
+        run_status = mark_running(session, payload.evaluation_run_id)
+    if run_status is EvaluationRunStatus.CANCELLED:
+        # 这条作业在队列里躺着的时候，实验被取消了。置一下取消标志就够了：
+        # `execute_task_run()` 在第一个阶段边界就会返回 CANCELLED，
+        # 一个容器都不会起。不直接 return 是为了照样留下一条记录 ——
+        # "这道题当时排到哪了"是取消之后唯一能查的证据
+        logger.info(
+            "eval_task_cancelled_before_start",
+            evaluation_run_id=payload.evaluation_run_id,
+            task_id=loaded.task.task_id,
+        )
+        ctx.cancel.set()
 
     runner = _build_runner(loaded, payload, store=store)
 
@@ -190,7 +171,13 @@ def handle_eval_task(ctx: JobContext) -> None:
     )
     try:
         outcome = execute_task_run(
-            runner, inputs, store=store, agent_config=_agent_config(ctx, loaded)
+            runner,
+            inputs,
+            store=store,
+            agent_config=_agent_config(ctx, loaded),
+            # 双层并发和取消都从这里进来。Worker 不给闸门时是 NULL_GATE，
+            # 行为和 E5-T1 完全一样（串行、不可取消）
+            gate=ctx.gate,
         )
     finally:
         # 工作区不留：一次评测两份代码树，几百次跑下来就是几十 GB。
@@ -326,6 +313,12 @@ def _persist_and_schedule(
     outcome: TaskRunOutcome,
 ) -> None:
     """落库、决定重试、打 canonical 标记。全在调用方开的那一个事务里。"""
+    # 第一件事：锁住实验那一行。**顺序不能换到后面去** —— 插 attempt 行会顺手在
+    # 父行上加一把 FOR KEY SHARE，之后再要 FOR UPDATE 就是锁升级，
+    # 两条同实验的作业同时收尾必然死锁（2026-09-06 的 8 槽位实测撞到过）。
+    # 细节写在 `progress.lock_run` 的注释里
+    progress_mod.lock_run(session, payload.evaluation_run_id)
+
     # queued_at 取作业进队列的时刻，不是现在 —— 它要回答的是"这道题排了多久队"，
     # 用当前时间的话这个字段永远等于 completed_at，等于没记。
     job = session.get(JobQueue, ctx.job_id)
@@ -340,6 +333,21 @@ def _persist_and_schedule(
     )
     session.add(task_run)
     persist_task_run(session, task_run, outcome)
+
+    if outcome.infra_outcome is InfraOutcome.CANCELLED:
+        # 取消的 attempt **不打 canonical、不排重试**。
+        # 它不是"这道题的结论"，而是"这道题没来得及跑完"：打了标就等于人工制造了
+        # 一个认定结果（C-25 禁止），排重试就等于取消完还接着跑。
+        # 协议 C-70 只要求 COMPLETED/PARTIAL 的实验每题恰好一个 canonical，
+        # 被取消的实验不受这条约束，所以这里留空是合法的
+        logger.info(
+            "task_run_cancelled",
+            evaluation_run_id=payload.evaluation_run_id,
+            benchmark_task_id=payload.benchmark_task_id,
+            attempt_no=payload.attempt_no,
+        )
+        _refresh_progress(session, ctx, payload)
+        return
 
     history = _attempt_history(session, payload)
     decision = decide_next(history)
@@ -356,10 +364,25 @@ def _persist_and_schedule(
     if decision.should_retry:
         assert decision.next_attempt_no is not None  # decide_next 保证的
         _enqueue_retry(session, ctx, payload, outcome, task_run, decision.next_attempt_no)
+        _refresh_progress(session, ctx, payload)
         return
 
     assert decision.canonical_attempt_no is not None
     _mark_canonical(session, payload, decision.canonical_attempt_no)
+    _refresh_progress(session, ctx, payload)
+
+
+def _refresh_progress(session: Session, ctx: JobContext, payload: EvalTaskPayload) -> None:
+    """重算这次实验的统计，顺带在最后一道题跑完时定案（E5-T2）。
+
+    和落库同一个事务：分开提交的话会出现"结果写了但进度没更新"，而进度是
+    前端和报表唯一的取数口径，对不上的时候没人说得清哪个是真的。
+
+    `exclude_job_id` 必须给：这会儿自己这条作业还挂在 LEASED 上
+    （`ctx.complete()` 是先写业务、后标 DONE），不排掉的话最后一道题
+    永远发现"还有一条在跑"，实验就永远定不了案。
+    """
+    progress_mod.refresh(session, payload.evaluation_run_id, exclude_job_id=ctx.job_id)
 
 
 def _attempt_history(session: Session, payload: EvalTaskPayload) -> list[AttemptRecord]:
@@ -396,13 +419,6 @@ def _enqueue_retry(
     """
     normalized = outcome.patches.get(PatchKind.AGENT_NORMALIZED)
     reuse_key = normalized.key if normalized is not None else None
-    next_payload = EvalTaskPayload(
-        evaluation_run_id=payload.evaluation_run_id,
-        benchmark_task_id=payload.benchmark_task_id,
-        attempt_no=next_attempt_no,
-        retry_of_id=task_run.id,
-        reuse_patch_key=reuse_key,
-    )
     # 退避按已经跑过的 attempt 次数来。故障多半是"环境抖了一下"，
     # 立刻重排大概率再挂一次，还把机器占着。
     delay = queue.backoff_seconds(
@@ -410,10 +426,13 @@ def _enqueue_retry(
         ctx.settings.job_retry_backoff_base_s,
         cap_s=ctx.settings.job_retry_backoff_cap_s,
     )
-    queue.enqueue(
+    enqueue_eval_task(
         session,
-        job_type=JobType.EVAL_TASK,
-        payload=next_payload.to_payload(),
+        evaluation_run_id=payload.evaluation_run_id,
+        benchmark_task_id=payload.benchmark_task_id,
+        attempt_no=next_attempt_no,
+        retry_of_id=task_run.id,
+        reuse_patch_key=reuse_key,
         # 重试优先于新题：一道题拖着不结束，整次实验就结束不了
         priority=1,
         max_attempts=ctx.settings.job_max_attempts,
@@ -465,27 +484,6 @@ def _mark_canonical(session: Session, payload: EvalTaskPayload, attempt_no: int)
         )
         .values(is_canonical=True)
         .execution_options(synchronize_session=False)
-    )
-
-
-def enqueue_eval_task(
-    session: Session,
-    *,
-    evaluation_run_id: int,
-    benchmark_task_id: int,
-    priority: int = 0,
-    max_attempts: int = 3,
-) -> JobQueue:
-    """投一道题的第一次 attempt。给编排层（E5-T2）和 CLI 用。**不 commit**。"""
-    payload = EvalTaskPayload(
-        evaluation_run_id=evaluation_run_id, benchmark_task_id=benchmark_task_id, attempt_no=1
-    )
-    return queue.enqueue(
-        session,
-        job_type=JobType.EVAL_TASK,
-        payload=payload.to_payload(),
-        priority=priority,
-        max_attempts=max_attempts,
     )
 
 

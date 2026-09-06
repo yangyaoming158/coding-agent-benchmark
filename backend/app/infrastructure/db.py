@@ -23,13 +23,30 @@ def get_database_url() -> str:
     return get_settings().database_url
 
 
-def create_db_engine(url: str | None = None, *, echo: bool = False) -> Engine:
+def create_db_engine(
+    url: str | None = None,
+    *,
+    echo: bool = False,
+    pool_size: int | None = None,
+    max_overflow: int = 5,
+) -> Engine:
     """建引擎。
 
     `pool_pre_ping` 是必要的：Worker 进程可能在两次作业之间闲置很久，
     中间连接被数据库或防火墙掐掉，不 ping 一下会在下次查询时才发现。
+
+    `pool_size` 不给就用 SQLAlchemy 的默认值（5 条）。**多槽位的 Worker 必须给**：
+    每条在跑的作业要两条连接（处理函数一条、心跳一条），8 个槽位就是 16 条，
+    默认池会被坐穿。坐穿的表现很难查 —— 拿不到连接的线程阻塞在
+    `session_factory()` 上，不报错，只是"并发调高了反而更慢"。
     """
-    return create_engine(url or get_database_url(), echo=echo, pool_pre_ping=True, future=True)
+    kwargs: dict[str, object] = {}
+    if pool_size is not None:
+        kwargs["pool_size"] = pool_size
+        kwargs["max_overflow"] = max_overflow
+    return create_engine(
+        url or get_database_url(), echo=echo, pool_pre_ping=True, future=True, **kwargs
+    )
 
 
 def create_session_factory(engine: Engine) -> sessionmaker[Session]:
