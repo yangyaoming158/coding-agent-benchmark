@@ -139,7 +139,9 @@ def test_cancel_wakes_up_a_thread_that_is_waiting_for_a_slot() -> None:
     assert not thread.is_alive()
     assert len(raised) == 1
     assert isinstance(raised[0], TaskCancelledError)
-    assert elapsed < 1.0, f"取消之后 {elapsed:.2f} 秒才醒，太慢了"
+    # 线画在 3 秒是给慢机器留的余量。真的没修好的话，这个线程会一直等到
+    # 外层 with 退出才拿到名额，那时 `raised` 是空的，上面那条断言先挂
+    assert elapsed < 3.0, f"取消之后 {elapsed:.2f} 秒才醒，太慢了"
 
 
 def test_null_gate_does_nothing() -> None:

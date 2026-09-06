@@ -238,10 +238,11 @@ def test_a_freed_slot_is_refilled_without_waiting_for_the_next_poll(
     峰值看起来还是满的 8，但有效并发的 P50 是 0 —— 单看峰值发现不了，
     这正是验收标准要"时间序列"而不是一个峰值数字的原因。
 
-    轮询周期在这里设成 5 秒（生产默认值）：修好之前这条测试要跑 5 秒以上，
-    修好之后不到 1 秒。
+    轮询周期在这里设成 10 秒（生产默认值是 5 秒）：修好之前四条作业要串三次补槽、
+    跑 30 秒以上，修好之后不到 1 秒。断言线画在 5 秒，两边都留足余量，
+    不会在慢机器上飘。
     """
-    slow_poll = settings.model_copy(update={"job_poll_interval_s": 5.0})
+    slow_poll = settings.model_copy(update={"job_poll_interval_s": 10.0})
     enqueue(factory, 4)
     done = threading.Event()
 
@@ -349,11 +350,9 @@ def test_a_stopping_worker_waits_for_jobs_in_flight(
     丢在 LEASED 上的话，下一个 Worker 要等租约自然过期（默认 30 分钟）才能接手。
     """
     enqueue(factory, 2)
-    entered = threading.Event()
     release = threading.Event()
 
     def handler(_ctx: JobContext) -> None:
-        entered.set()
         release.wait(timeout=WAIT_S)
 
     worker = Worker(
@@ -365,10 +364,12 @@ def test_a_stopping_worker_waits_for_jobs_in_flight(
     )
     thread = run_worker(worker)
     try:
-        assert entered.wait(timeout=WAIT_S)
+        # 要等**两条都被领走**再发停机信号。只等第一条的话，第二条可能还没被领，
+        # 停机之后它就停在 PENDING —— 那是正确行为（停机时不再领新的），
+        # 断言却会挂。CI 上真挂过一次
+        assert wait_until(lambda: worker.in_flight == 2), "两条作业没能同时在途"
         worker.request_stop()
-        time.sleep(0.2)
-        assert thread.is_alive(), "手上还有活就退出了"
+        assert not wait_until(lambda: not thread.is_alive(), timeout=0.5), "手上还有活就退出了"
         release.set()
         thread.join(timeout=WAIT_S)
     finally:
