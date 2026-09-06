@@ -108,6 +108,8 @@ def persist_task_run(
         if agent.token_usage is not None:
             task_run.tokens_input = agent.token_usage.input
             task_run.tokens_output = agent.token_usage.output
+            # 缓存命中是 input 的一部分，不进 total（协议 §9.2 的 token_usage 语义）
+            task_run.tokens_cache_read = agent.token_usage.cache_read
             task_run.tokens_total = agent.token_usage.total
 
     patch = outcome.patch

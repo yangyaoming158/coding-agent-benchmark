@@ -208,6 +208,13 @@ class EvaluationTaskRun(Base):
 
     tokens_input: Mapped[int | None] = mapped_column(sa.BigInteger)
     tokens_output: Mapped[int | None] = mapped_column(sa.BigInteger)
+    #: 提示缓存命中的 token 数。**是 `tokens_input` 的一部分，不是另加的**，
+    #: 所以不进 `tokens_total` —— 加进去 token 统计会凭空多出一截。
+    #:
+    #: 单独记一列是因为它是成本分析绕不开的一环：DeepSeek 的缓存命中便宜一个数量级，
+    #: 不记的话，"两次运行 token 差不多、钱差好几倍"这种事解释不了，
+    #: 而按 token 估算成本（协议纪律 3 的 `estimated` 那条路）会系统性偏高。
+    tokens_cache_read: Mapped[int | None] = mapped_column(sa.BigInteger)
     tokens_total: Mapped[int | None] = mapped_column(sa.BigInteger)
     cost_usd: Mapped[Decimal | None] = mapped_column(sa.Numeric(12, 6))
     cost_source: Mapped[CostSource | None] = mapped_column(pg_enum(CostSource))

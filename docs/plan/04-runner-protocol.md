@@ -121,12 +121,35 @@ class ImageBuildingRunner(AgentRunner, Protocol):
 
 | Agent | CLI 自动化 | 非交互 | 鉴权 | Patch 获取 | Token/Cost | Docker 兼容 | 稳定性 | 成本 | **4 周风险** |
 |:---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--|
-| **Aider** | 5 | 5 (`--yes-always --message`) | 5（纯 API Key，任意 OpenAI 兼容端点） | 5（workspace + 自带 git） | 5（自带 token/cost 统计输出） | 5（pip 安装） | 4 | 5（可接国产便宜模型） | **低** |
+| **Aider** | 5 | 5 (`--yes-always --message`) | 5（纯 API Key，任意 OpenAI 兼容端点） | 5（workspace + 自带 git） | 5（自带 token/cost 统计输出） | 5（pip 安装） | 3 ⬇ | 5（可接国产便宜模型） | **低** |
 | **Claude Code** | 4 | 5 (`-p/--print`, `--output-format stream-json`, `--max-turns`) | 3（API Key 可脚本化；订阅态 OAuth 需预置凭据） | 5（workspace） | 4（stream-json 含 usage） | 4（npm 安装，需 Node） | 4 | 3（贵，或受订阅并发限制） | **中** |
 | **Qwen Code**（国产） | 4 | 4 (`-p` 非交互) | 4（OpenAI 兼容 Key / DashScope） | 5（workspace） | 3 | 4（npm） | 3 | 5 | **中** |
 | **自研 MiniAgent** | 5 | 5 | 5 | 5 | 5（自己算） | 5 | 5（自己修） | 5 | **低** |
 | **Codex CLI** | 3 | 4 | 2（登录流程最麻烦，容器内尤甚） | 5 | 3 | 3 | 3 | 3 | **高** |
 | OpenHands | 3 | 3 | 4 | 4 | 3 | 2（自身要 Docker，DinD 复杂） | 3 | 4 | **高** |
+
+> **实测下调（2026-09-06，E3-T4）：Aider 的"稳定性"由 4 改为 3。**
+>
+> 原来的 4 分是按 CLI 本身的成熟度打的，那部分没问题：非交互、退出码、
+> patch 获取都很稳。下调是因为**接上真实模型之后，端到端的稳定性由模型主导**，
+> 而这一列是给"能不能靠它跑完一批实验"用的。
+>
+> 实测（`deepseek-chat`，四道 Golden 题，跑两轮）：每轮都有 1–2 道题卡在
+> **复读循环**里 —— 模型把同一句话重复几十次直到墙钟 300 秒到点被强杀。
+> 有一次它其实已经推出了正确答案（"895.5 应该进位成 896"）就是停不下来。
+> 另有一次 aider 的 SEARCH/REPLACE 块格式写错，反射三次后放弃，产出空补丁。
+> 两轮之间卡住的题目还不一样（第一轮 cart-3，第二轮 textkit-1）。
+>
+> 两个后果，都写进了排期而不只是这张表：
+>
+> 1. **单轮结果不能当结论**，正式实验需要多轮取样（E5-T2）；
+> 2. 墙钟超时是这类失效的唯一兜底，`agent_timeout_s` 不能设得太宽 ——
+>    复读循环期间是在**持续烧 token** 的。
+>
+> **排第一的结论不变。** 接入成本、鉴权、patch 获取、token/cost 这四项才是
+> "第一个真实 Agent"要解决的风险，Aider 在这四项上仍然是最好的。
+> 复读循环是所选模型的问题，换个底座模型就换一批表现 ——
+> 而"一个适配器 × N 个底座模型"正是选它的理由。
 
 **推荐接入顺序：**
 
@@ -154,10 +177,30 @@ class ImageBuildingRunner(AgentRunner, Protocol):
 {"ts": 1767..., "type": "message", "role": "assistant", "text_excerpt": "..."}
 ```
 - Claude Code：由 `--output-format stream-json` 直接转换；
-- Aider：解析其输出 + `.aider.chat.history.md`；
+- Aider：解析其 stdout（`.aider.chat.history.md` 实测不落在工作区里，见下）；
 - MiniAgent：原生输出；
 - 无法采集时至少留全量 stdout（`raw_stdout` 制品）。
 轨迹用于：① 失败归因的证据；② 人工抽检页展示；③ 报告"含每题轨迹"要求（FR-17）。
+
+> **实测回填（2026-09-06，E3-T4）：**
+>
+> **① `.aider.chat.history.md` 不在工作区里。** 原文写的是"解析其输出 +
+> `.aider.chat.history.md`"，实测跑完之后 `git status --untracked-files=all`
+> 里只有被修改的源文件，那个文件一个都没有 —— 我们把 `HOME` 指到了容器的
+> `/tmp`（tmpfs），aider 的聊天历史跟着写到那儿去了，容器一结束就没了。
+> 这反而是想要的结果：工作区里多出来的文件会进 `git diff`，变成补丁里
+> 凭空多出的改动。所以 Aider 的轨迹**只从 stdout 解析**。
+>
+> **② 只提取确定能对上的事件。** 落地的是两类：每轮的 `llm_usage`
+> （来自 `Tokens: ... sent, ... received.` 那一行）和每次 `tool_call`
+> （来自 `Applied edit to <path>`）。**不去猜自然语言里哪句是"思考"、
+> 哪句是"结论"** —— 上面那个 JSONL 例子里的 `message` 事件对 Aider 不产出。
+> 轨迹会被当成失败归因的证据用，猜出来的证据比没有证据更糟。
+>
+> **③ 全量 stdout 照存。** 本节最后一条（"无法采集时至少留全量 stdout"）
+> 对 Aider 是常态而非兜底：适配器把 stdout / stderr / 轨迹三个文件写进
+> `AgentConfig.artifact_dir`，`execute_task_run()` 跑完捡走，分别存成
+> `AGENT_STDOUT` / `AGENT_STDERR` / `TRAJECTORY` 三份制品。
 
 ## 9.6 超时与清理
 - 阶段级硬超时由 harness 用 `docker stop --time=10` + `docker kill` 双保险，不依赖 Agent 自觉；

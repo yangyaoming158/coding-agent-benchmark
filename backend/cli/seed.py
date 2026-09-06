@@ -18,7 +18,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -36,6 +38,11 @@ class SeedAgent:
     adapter_class: str
     config_label: str
     note: str
+    #: 这份配置用哪个模型。哨兵一个模型都不调，写 `none` 而不是留空 ——
+    #: 留空会让报表里出现一堆"未知模型"。
+    model_name: str = "none"
+    #: 适配器私有配置，原样进 `agent_configs.params`。
+    params: Mapping[str, Any] = field(default_factory=dict)
 
 
 SEED_AGENTS: tuple[SeedAgent, ...] = (
@@ -62,6 +69,19 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         adapter_class="app.runner.adapters.mock.MockRunner",
         config_label="mock@programmable",
         note="按配置触发六种行为，用来测失败路径",
+    ),
+    SeedAgent(
+        name="aider",
+        display_name="Aider",
+        kind=AgentKind.CLI,
+        adapter_class="app.runner.adapters.aider.AiderRunner",
+        config_label="aider@deepseek-chat",
+        note="第一个真实被测 AI（E3-T4），在容器里改工作区",
+        model_name="deepseek/deepseek-chat",
+        # 镜像写进 params 而不是新开一列：同一个 Aider 接不同底座模型时，
+        # 镜像是同一个，而 E2-T3 的分层构建器到位后这里会换成 bench-agent:<env>-aider，
+        # 那时改的是数据不是表结构
+        params={"image": "bench-agent:py311-aider"},
     ),
 )
 
@@ -102,15 +122,16 @@ def seed_agents(session: Session) -> tuple[int, int]:
                     agent_version="builtin",
                     # 哨兵不调用任何模型，这里给一个明确的占位值，
                     # 而不是留空 —— 留空会让报表里出现一堆 "未知模型"。
-                    model_name="none",
-                    params={"note": spec.note},
+                    model_name=spec.model_name,
+                    params={"note": spec.note, **spec.params},
                     config_hash=f"{spec.config_label:_<64}"[:64],
                     enabled=True,
                 )
             )
             created += 1
         else:
-            config.params = {"note": spec.note}
+            config.model_name = spec.model_name
+            config.params = {"note": spec.note, **spec.params}
             updated += 1
 
     return created, updated

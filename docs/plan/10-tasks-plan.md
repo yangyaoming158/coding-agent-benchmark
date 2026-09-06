@@ -279,11 +279,130 @@
   AI 改了也生效。这个模块本来就只依赖 `app.domain.protected_paths`，放 domain 合适。
   原有 14 条解析用例一行没改就全过，等于证明了搬家没改行为。
 
-### E3-T4 AiderRunner（第一个真实 Agent）
+### E3-T4 AiderRunner（第一个真实 Agent） ✅ 已于 2026-09-06 完成
 - **Goal**：容器内非交互运行 Aider，采集 patch/token/cost/轨迹
 - **Req**：FR-09, MET-06 · **Deps**：E3-T1, E3-T3, E2-T3 · **🔑**
 - **AC**：在 Golden 集上产出非空补丁且至少解决 1 题；契约测试 6 条全过；token/cost 字段非空
 - **P0 · C:M · E:1.5d · 🐳🔑**
+- **实际交付**（2026-09-06）：`app/runner/adapters/aider.py` + `images/aider/Dockerfile`
+  （`bench-agent:py311-aider`，钉死 aider 0.86.2）。**这是第一个真的会起容器的适配器**，
+  也是整条链路第一次被真实 AI 跑过 —— 前面 16 个任务全是拿 Oracle 和 Mock 验的。
+
+  三个设计决定：
+
+  **① 容器里不放 wrapper 脚本，解析全在宿主机。** 原本想往镜像里放一个"读 stdin 的
+  任务 JSON、调 aider、打印结果 JSON"的脚本，看起来更贴合 stdin/stdout 协议。
+  不这么做有两个理由：`run_in_container()` 走 docker SDK 的 create + start，
+  不支持 stdin，要接得挂 socket，而那一层还被测试阶段共用，风险不对等；
+  更重要的是 §9.1 已经把协议边界定在 **Adapter** 上，`AiderRunner` 本身就是那个
+  Adapter，字面的 stdin/stdout 形式由 `cli/runner.py` 提供。
+  结果是容器命令直接就是 `aider ... --message "<提示>"`，**所有易错的解析逻辑
+  都是纯函数**，普通单测就能覆盖，不需要 Docker 和 Key，改规则也不用重建镜像。
+
+  **② 测试分三层，只有最上面一层花钱。** `tests/unit/test_aider_output.py`（28 条，
+  纯解析）→ `tests/sandbox/test_aider_runner.py`（21 条，真工作区 + 假容器，验补丁
+  怎么抓、故障怎么归类）→ `tests/contract/test_aider_runner.py`（六条契约，真容器真模型，
+  标 `agent` 手动触发）。顺带把 `make test-docker` 改成 `-m "docker and not agent"`——
+  原来的 `-m docker` 会把花钱的用例一起选上，夜间跑一次就烧掉一截额度，而且没人会注意到。
+
+  **③ 补丁交原始 diff。** 契约第 2 条要求 `has_patch` 为真，所以适配器自己跑
+  `capture_workspace_diff(workspace)`（以 `base_sha` 为基准 —— aider 可能自己
+  commit 过，裸 `git diff` 会是空的）。受保护路径的改动留在里面不动，
+  过滤是平台在 E3-T3 做的事（C-08b、契约第 4 条）。
+
+  **五条实测结论，全都是真跑之后才知道的：**
+
+  **① aider 遇到模型侧报错，退出码照样是 0。** 第一次真跑就撞上：Key 无效时它把
+  `litellm.BadRequestError` 打在 stdout 上然后正常退出。只看退出码的话这次会被记成
+  "AI 跑完了但什么都没改"，判 `UNRESOLVED` —— **一个配错的 Key 会让整批评测的
+  解决率安静地掉到 0，排行榜上看不出任何异常**。现在除退出码外还要扫一遍
+  `litellm.*Error`。
+
+  **② 它按终端宽度硬折行，而且从单词中间折。** 实测原文里
+  `invalid_request_error` 被劈成 `erro` 和 `r`。拿原始文本做子串匹配的话，
+  一段报错认不认得出来取决于它恰好折在哪个字符上，这种 bug 几乎没法复现。
+  解法是分两个函数：`squash()` 把空白压成**空**（子串匹配用，顺带把劈开的单词接回去），
+  `unwrap()` 压成**一个空格**（正则匹配用，词边界要留着）。
+
+  **③ 真实用量行比冒烟时多一个字段。** 格式是
+  `Tokens: 3.2k sent, 2.4k cache hit, 97 received. Cost: $0.00050 message, $0.00050 session.`——
+  中间的 `cache hit` 只在提示缓存命中时才打。冒烟是冷启动、没命中，格式恰好和
+  编出来的样本一样；正式跑四道题时每次都命中，于是**一条都解析不出来，
+  token 和 cost 全成空值，且不报错**。缓存命中数记进 `TokenUsage.cache_read`，
+  但**不加进 total**（它是 `sent` 的一部分）。
+  这一条最能说明"必须真跑一次"：两层单测全绿，盲区在于那段 stdout 是我们自己编的。
+
+  **④ 报错摘要不能只取 stderr。** aider 的 stderr 里往往只有一句
+  `Warning: Input is not a terminal (fd=0).`，真正的原因全在 stdout。
+  先取 stderr 的话，`error_message_excerpt` 那一列里只剩这句废话。
+
+  **⑤ `"401"` 不能直接当鉴权关键词。** `Tokens: 1401 sent` 里就有 `401`，
+  一次正常的运行会被判成鉴权失败然后白重试三次。改用 `\b401\b`。
+
+  **验收证据**（DeepSeek `deepseek-chat`，四道 Golden 题，走队列真跑）：
+
+  | 题目 | infra | agent | F2P | P2P | tok in/out | 成本 | 轮 | 秒 |
+  |:---|:---|:---|:--|:--|:--|:--|:-:|--:|
+  | auth-2 | SUCCESS | RESOLVED | 3/3 | 4/4 | 6800/1256 | $0.0019 | 2 | 12.8 |
+  | cart-3 | SUCCESS | RESOLVED | 4/4 | 5/5 | 6600/2889 | $0.0040 | 2 | 22.6 |
+  | pager-4 | SUCCESS | RESOLVED | 3/3 | 6/6 | 12500/2427 | $0.0053 | 3 | 16.6 |
+  | textkit-1 | AGENT_TIMEOUT | UNRESOLVED | — | — | — | unavailable | — | 349.8 |
+
+  **3/4 解决**，四条作业全 `DONE`，一轮总花费 $0.0112，停 Worker 后残留容器 0 个。
+  契约测试 **5 过 1 跳**（第 4 条按套件规定跳过：没法命令 aider 去改某个指定文件，
+  真要试就得在提示词里写"请改 tests/xxx"，那测的是提示词不是适配器；
+  这条线由 `tests/sandbox/test_aider_runner.py` 用假容器覆盖）。
+
+  textkit-1 那次是**被测 AI 自己陷进了复读循环**：同一句话重复几十次，
+  一次完整往返都没走完，墙钟 300 秒到点被 `docker stop` 强杀。
+  它的 `Tokens:` 行数是 0，所以成本如实报 `unavailable` 而不是 0（协议纪律 3）。
+  按 C-18，`AGENT_TIMEOUT` 不重试 —— 这顺带把这条路径在真实 Agent 上跑通了一遍，
+  之前只有 Mock 验过。
+
+  这个复读循环**每轮换题**：另一轮里卡住的是 cart-3，pager-4 则因为 SEARCH/REPLACE
+  块格式写错、aider 反射三次后放弃，产出 `EMPTY_PATCH`。同一批题跑两轮结果不同，
+  说明**单轮结果不能当结论**，正式实验需要多轮取样 —— 这是 E5-T2 要处理的事。
+
+  **顺带修的**：`AgentConfig` 加 `artifact_dir`（适配器写全量 stdout 和轨迹，
+  harness 捡走存制品 —— 写工作区的话会进 `git diff` 变成补丁里多出来的文件）；
+  协议加 `oom_killed` 错误码（之前没有适配器会起容器，`AGENT_TIMEOUT` 和
+  `OOM_KILLED` 退出码都是 137，混在一起会让内存吃紧的题用同样配置重试到耗尽预算）；
+  `execute_task_run()` 补 `SandboxError` 分支（docker 起不来以前会被记成
+  `AGENT_RUNTIME_ERROR`，也就是记在被测 AI 头上）；`Settings.agent_env_for()`
+  按模型名挑该家的 Key（全给的话，一次 DeepSeek 的评测里被测 AI 的容器里
+  也躺着 Anthropic 的 Key）。
+- **顺带补的一列**（迁移 `0003`）：`evaluation_task_runs.tokens_cache_read`。
+  Runner 协议 §9.2 的 `token_usage` 里一直有 `cache_read`，但 0001 建表时只落了
+  `input`/`output`/`total` 三列，缓存命中数采到就扔了。实测 DeepSeek 每轮命中
+  2.4k 左右，而缓存命中的单价比普通输入便宜一个数量级 —— 不记的话，
+  "两次运行 token 差不多、钱差好几倍"解释不了，按 token 估算成本那条路
+  （协议纪律 3 的 `estimated`）也会系统性偏高。
+  **这一列不进 `tokens_total`**（它是 `input` 的一部分，不是另加的），
+  而且**可空、不给默认 0**：空是"适配器报不出来"，0 是"报得出来、确实没命中"，
+  给默认值会把历史行追认成后者。和 `cost_usd` 同一条纪律。
+- **顺带加的一道保护**：`tests/integration/conftest.py` 的 `engine` 夹具在清库前
+  会检查有没有 Worker 正拿着**没过期的**租约，有就报错退出。
+  这道保护是当天踩坑之后加的：一个 Worker 正在跑 Golden 集，另一个终端跑了
+  `make check`，那个夹具的 `downgrade base` + `upgrade head` 把整个库连表带数据
+  一起抹了。Worker 那边表现为 `lease_lost`（它自己的保护起作用了，结果被丢弃、
+  没写坏数据），但一轮真实实验就这么没了。
+  这条坑在 E5-T1 的交付说明里已经写过一次，同一个人一天之内又踩了第二次 ——
+  **说明写进文档不够，它得是一条会报错的规则**。逃生口是
+  `BENCH_TEST_FORCE_DB_RESET=1`，留给"Worker 崩了、租约还挂着"的情况
+  （租约最长 30 分钟，不给逃生口的话那半小时里一条集成测试都跑不了）。
+- **改了冻结件 `04-runner-protocol.md`（讨论后进行，2026-09-06）**：两处，
+  都是被实测推翻的散文，**§9.2 的报文格式一个字没动**。
+  ① §9.4 选型表里 Aider 的"稳定性"由 4 改为 3 —— 原来那 4 分打的是 CLI 本身的
+  成熟度（这部分没问题），但这一列要回答的是"能不能靠它跑完一批实验"，
+  而接上真实模型之后端到端稳定性由模型主导。**排第一的结论不变**：
+  接入成本、鉴权、patch 获取、token/cost 这四项才是"第一个真实 Agent"要解决的
+  风险，Aider 在这四项上仍然最好，复读循环是所选底座模型的问题。
+  ② §9.5 里"Aider：解析其输出 + `.aider.chat.history.md`"改成只解析 stdout ——
+  我们把容器的 `HOME` 指到了 tmpfs，那个文件跟着写到 `/tmp` 去了，
+  工作区里根本没有。这反而是想要的：工作区多出来的文件会进 `git diff`。
+- **明确没做**：`max_tokens_budget` 不下发也不执行（aider 没有对应开关，
+  预算控制靠墙钟）；轨迹只记用量和文件编辑两类确定能对上的事件，
+  不去猜自然语言里哪句是"思考"；镜像分层仍是临时 Dockerfile，真正的构建器是 E2-T3。
 
 ### E3-T5 ClaudeCodeRunner
 - **Goal**：headless `-p` + `stream-json` 解析 + 凭据注入 + `--max-turns` 预算控制

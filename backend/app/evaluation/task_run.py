@@ -81,14 +81,19 @@ from app.infrastructure.logging import get_logger
 from app.judge.decision import AgentFacts, ControlRunRequiredError, Verdict, judge
 from app.runner.patch import NormalizedPatch, capture_agent_patch, normalize_patch
 from app.runner.protocol import (
+    AGENT_STDERR_FILENAME,
+    AGENT_STDOUT_FILENAME,
+    AGENT_TRAJECTORY_FILENAME,
     AUTH_FAILED,
     DEADLINE_EXCEEDED,
+    OOM_KILLED,
     RUNTIME_ERROR,
     AgentRunner,
     AgentRunResult,
     AgentTaskInput,
     ProtocolError,
 )
+from app.sandbox.container import SandboxError
 from app.sandbox.workspace import Workspace, WorkspaceError, materialize_workspace
 from app.storage.base import ArtifactRef, ArtifactStore
 
@@ -98,6 +103,8 @@ logger = get_logger(__name__)
 _TEXT_CONTENT_TYPE = "text/plain; charset=utf-8"
 _PATCH_CONTENT_TYPE = "text/x-diff; charset=utf-8"
 _XML_CONTENT_TYPE = "application/xml"
+#: 轨迹是一行一个 JSON 事件（§9.5），不是一整份 JSON 文档，所以不能写 application/json
+_JSONL_CONTENT_TYPE = "application/x-ndjson"
 
 
 def _now() -> datetime:
@@ -271,6 +278,9 @@ def execute_task_run(
     from app.runner.protocol import AgentConfig  # 局部导入：默认值要一个实例
 
     config = agent_config if agent_config is not None else AgentConfig()
+    # 制品往哪写由 harness 说了算，调用方给的值一律覆盖 —— 制品的位置和
+    # `run_key` 是绑定的，让调用方决定的话，同一次运行的东西会散到几个地方去
+    config = replace(config, artifact_dir=inputs.scratch_dir / "agent-io")
     plan = inputs.plan
     artifacts: dict[ArtifactKind, ArtifactRef] = {}
     patches: dict[PatchKind, ArtifactRef] = {}
@@ -292,6 +302,13 @@ def execute_task_run(
         # ── AGENT_RUNNING ──
         try:
             agent_result = runner.run(inputs.agent_input, agent_ws, config)
+        except SandboxError as exc:
+            # docker 连不上、镜像不在、容器起不来 —— 平台的锅，不是 AI 的。
+            # 这一条要排在下面那个 except Exception 前面：落到那里会被记成
+            # AGENT_RUNTIME_ERROR，也就是记在被测 AI 头上，白白拉低它的解决率。
+            # E3-T4 之前没有适配器会起容器，所以这条路径以前不存在
+            timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
+            raise _AbortError(InfraOutcome.SANDBOX_ERROR, f"Agent 容器起不来：{exc}") from exc
         except ProtocolError as exc:
             # 适配器输出的 JSON 读不出来。它确实跑起来了，只是没好好说话
             timings = replace(timings, agent_started_at=_now(), agent_finished_at=_now())
@@ -314,7 +331,22 @@ def execute_task_run(
             artifacts,
             ArtifactKind.AGENT_STDOUT,
             f"{inputs.run_key}/agent.log",
-            _agent_log(agent_result),
+            _agent_log(agent_result) + _read_side_file(config, AGENT_STDOUT_FILENAME),
+        )
+        _store_text(
+            store,
+            artifacts,
+            ArtifactKind.AGENT_STDERR,
+            f"{inputs.run_key}/agent.err.log",
+            _read_side_file(config, AGENT_STDERR_FILENAME),
+        )
+        _store_text(
+            store,
+            artifacts,
+            ArtifactKind.TRAJECTORY,
+            f"{inputs.run_key}/trajectory.jsonl",
+            _read_side_file(config, AGENT_TRAJECTORY_FILENAME),
+            content_type=_JSONL_CONTENT_TYPE,
         )
 
         # ── PATCH_CAPTURED ──
@@ -473,6 +505,7 @@ _AGENT_ERROR_TO_INFRA: dict[str, InfraOutcome] = {
     DEADLINE_EXCEEDED: InfraOutcome.AGENT_TIMEOUT,
     AUTH_FAILED: InfraOutcome.AGENT_AUTH_ERROR,
     RUNTIME_ERROR: InfraOutcome.AGENT_RUNTIME_ERROR,
+    OOM_KILLED: InfraOutcome.OOM_KILLED,
 }
 
 
@@ -527,6 +560,21 @@ def _abort_outcome(
         error_code=abort.outcome.value,
         error_message_excerpt=abort.message[:2000],
     )
+
+
+def _read_side_file(config: Any, filename: str) -> str:
+    """读适配器写在 `AgentConfig.artifact_dir` 里的一个文件，读不到就当空。
+
+    读不到是常态，不是异常：哨兵适配器一个字节都不写。所以这里不报错、不记日志 ——
+    每跑一次就刷三条"文件不存在"的警告，真正的问题会被淹掉。
+    """
+    directory: Path | None = getattr(config, "artifact_dir", None)
+    if directory is None:
+        return ""
+    try:
+        return (directory / filename).read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def _agent_log(result: AgentRunResult) -> str:

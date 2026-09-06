@@ -6,12 +6,15 @@ SHELL := /bin/bash
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         seed-tasks worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
-        golden golden-verify images
+        golden golden-verify images images-aider test-agent
 
 BACKEND := backend
 FRONTEND := frontend
 # Golden 题的测试镜像标签。测试执行器的默认值和这里对齐（app/evaluation/test_executor.py）。
 GOLDEN_IMAGE := bench-golden:py311
+# Aider 的 Agent 镜像。适配器里的默认值和这里对齐（app/runner/adapters/aider.py），
+# 数据库里那份在 agent_configs.params["image"]
+AIDER_IMAGE := bench-agent:py311-aider
 UV := cd $(BACKEND) && uv run
 
 help:                ## 显示这份帮助
@@ -48,8 +51,13 @@ imports:             ## 模块边界检查（§14.2 的依赖方向）
 test:                ## 快速测试（不含需要 Docker 和真实大模型的）
 	$(UV) pytest -m "not docker and not agent"
 
-test-docker:         ## 只跑需要 Docker 的沙箱测试（E2-T2 的四条负例）
-	$(UV) pytest -m docker
+# 要排掉 agent：那些用例会真的调大模型，是要花钱的。
+# 夜间跑一次 test-docker 就把额度烧掉一截，而且没人会注意到
+test-docker:         ## 只跑需要 Docker 的沙箱测试（不含花钱的）
+	$(UV) pytest -m "docker and not agent"
+
+test-agent:          ## 跑会真的调用大模型的用例（要 API Key，会花钱，手动触发）
+	$(UV) pytest -m agent
 
 test-all:            ## 全部测试
 	$(UV) pytest
@@ -136,6 +144,9 @@ golden-verify:       ## 对每道 Golden Task 跑六步验证
 
 images:              ## 建 Golden 题的测试镜像（E4-T2 用，E2-T3 到位后由构建器接管）
 	docker build -t $(GOLDEN_IMAGE) images/golden
+
+images-aider:        ## 建 Aider 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)）
+	docker build -t $(AIDER_IMAGE) images/aider
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

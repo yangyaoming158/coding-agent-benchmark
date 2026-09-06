@@ -120,6 +120,12 @@ class AgentRunnerContract:
     #: 截止时刻已过之后，留给这个适配器收尾的秒数。
     deadline_grace_s: float = DEADLINE_GRACE_S
 
+    #: 正常那几条给适配器的墙钟预算（秒）。
+    #: 假适配器一瞬间就返回，60 秒绰绰有余；真实 CLI 要起容器、装载自己、
+    #: 扫一遍仓库、再等模型回话，60 秒多半只够走到一半，于是第 2 条会因为超时
+    #: 拿到空补丁而变红 —— 那测出来的是预算不够，不是适配器有问题。
+    task_deadline_s: float = 60.0
+
     #: 这个适配器在能解的题上会不会交出非空补丁。
     #: **Noop 哨兵要设成 False**——交空补丁是它的定义，不是缺陷。
     #: 真实适配器设成 False 是一个危险信号，那意味着它从来没产出过东西。
@@ -148,6 +154,17 @@ class AgentRunnerContract:
 
     # ── 子类可选提供 ────────────────────────────────────────
 
+    def make_task(self, *, deadline_ms: int) -> AgentTaskInput:
+        """这几条契约用的任务输入。默认是套件自带的那份合成任务。
+
+        **真实适配器的子类应该覆盖成一道真题。** 合成任务说的仓库是
+        `example/demo`，题干说的函数是 `login()`；而 `workspace` fixture 物化出来的
+        是另一个仓库。假适配器不看这些，真实 CLI 会照着题干去仓库里找，找不到就
+        什么都不改，于是第 2 条以"没产出补丁"变红 —— 那测出来的是任务和工作区
+        对不上，不是适配器有毛病。
+        """
+        return make_task_input(deadline_ms=deadline_ms)
+
     def runner_that_edits(self, relative_path: str) -> AgentRunner | None:
         """造一个"会去改指定文件"的同类适配器，用于第 4 条。
 
@@ -157,6 +174,10 @@ class AgentRunnerContract:
         return None
 
     # ── 六条契约 ────────────────────────────────────────────
+
+    def _deadline_ms(self) -> int:
+        """正常那几条用的截止时刻。子类调 `task_deadline_s` 就能整体放宽。"""
+        return int(time.time() * 1000) + int(self.task_deadline_s * 1000)
 
     def test_probe_reports_availability(self, runner: AgentRunner) -> None:
         """第 1 条：探活能给出结论，失败时必须说清原因。
@@ -176,7 +197,7 @@ class AgentRunnerContract:
         self, runner: AgentRunner, workspace: Path, config: AgentConfig
     ) -> None:
         """第 2 条：跑一道能解的题，交出符合声明的补丁。"""
-        task = make_task_input(deadline_ms=int(time.time() * 1000) + 60_000)
+        task = self.make_task(deadline_ms=self._deadline_ms())
         result = runner.run(task, workspace, config)
 
         assert isinstance(result, AgentRunResult)
@@ -198,7 +219,7 @@ class AgentRunnerContract:
         这里测的是软预算：适配器认不认这个字段。
         """
         before = child_pids()
-        task = make_task_input(deadline_ms=int(time.time() * 1000) - 1_000)
+        task = self.make_task(deadline_ms=int(time.time() * 1000) - 1_000)
 
         started = time.monotonic()
         result = runner.run(task, workspace, config)
@@ -221,7 +242,7 @@ class AgentRunnerContract:
         if runner is None:
             pytest.skip("这个适配器没法被指定去改某个文件，第 4 条跳过")
 
-        task = make_task_input(deadline_ms=int(time.time() * 1000) + 60_000)
+        task = self.make_task(deadline_ms=self._deadline_ms())
         result = runner.run(task, workspace, config)
 
         paths = derive_patch_paths(result.patch)
@@ -238,7 +259,7 @@ class AgentRunnerContract:
         并在报告里标成 `estimated`（协议纪律 3）。**不能填 0** —— 0 和"不知道"
         是两回事，填 0 会让成本统计悄悄偏低，而且没人看得出来。
         """
-        task = make_task_input(deadline_ms=int(time.time() * 1000) + 60_000)
+        task = self.make_task(deadline_ms=self._deadline_ms())
         result = runner.run(task, workspace, config)
 
         assert isinstance(result.cost_source, CostSource)
@@ -262,7 +283,7 @@ class AgentRunnerContract:
         （只认最后一行的规则要顶得住），和一个 `\\r` 进度条（最后一行会变成
         `进度\\r{...}`）。
         """
-        task = make_task_input(deadline_ms=int(time.time() * 1000) + 60_000)
+        task = self.make_task(deadline_ms=self._deadline_ms())
         result = runner.run(task, workspace, config)
 
         result_line = json.dumps(result.model_dump(mode="json"), ensure_ascii=False)
