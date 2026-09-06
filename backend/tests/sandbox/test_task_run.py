@@ -22,6 +22,8 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 import pytest
@@ -281,6 +283,71 @@ def test_same_agent_gives_identical_verdicts_three_times(image: str, tmp_path: P
     assert statuses[0] == statuses[1] == statuses[2]
     outcomes = {run.verdict.agent_outcome for run in runs}
     assert len(outcomes) == 1
+
+
+# ── 双层并发的阶段顺序（E5-T2）──────────────────────────────
+
+
+class RecordingGate:
+    """记下闸门被怎么用的。实现 `app.evaluation.gate.PhaseGate`，不限流也不取消。"""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+
+    @contextmanager
+    def _phase(self, name: str) -> Iterator[None]:
+        self.events.append(f"{name}+")
+        try:
+            yield
+        finally:
+            self.events.append(f"{name}-")
+
+    def sandbox(self) -> AbstractContextManager[None]:
+        return self._phase("sandbox")
+
+    def agent(self) -> AbstractContextManager[None]:
+        return self._phase("agent")
+
+    def raise_if_cancelled(self) -> None:
+        return None
+
+
+def test_the_two_concurrency_slots_are_never_held_at_the_same_time(
+    image: str, tmp_path: Path
+) -> None:
+    """阶段顺序必须是 沙箱 → 放开 → AI → 放开 → 沙箱（§15.2）。
+
+    两把名额同时持有的话，实际并发会退化成两者的较小值：本机配的是
+    AI 10 个、沙箱 5 个，嵌套之后 AI 那层永远只能跑 5 个，
+    "分两层"这件事就白做了。
+
+    这条跑的是真实链路（真起容器、真跑 pytest），所以它验的是**代码里那两个
+    `with` 的实际位置**，不是我对它的记忆。
+    """
+    task = find(BEHAVIOR_TASK_ID)
+    gate = RecordingGate()
+    outcome = execute_task_run(
+        OracleRunner(GOLD_PATCHES),
+        TaskRunInputs(
+            plan=task.execution_plan(),
+            agent_input=task.agent_task_input(deadline_unix_ms=deadline_ms(120)),
+            mirror_path=mirror_of(task),
+            scratch_dir=tmp_path / "gate",
+            image=image,
+            run_key="test/gate",
+        ),
+        gate=gate,
+    )
+
+    assert outcome.verdict.agent_outcome is AgentOutcome.RESOLVED, "先确认这次跑通了"
+    assert gate.events == [
+        "sandbox+",
+        "sandbox-",  # 物化工作区，占的是沙箱名额
+        "agent+",
+        "agent-",  # 调被测 AI，这段不占沙箱名额
+        "sandbox+",
+        "sandbox-",  # 跑测试容器
+    ]
 
 
 # ── 平台故障不能冒泡成异常 ──────────────────────────────────

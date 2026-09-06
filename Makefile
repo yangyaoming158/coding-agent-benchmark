@@ -126,6 +126,9 @@ enqueue:             ## 建一次实验并把库里的题全投进队列（AGENT
 queue:               ## 看作业队列现状
 	$(UV) python -m cli.queue status
 
+runs:                ## 看实验进度（细账：python -m cli.experiment status --run N）
+	$(UV) python -m cli.experiment status
+
 env:                 ## 开发环境自检
 	python3 scripts/check_env.py
 

@@ -124,6 +124,15 @@ class Settings(BaseSettings):
     agent_concurrency: int = Field(default=10, ge=1)
     #: 同时跑几个测试容器，受 CPU 和内存约束。
     sandbox_concurrency: int = Field(default=5, ge=1)
+    #: 一个 Worker 进程同时在途几道题（E5-T2）。
+    #:
+    #: 这是对外声明的"并行度"（§4.6：同时处于已开始但还没结束状态的评测任务数），
+    #: 和上面两个数管的**不是**同一件事：上面两个管"这一刻允许几个在调 AI、
+    #: 几个在跑测试"，这个管"同时有几道题在手里"。
+    #:
+    #: 设得比 `agent_concurrency + sandbox_concurrency` 大没有意义：多出来的作业
+    #: 只会占着租约卡在信号量上等名额，既不干活，又让在途任务数这个指标虚高。
+    worker_slots: int = Field(default=8, ge=1)
 
     # ── 队列与 Worker（E5-T1，含义见 07-platform-architecture.md §15.2）──
     #: 这个 Worker 进程的标识，写进 `job_queue.lease_owner` 和
@@ -154,6 +163,12 @@ class Settings(BaseSettings):
     #: 启动时先回收一遍带 bench 标签的残留容器。
     #: Worker 被 `kill -9` 时容器删不掉，留着会一直占内存和 pid。
     worker_reap_on_start: bool = True
+    #: 多久查一次"我手上这些作业所属的实验是不是被取消了"（秒，E5-T2）。
+    #: 这个数直接决定取消的响应上限（验收标准是 30 秒内停住），不要往大了调。
+    cancel_poll_s: float = Field(default=5.0, gt=0)
+    #: 多久扫一次"没有活作业了但状态还停在 RUNNING"的实验（秒，E5-T2）。
+    #: 正常路径是最后一道题跑完时顺手定案，这只是兜底，不用太频繁。
+    run_sweep_interval_s: float = Field(default=30.0, gt=0)
     #: 回收时只删创建超过这么久的容器（秒）。0 表示不管年龄全删。
     #: **一台机器上跑多个 Worker 时必须设成大于最长容器寿命的值**，
     #: 否则新起的 Worker 会把别人正在用的容器删掉。

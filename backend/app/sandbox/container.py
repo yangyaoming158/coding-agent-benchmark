@@ -673,6 +673,45 @@ def reap_orphans(*, client: Any = None, min_age_s: float = 0.0) -> list[str]:
     return removed
 
 
+def kill_containers_by_run_prefix(prefix: str, *, client: Any = None) -> list[str]:
+    """杀掉 `bench.run_id` 标签以 `prefix` 开头的容器，返回被杀掉的容器 id。
+
+    取消一次实验时用它（E5-T2）。取消的语义是"现在就停"，所以直接 `kill`
+    而不是 `stop`：`stop` 要先 SIGTERM 再等宽限期，一道题最多能拖 10 秒，
+    8 道题一起取消就顶掉了 30 秒验收窗口的四分之一还多。补丁在这里不用抢救——
+    这次执行会被记成 `CANCELLED`，本来就不产出结论。
+
+    **只 kill 不 remove。** 容器是 `run_in_container` 起的，它的 `finally`
+    会把容器删掉；这里抢着删的话，那边紧接着的 `container.reload()` 会撞上
+    404，一次干净的取消就变成一条 `HARNESS_ERROR` 了。
+
+    docker 的标签过滤只能精确匹配，做不了前缀匹配，所以是先按 bench 标签
+    把容器列出来，再在 Python 里筛前缀。一台机器上同时也就几十个容器。
+    """
+    client = client or get_docker_client()
+    try:
+        containers = client.containers.list(filters={"label": f"{BENCH_LABEL}={BENCH_LABEL_VALUE}"})
+    except DockerException as exc:
+        raise SandboxError(f"列容器失败：{exc}") from exc
+
+    killed: list[str] = []
+    for container in containers:
+        run_id = str((container.labels or {}).get(BENCH_RUN_LABEL, ""))
+        if not run_id.startswith(prefix):
+            continue
+        try:
+            container.kill()
+        except NotFound:
+            continue  # 已经自己结束了，正是我们想要的
+        except DockerException as exc:
+            logger.warning("cancel_kill_failed", container_id=str(container.id), error=str(exc))
+            continue
+        killed.append(str(container.id))
+    if killed:
+        logger.warning("cancel_killed_containers", prefix=prefix, count=len(killed))
+    return killed
+
+
 __all__ = [
     "AGENT_ENV_ALLOWLIST",
     "BENCH_LABEL",
@@ -696,6 +735,7 @@ __all__ = [
     "classify_outcome",
     "default_container_user",
     "get_docker_client",
+    "kill_containers_by_run_prefix",
     "parse_docker_time",
     "reap_orphans",
     "reset_docker_client",

@@ -1,15 +1,24 @@
-"""Worker 主循环（E5-T1）。
+"""Worker 主循环（E5-T1 建，E5-T2 改成多槽位）。
 
-    reap_orphans() ──▶ ┌── 回收过期租约 ──▶ 领一条 ──▶ 没有？等一会儿 ──┐
-      （启动时一次）    │                      │                        │
-                        │                      ▼                        │
-                        │                 起心跳线程                    │
-                        │                 跑处理函数（另一个线程）       │
-                        │                 收尾 / 失败重排                │
-                        └──────────────────────◀───────────────────────┘
-                                   收到 SIGTERM 就跳出，再 reap_orphans()
+    reap_orphans() ──▶ ┌── 回收过期租约 ──▶ 兜底定案 ──▶ 有空槽就领 ──┐
+      （启动时一次）    │                                    │        │
+                        │                                    ▼        │
+                        │                          每条作业起一个槽线程 │
+                        │                          槽线程里：心跳 + 处理 │
+                        │                          函数 + 收尾/失败重排  │
+                        └───────── 槽满或队列空就等一会儿 ◀────────────┘
+                                   收到 SIGTERM 就跳出，等在跑的收工，再 reap_orphans()
 
-## 三件事各自防的是什么
+## 一个 Worker 同时跑几条
+
+`worker_slots` 决定（默认 8）。**槽位数不等于并发上限** —— 两层信号量
+（`app.worker.concurrency`）才管"这一刻允许几个在调 AI、几个在跑测试"。
+槽位管的是"同时有几道题在途"，也就是需求 §4.6 对外声明的那个并行度。
+
+槽位设得比 `agent_concurrency + sandbox_concurrency` 大没有意义：多出来的作业
+只会占着租约卡在信号量上，既不干活又让"在途任务数"这个指标虚高。
+
+## 四件事各自防的是什么
 
 **回收过期租约** 防的是 Worker 被 `kill -9`。作业会一直挂在 `LEASED` 上，
 从外面看像"还在跑"，实际上没人做。租约过期之后由任意一个 Worker 把它退回队列——
@@ -23,6 +32,12 @@
 主线程就卡在处理函数里，`worker_shutdown_grace_s` 这个配置等于摆设——
 而 docker daemon 偶尔会卡住，那时候唯一的出路就是 `kill -9`，
 一 `kill -9` 就会留下残留容器，正好是验收标准要挡的那件事。
+（多槽位之后主线程本来就不会卡在处理函数里，但这一层保留着：
+单条作业的宽限期逻辑就写在那儿，去掉等于重写一遍。）
+
+**兜底定案** 防的是最后一道题没能正常收尾。正常路径是最后一条作业在落库事务里
+顺手把实验定案；要是那条作业抛异常、重试次数用完被判 DEAD，就没人去改实验状态了，
+它会永远停在 RUNNING。所以主循环每隔一会儿扫一遍（`app.evaluation.orchestrator`）。
 
 ## 停机之后为什么还要再 reap 一次
 
@@ -42,6 +57,7 @@ import os
 import signal
 import socket
 import threading
+import time
 import traceback
 from types import FrameType
 from typing import Any
@@ -50,11 +66,14 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.enums import JobState
+from app.evaluation.orchestrator import finalize_stale_runs
 from app.infrastructure import queue
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.logging import get_logger
 from app.infrastructure.models.job import JobQueue
+from app.worker.cancel import CancelWatcher
+from app.worker.concurrency import ConcurrencyLimits
 from app.worker.registry import HandlerRegistry, JobContext
 
 logger = get_logger(__name__)
@@ -65,6 +84,12 @@ MAX_WORKER_ID_LENGTH = 100
 #: 等处理函数线程时每次 join 多久。不一次性 join 到底是为了让主线程有机会处理信号——
 #: Python 的信号处理器只在主线程的字节码之间跑。
 _JOIN_TICK_S = 1.0
+
+#: 每条在跑的作业最多同时占几条数据库连接：处理函数一条、心跳一条。
+_CONNECTIONS_PER_SLOT = 2
+
+#: 主循环、看门线程、兜底扫描各自还要一条，再留一条余量。
+_RESERVED_CONNECTIONS = 4
 
 
 def default_worker_id() -> str:
@@ -89,8 +114,8 @@ class _Result:
 class Worker:
     """一个 Worker 进程的全部行为。
 
-    `run()` 是阻塞的主循环，`run_once()` 处理一条作业就返回——测试用后者，
-    不用起线程也不用发信号就能把领取、心跳、收尾、失败重排全验一遍。
+    `run()` 是阻塞的主循环，`run_once()` 领一条作业**当场跑完**再返回——
+    测试用后者，不用起线程也不用发信号就能把领取、心跳、收尾、失败重排全验一遍。
     """
 
     def __init__(
@@ -101,24 +126,52 @@ class Worker:
         engine: Engine | None = None,
         session_factory: sessionmaker[Session] | None = None,
         docker_client: Any = None,
+        slots: int | None = None,
+        limits: ConcurrencyLimits | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = registry
+        #: 同时在途的作业数上限。
+        self.slots = max(1, slots if slots is not None else self.settings.worker_slots)
+        #: 双层并发的两把信号量，所有槽位共用。
+        self.limits = limits or ConcurrencyLimits.from_settings(self.settings)
         self._engine = engine
         if session_factory is None:
-            self._engine = engine or create_db_engine()
+            self._engine = engine or create_db_engine(pool_size=self._pool_size())
             session_factory = create_session_factory(self._engine)
         self.session_factory = session_factory
         self.worker_id = (self.settings.worker_id or default_worker_id())[:MAX_WORKER_ID_LENGTH]
         self._docker_client = docker_client
         self._stop = threading.Event()
         self._force = threading.Event()
+        #: 有槽位空出来了。槽满的时候主循环等它，而不是干等一个轮询周期 ——
+        #: 干等的话，一批题跑完之后机器要空转到下一次轮询才接着领，
+        #: 实测（2026-09-06，120 条作业）70% 的时间在途数是 0，有效并发的 P50 直接掉到 0。
+        self._slot_free = threading.Event()
+        self._slots_lock = threading.Lock()
+        self._inflight: dict[int, threading.Thread] = {}
+        self._watcher = CancelWatcher(
+            session_factory,
+            poll_s=self.settings.cancel_poll_s,
+            docker_client=docker_client,
+        )
+        self._last_sweep = 0.0
+
+    def _pool_size(self) -> int:
+        """连接池要多大。
+
+        默认池是 5 条，8 个槽位一起跑会把它坐穿：处理函数拿不到连接就阻塞在
+        `session_factory()` 上，表现是"并发调高了反而更慢"，而且不报错。
+        """
+        return self.slots * _CONNECTIONS_PER_SLOT + _RESERVED_CONNECTIONS
 
     # ── 停机 ────────────────────────────────────────────────
 
     def request_stop(self, *, force: bool = False) -> None:
         """不再领新作业。`force` 为真时连当前作业也不等了。"""
         self._stop.set()
+        # 主循环可能正卡在"等一个槽空出来"上，捅一下让它立刻去看停机标志
+        self._slot_free.set()
         if force:
             self._force.set()
 
@@ -126,10 +179,16 @@ class Worker:
     def stopping(self) -> bool:
         return self._stop.is_set()
 
+    @property
+    def in_flight(self) -> int:
+        """现在有几条作业在跑。"""
+        with self._slots_lock:
+            return len(self._inflight)
+
     def install_signal_handlers(self) -> None:
         """接管 SIGTERM 和 SIGINT。
 
-        第一次：优雅停机——把手上这条做完，不再领新的。
+        第一次：优雅停机——把手上这些做完，不再领新的。
         第二次：不等了，直接进收尾（还是会回收容器，不会裸奔退出）。
         """
 
@@ -137,10 +196,10 @@ class Worker:
             name = signal.Signals(signum).name
             if self._stop.is_set():
                 logger.warning("worker_force_stop", signal=name)
-                self._force.set()
+                self.request_stop(force=True)
             else:
-                logger.info("worker_graceful_stop", signal=name, detail="做完手上这条就退出")
-                self._stop.set()
+                logger.info("worker_graceful_stop", signal=name, detail="做完手上这些就退出")
+                self.request_stop()
 
         signal.signal(signal.SIGTERM, handle)
         signal.signal(signal.SIGINT, handle)
@@ -174,6 +233,9 @@ class Worker:
             "worker_started",
             worker_id=self.worker_id,
             job_types=[t.value for t in self.registry.job_types],
+            slots=self.slots,
+            agent_concurrency=self.limits.agent_limit,
+            sandbox_concurrency=self.limits.sandbox_limit,
             lease_s=self.settings.job_lease_s,
             heartbeat_s=self.settings.job_heartbeat_s,
         )
@@ -182,18 +244,25 @@ class Worker:
             if reaped:
                 logger.warning("startup_reaped_containers", count=reaped)
 
+        self._watcher.start()
         try:
             while not self._stop.is_set():
-                if not self.run_once():
-                    # 队列空了，等一会儿再看。用 Event.wait 而不是 sleep：
-                    # 收到停机信号能立刻醒过来，不用干等满一个轮询周期。
-                    self._stop.wait(self.settings.job_poll_interval_s)
+                self._reap_expired_leases()
+                self._sweep_stale_runs()
+                if self._fill_slots() == 0:
+                    self._idle()
         finally:
+            self._watcher.stop()
+            self._drain()
             reaped = self.reap_orphan_containers()
             logger.info("worker_stopped", worker_id=self.worker_id, reaped_containers=reaped)
 
     def run_once(self) -> bool:
-        """回收一遍僵尸、领一条作业跑掉。领不到返回 False。"""
+        """回收一遍僵尸、领一条作业**当场跑完**。领不到返回 False。
+
+        这是单槽位的同步路径，给测试和"就想跑一条看看"的场合用。
+        多槽位的并发调度在 `run()` 里。
+        """
         self._reap_expired_leases()
         job = self._lease()
         if job is None:
@@ -201,7 +270,113 @@ class Worker:
         self._process(job)
         return True
 
+    # ── 槽位调度 ────────────────────────────────────────────
+
+    def _idle(self) -> None:
+        """这一轮没领到活，等一会儿再看。
+
+        分两种情况，等的东西不一样：
+
+        - **槽满了**：等一个槽空出来。干等一个轮询周期的话，一批题跑完之后机器
+          会空转到下一次轮询才接着领 —— 实测（2026-09-06，120 条 Oracle 作业）
+          70% 的时间在途数是 0，有效并发的 P50 掉到 0，而峰值看起来还是满的。
+          单看峰值发现不了这件事，这就是为什么要出**时间序列**而不是一个峰值数字。
+        - **队列空了**：等一个轮询周期，或者等到收到停机信号。
+
+        两种情况都带超时，不会永远睡下去：槽位有可能被强杀的线程占着不放。
+        """
+        if self.in_flight >= self.slots:
+            self._slot_free.wait(self.settings.job_poll_interval_s)
+            self._slot_free.clear()
+            return
+        # 用 Event.wait 而不是 sleep：收到停机信号能立刻醒过来
+        self._stop.wait(self.settings.job_poll_interval_s)
+
+    def _fill_slots(self) -> int:
+        """有空槽就一直领，返回这一轮起了几条。"""
+        self._harvest()
+        started = 0
+        while not self._stop.is_set() and self.in_flight < self.slots:
+            job = self._lease()
+            if job is None:
+                break
+            self._spawn(job)
+            started += 1
+        return started
+
+    def _spawn(self, job: JobQueue) -> None:
+        """给一条作业起一个槽线程。"""
+        thread = threading.Thread(
+            target=self._slot_body, args=(job,), name=f"slot-{job.id}", daemon=True
+        )
+        with self._slots_lock:
+            self._inflight[job.id] = thread
+        thread.start()
+
+    def _slot_body(self, job: JobQueue) -> None:
+        try:
+            self._process(job)
+        except Exception as exc:
+            # `_process` 自己会兜住处理函数的异常，走到这里说明是调度本身出了问题
+            # （比如收尾时数据库连不上）。槽线程不能带着异常静默退出
+            logger.error(
+                "slot_crashed",
+                job_id=job.id,
+                error=f"{type(exc).__name__}: {exc}",
+                tb=traceback.format_exc()[-2000:],
+            )
+        finally:
+            with self._slots_lock:
+                self._inflight.pop(job.id, None)
+            self._slot_free.set()  # 叫醒主循环，别让它干等一个轮询周期
+
+    def _harvest(self) -> None:
+        """把已经跑完的槽从表里删掉。
+
+        正常情况下 `_slot_body` 的 `finally` 已经删了，这里是防线程被强杀之后
+        表里留下一个永远不会释放的槽 —— 那会让 Worker 的可用槽位越用越少。
+        """
+        with self._slots_lock:
+            done = [job_id for job_id, thread in self._inflight.items() if not thread.is_alive()]
+            for job_id in done:
+                self._inflight.pop(job_id, None)
+
+    def _drain(self) -> None:
+        """停机时等在跑的作业收工，最多等 `worker_shutdown_grace_s`。"""
+        if self.in_flight == 0:
+            return
+        logger.info("worker_draining", in_flight=self.in_flight)
+        deadline = time.monotonic() + self.settings.worker_shutdown_grace_s
+        while time.monotonic() < deadline:
+            self._harvest()
+            if self.in_flight == 0:
+                return
+            if self._force.wait(_JOIN_TICK_S):
+                break
+        self._harvest()
+        if self.in_flight:
+            logger.error(
+                "worker_drain_timeout",
+                in_flight=self.in_flight,
+                detail="宽限期用完还有作业在跑，它们的租约会自然过期后被回收",
+            )
+
     # ── 内部步骤 ────────────────────────────────────────────
+
+    def _sweep_stale_runs(self) -> None:
+        """把"没有活作业了、状态还停在 RUNNING"的实验定案。节流成每隔一段时间一次。"""
+        now = time.monotonic()
+        if now - self._last_sweep < self.settings.run_sweep_interval_s:
+            return
+        self._last_sweep = now
+        try:
+            with session_scope(self.session_factory) as session:
+                finalized = finalize_stale_runs(session)
+            if finalized:
+                logger.info("stale_runs_finalized", evaluation_run_ids=finalized)
+        except Exception as exc:
+            # 定案失败不该让 Worker 停摆，下一轮再试
+            logger.warning("finalize_stale_runs_failed", error=f"{type(exc).__name__}: {exc}")
 
     def _reap_expired_leases(self) -> None:
         try:
@@ -239,6 +414,9 @@ class Worker:
             self._fail(job, f"没有 {job.job_type.value} 的处理函数")
             return
 
+        # 每条作业一把闸门：两层名额是共用的，取消标志是它自己的
+        cancel = threading.Event()
+        gate = self.limits.gate_for(cancel)
         ctx = JobContext(
             job_id=job.id,
             job_type=job.job_type,
@@ -248,7 +426,10 @@ class Worker:
             settings=self.settings,
             session_factory=self.session_factory,
             stop_event=self._stop,
+            gate=gate,
+            cancel=cancel,
         )
+        self._watcher.register(job.id, job.payload, cancel)
 
         heartbeat_stop = threading.Event()
         lease_lost = threading.Event()
@@ -266,6 +447,7 @@ class Worker:
         finally:
             heartbeat_stop.set()
             heartbeat.join(timeout=_JOIN_TICK_S)
+            self._watcher.unregister(job.id)
 
         if not result.finished:
             # 宽限期用完了，处理函数还在跑。不重排：它可能正跑到一半，

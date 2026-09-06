@@ -273,6 +273,24 @@ SANDBOX_CONCURRENCY = 4 ~ 8    同时跑几个测试容器（受 CPU 和内存�
 
 配置里已有的 `autoMemoryReclaim=gradual` 会让 WSL 把闲置内存还给 Windows，所以把上限提到 12 GB 并不等于常驻占用 12 GB。
 
+**实测回填（E5-T2，2026-09-06）**：双层并发跑起来了，口径按本节定义实测如下 ——
+Oracle × 4 道 Golden 题 × 30 轮 = 120 条作业，`worker_slots=8 / agent=10 / sandbox=5`：
+
+| 指标 | 实测 | 对应要求 |
+|:---|:---|:---|
+| 在途任务数（= 对外声明的并行度） | 峰值 **8**、时间加权 P50 **8** | MET-03 峰值 ≥8、P50 ≥8 |
+| 同时跑的测试容器 | 峰值 **5**、P50 **5** | 正好卡在 `SANDBOX_CONCURRENCY` 上 |
+| 同时跑的被测 AI | 峰值 1 | Oracle 不调模型，这一层没排队 |
+| 内存峰值 | 28.2%（11.7 GiB 的机器） | 验收线 <80% |
+
+时间序列由 `python -m cli.experiment concurrency --run N --csv` 导出，
+算法是拿 `evaluation_task_runs` 的时刻列做扫描线（不采样，见 `07-platform-architecture.md` §15.2.2）。
+
+⚠️ **内存那个数字受题目大小主导，不能直接外推。** Golden 题的测试跑起来只占几十 MB。
+按 `sandbox_memory_mb` 的硬上限算最坏情况：5 × 1.5 GB + 3.2 GB 基线 = 91%，超线。
+所以本节"默认值应设为 1280"那条建议**必须落实**（5 × 1.25 + 3.2 ≈ 82%，仍偏紧），
+或者把 `SANDBOX_CONCURRENCY` 降到 4（4 × 1.5 + 3.2 ≈ 79%）。定档留给 E9-T2 的并发压测。
+
 另建议：**在 WSL 里装原生 docker engine，不要用 Docker Desktop**——后者会额外常驻一个 WSL 发行版和一堆 GUI 进程，在 15.7 GB 的机器上白吃 1~2 GB。
 
 ### 6 小时：有条件能达标

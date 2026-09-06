@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 
 from app.benchmark.schema import TaskDefinition
 from app.domain.enums import JobState, TaskValidationState
+from app.evaluation.orchestrator import create_runs
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models.agent import Agent, AgentConfig
@@ -36,9 +37,7 @@ from app.infrastructure.models.benchmark import (
     EnvironmentSpec,
     Repository,
 )
-from app.infrastructure.models.evaluation import EvaluationRun
 from app.infrastructure.models.job import JobQueue
-from app.worker.handlers import enqueue_eval_task
 
 GOLDEN_ROOT = REPO_ROOT / "datasets" / "golden"
 GOLDEN_SET_SLUG = "golden"
@@ -199,21 +198,25 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             print("没选中任何题目，先跑 `python -m cli.queue seed-golden`（或检查 --task 拼写）")
             return 1
 
-        run = EvaluationRun(name=args.name, benchmark_set_id=dataset.id, agent_config_id=config.id)
-        session.add(run)
-        session.flush()
-
-        for task_id in task_ids:
-            enqueue_eval_task(
-                session,
-                evaluation_run_id=run.id,
-                benchmark_task_id=task_id,
-                max_attempts=get_settings().job_max_attempts,
-            )
-        run_id = run.id
+        # 建实验这件事只有一份实现（`app.evaluation.orchestrator`）：
+        # 这里和 `cli.experiment start` 走同一条路，不然 total_tasks 之类的字段
+        # 迟早会有一边忘了写
+        settings = get_settings()
+        runs = create_runs(
+            session,
+            name=args.name,
+            benchmark_set_id=dataset.id,
+            agent_config_id=config.id,
+            task_ids=task_ids,
+            agent_concurrency=settings.agent_concurrency,
+            sandbox_concurrency=settings.sandbox_concurrency,
+            job_max_attempts=settings.job_max_attempts,
+        )
+        run_id = runs[0].id
 
     print(f"实验 #{run_id}（{args.name}）已建，投了 {len(task_ids)} 条 EVAL_TASK 作业")
     print("起 Worker 来跑：python -m app.worker")
+    print(f"看进度 / 取消 / 补跑：python -m cli.experiment status --run {run_id}")
     return 0
 
 
