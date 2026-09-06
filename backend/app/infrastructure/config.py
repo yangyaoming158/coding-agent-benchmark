@@ -55,6 +55,23 @@ def _blank_to_none(value: Any) -> Any:
     return value
 
 
+#: 模型名里出现哪个词 → 该用哪家的 Key。litellm 的模型名形如
+#: `deepseek/deepseek-chat`、`anthropic/claude-sonnet-4-6`、`gpt-4o`。
+#:
+#: 用"包含关系"而不是"前缀完全匹配"：同一家的名字写法不止一种
+#: （`anthropic/claude-...` 和裸的 `claude-...` 都有人用）。
+#: 顺序有意义 —— 第一个命中的就是答案，所以具体的写在前面。
+PROVIDER_KEY_ENV: dict[str, str] = {
+    "deepseek": "DEEPSEEK_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "claude": "ANTHROPIC_API_KEY",
+    "dashscope": "DASHSCOPE_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "openai": "OPENAI_API_KEY",
+    "gpt": "OPENAI_API_KEY",
+}
+
+
 class Settings(BaseSettings):
     """平台的全部配置项。
 
@@ -213,6 +230,36 @@ class Settings(BaseSettings):
     def frontend_origins(self) -> list[str]:
         """CORS 放行名单。空项会被丢掉，避免尾随逗号产生一个空 origin。"""
         return [o.strip() for o in self.dev_frontend_origins.split(",") if o.strip()]
+
+    def agent_env_for(self, model_name: str) -> dict[str, str]:
+        """跑这个模型时要注进 Agent 容器的环境变量。
+
+        **只给这一家的 Key。** 全给的话，一次 DeepSeek 的评测里，被测 AI 的容器里
+        也躺着 Anthropic 的 Key —— 被测对象是一个会执行任意代码的 AI，
+        多给一把钥匙就多一份风险，而这份风险换不到任何东西。
+
+        认不出是哪一家就一把都不给。这不会静默出错：aider 起来第一件事就是报
+        "没有 API Key"，然后被归成 `AGENT_AUTH_ERROR`，日志里看得见。
+        反过来"多给了一把 Key"才是查不出来的那种问题。
+
+        返回值还要再过一遍 `app.sandbox.container.build_env()` 的白名单才能用 ——
+        这里只负责挑，白名单负责挡。
+        """
+        env: dict[str, str] = {}
+        lowered = model_name.lower()
+        for marker, var in PROVIDER_KEY_ENV.items():
+            if marker in lowered:
+                secret = getattr(self, var.lower(), None)
+                if secret is not None:
+                    env[var] = secret.get_secret_value()
+                break
+        if self.sandbox_http_proxy:
+            # 大小写两套都给：curl 只认小写，requests/httpx 两套都认。
+            # 少哪一套都会有工具绕过代理直连，表现是"大部分请求走代理、个别超时"
+            for name in ("HTTP_PROXY", "HTTPS_PROXY"):
+                env[name] = self.sandbox_http_proxy
+                env[name.lower()] = self.sandbox_http_proxy
+        return env
 
     def secret_values(self) -> list[str]:
         """当前配置里所有非空的密钥明文。

@@ -70,6 +70,11 @@ from app.infrastructure.models.benchmark import BenchmarkTask, EnvironmentSpec
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun
 from app.infrastructure.models.job import JobQueue
 from app.runner.adapters.stored import StoredPatchRunner
+
+# 换个名字导入：这个模块里的 `AgentConfig` 是数据库那张表，
+# 协议里那个同名的是适配器的 harness 侧配置，两者完全无关，重名会读错
+from app.runner.protocol import AgentConfig as AgentRunnerConfig
+from app.sandbox.container import build_env
 from app.sandbox.mirror import MirrorManager
 from app.storage import create_artifact_store
 from app.storage.base import ArtifactStore
@@ -184,7 +189,9 @@ def handle_eval_task(ctx: JobContext) -> None:
         run_key=run_key_for(payload),
     )
     try:
-        outcome = execute_task_run(runner, inputs, store=store)
+        outcome = execute_task_run(
+            runner, inputs, store=store, agent_config=_agent_config(ctx, loaded)
+        )
     finally:
         # 工作区不留：一次评测两份代码树，几百次跑下来就是几十 GB。
         # 出了事也要删——删不掉只记一条日志，不能让它盖掉真正的失败原因。
@@ -250,6 +257,26 @@ def _load(session: Session, payload: EvalTaskPayload) -> _Loaded:
         extra_protected_paths=tuple(env.extra_protected_paths or ()),
         agent_timeout_s=task_row.agent_timeout_s,
         repo_name=task.repo_name,
+    )
+
+
+def _agent_config(ctx: JobContext, loaded: _Loaded) -> AgentRunnerConfig:
+    """拼适配器的 harness 侧配置：Agent 镜像、密钥、追加参数。
+
+    密钥必须过一遍 `build_env()` 的白名单。白名单挡的是"多传了一个不该进去的变量"——
+    比如 `GITHUB_TOKEN`，那等于把翻原始 PR 的钥匙交给了被测 AI。名字不在名单里
+    直接抛错，不会悄悄丢掉。
+
+    哨兵适配器（Oracle / Noop / Mock）的 `model_name` 是 `none`，
+    `agent_env_for()` 一把 Key 都挑不出来，所以这段对它们等价于什么都没做。
+    """
+    params = loaded.agent_params
+    image = params.get("image")
+    extra_args = params.get("extra_args") or ()
+    return AgentRunnerConfig(
+        image=str(image) if image else None,
+        env=build_env(ctx.settings.agent_env_for(loaded.model_name)),
+        extra_args=tuple(str(arg) for arg in extra_args),
     )
 
 

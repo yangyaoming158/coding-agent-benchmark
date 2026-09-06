@@ -327,6 +327,19 @@ class AgentRunResult(_Strict):
 DEADLINE_EXCEEDED = "deadline_exceeded"
 AUTH_FAILED = "auth_failed"
 RUNTIME_ERROR = "runtime_error"
+#: E3-T4 加的。在此之前没有适配器会起容器，也就不存在"Agent 容器被 OOM 杀掉"这回事。
+#: 不能并进 `runtime_error`：按 C-18，OOM 要降配重试，运行时错误不降配，
+#: 混在一起的话，一道内存吃紧的题会用同样的配置重试到耗尽预算。
+OOM_KILLED = "oom_killed"
+
+#: 适配器可以往 `AgentConfig.artifact_dir` 里写的三个文件名。
+#:
+#: 这是**适配器和 harness 之间的约定**：适配器按这三个名字写，`execute_task_run()`
+#: 按这三个名字捡，捡到什么存什么。定义放在协议里而不是某个适配器里 ——
+#: 放在 aider 里的话，编排层就得 import 一个具体适配器才能知道该找什么文件。
+AGENT_STDOUT_FILENAME = "stdout.log"
+AGENT_STDERR_FILENAME = "stderr.log"
+AGENT_TRAJECTORY_FILENAME = "trajectory.jsonl"
 
 #: 报错时截取多长的原文。太短看不出问题，太长会把日志刷爆。
 _ERROR_EXCERPT_CHARS = 200
@@ -418,6 +431,13 @@ class AgentConfig:
     env: Mapping[str, str] = field(default_factory=dict)
     #: 让适配器把结果也写一份到这里（容器内路径），给 `read_result()` 兜底用。
     result_file: Path | None = None
+    #: **宿主机**上的一个目录，适配器可以往里写全量 stdout、stderr 和轨迹
+    #: （文件名见各适配器的常量），跑完由 `execute_task_run()` 捡走存成制品。
+    #:
+    #: 为什么不写工作区：工作区里多出来的文件会进 `git diff`，变成补丁里的一处改动。
+    #: 为什么不由适配器自己存制品：`app.runner` 看不见编排层，而且制品存哪
+    #: 是 harness 的事，适配器不该知道。
+    artifact_dir: Path | None = None
     #: 追加给底层 CLI 的参数。
     extra_args: tuple[str, ...] = ()
 

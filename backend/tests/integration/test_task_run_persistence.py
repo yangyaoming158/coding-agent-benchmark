@@ -28,6 +28,7 @@ from app.domain.enums import (
     AgentOutcome,
     ArtifactBackend,
     ArtifactKind,
+    CostSource,
     InfraOutcome,
     IssueLanguage,
     LifecycleStatus,
@@ -52,6 +53,7 @@ from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRu
 from app.infrastructure.models.evaluation import TestResult as CaseRow
 from app.judge.decision import CaseVerdict, Verdict
 from app.runner.patch import FilteredChange, FilterReason, NormalizedPatch, patch_stats
+from app.runner.protocol import AgentRunResult, TokenUsage
 from app.storage.base import ArtifactRef
 
 pytestmark = pytest.mark.db
@@ -158,6 +160,7 @@ def make_outcome(
     cases: tuple[CaseVerdict, ...] = (),
     patch: NormalizedPatch | None = None,
     agent_started: bool = True,
+    agent_result: AgentRunResult | None = None,
 ) -> TaskRunOutcome:
     if not cases:
         cases = (
@@ -189,6 +192,24 @@ def make_outcome(
             PatchKind.AGENT_NORMALIZED: _ref("runs/1/patch.diff"),
         },
         artifacts={ArtifactKind.TEST_STDOUT: _ref("runs/1/test.log")},
+        agent_result=agent_result,
+    )
+
+
+def make_agent_result(usage: TokenUsage | None) -> AgentRunResult:
+    """一份最简的适配器结果，只为把 token / cost 那几列喂进去。"""
+    return AgentRunResult(
+        agent_name="aider",
+        agent_version="0.86.2",
+        model="deepseek/deepseek-chat",
+        started_at=START,
+        finished_at=START + timedelta(seconds=3),
+        duration_ms=3000,
+        patch=SAMPLE_PATCH,
+        token_usage=usage,
+        cost_usd=0.0042,
+        cost_source=CostSource.REPORTED,
+        turns=2,
     )
 
 
@@ -220,6 +241,53 @@ def test_verdict_and_timings_are_written(session: Session, task_run: EvaluationT
     assert row.agent_duration_ms == 2000
     assert row.test_duration_ms == 5000
     assert row.total_duration_ms == 10000
+
+
+def test_token_usage_lands_in_the_columns(session: Session, task_run: EvaluationTaskRun) -> None:
+    """token 和 cost 四项都要落库，缓存命中单独一列。"""
+    usage = TokenUsage(input=6800, output=625, cache_read=4800, total=7425)
+    persist_task_run(session, task_run, make_outcome(agent_result=make_agent_result(usage)))
+    session.flush()
+
+    assert task_run.tokens_input == 6800
+    assert task_run.tokens_output == 625
+    assert task_run.tokens_cache_read == 4800
+    assert task_run.tokens_total == 7425
+    assert task_run.turns == 2
+    assert task_run.cost_source is CostSource.REPORTED
+
+
+def test_cache_hits_are_not_added_into_the_total(
+    session: Session, task_run: EvaluationTaskRun
+) -> None:
+    """缓存命中是 `input` 的一部分，不是另加的一份。
+
+    加进 `tokens_total` 的话，token 统计会凭空多出一截 —— 实测 DeepSeek 每轮
+    命中 2.4k 左右，四道题一轮就能把总量吹高一倍多，而且没人看得出来。
+    """
+    usage = TokenUsage(input=6800, output=625, cache_read=4800, total=7425)
+    persist_task_run(session, task_run, make_outcome(agent_result=make_agent_result(usage)))
+    session.flush()
+
+    assert task_run.tokens_total == task_run.tokens_input + task_run.tokens_output
+    assert task_run.tokens_cache_read is not None
+    assert task_run.tokens_cache_read < task_run.tokens_input
+
+
+def test_no_usage_leaves_the_columns_null_not_zero(
+    session: Session, task_run: EvaluationTaskRun
+) -> None:
+    """报不出用量时留空，不能填 0。
+
+    空是"这个适配器报不出来"，0 是"报得出来、确实一次都没有"。填 0 的话，
+    一次连响应都没拿到的运行（比如 AI 卡在复读循环里被墙钟杀掉）会被追认成
+    "确实没命中过缓存"，成本分析拿它当真值就错了。和 `cost_usd` 同一条纪律。
+    """
+    persist_task_run(session, task_run, make_outcome(agent_result=make_agent_result(None)))
+    session.flush()
+
+    assert task_run.tokens_input is None
+    assert task_run.tokens_cache_read is None
 
 
 def test_patch_stats_are_written(session: Session, task_run: EvaluationTaskRun) -> None:

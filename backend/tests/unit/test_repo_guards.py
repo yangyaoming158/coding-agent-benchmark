@@ -287,8 +287,25 @@ def test_secret_scanner_only_looks_at_tracked_files() -> None:
         "扫不到前端。多半是 git ls-files 从 backend/ 而不是仓库根目录列的，"
         "那样前端泄的密钥会被静默漏掉"
     )
-    noisy = [p for p in tracked if "node_modules" in p or "_cache" in p or ".venv" in p]
+    noisy = [p for p in tracked if is_cache_path(p)]
     assert not noisy, f"这些不该被扫：{noisy[:5]}"
+
+
+def is_cache_path(path: str) -> bool:
+    """这个路径是不是躺在缓存目录里。
+
+    **按路径分段判，不按子串判。** 原来写的是 `"_cache" in path`，
+    结果 `alembic/versions/0003_add_tokens_cache_read.py` 这样一个正常的
+    源文件被判成了缓存（2026-09-06 CI 实测撞到）—— 任何名字里带
+    `_cache` 的文件都会中招，比如 `test_cache_layer.py`。
+
+    真正要排除的是**目录**：`node_modules`、`.venv`，以及 `__pycache__`、
+    `.pytest_cache`、`.mypy_cache`、`.ruff_cache` 这一类。
+    """
+    return any(
+        part in {"node_modules", ".venv", "venv", "__pycache__"} or part.endswith("_cache")
+        for part in Path(path).parts
+    )
 
 
 def test_repo_has_no_secrets() -> None:
