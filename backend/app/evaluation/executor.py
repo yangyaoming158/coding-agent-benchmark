@@ -291,6 +291,7 @@ def execute_tests(
     mirror_path: Path,
     workspace_dir: Path,
     image: str = DEFAULT_GOLDEN_IMAGE,
+    test_ids: Sequence[str] | None = None,
     run_id: str | None = None,
     client: Any = None,
     run_container: Callable[[ContainerSpec], ContainerResult] | None = None,
@@ -304,11 +305,18 @@ def execute_tests(
     `workspace_dir` 必须不存在或为空目录。**不要**把 Agent 用过的工作区传进来，
     那违反 C-15；本函数会自己从 `mirror_path` 重新导出一份。
 
+    `test_ids` 指定跑哪些用例，不给就用 `plan.test_ids`（F2P ∪ P2P，C-17 的子集）。
+    **给一个空序列表示跑全量套件** —— 题目验证流水线（E1-T3）的 S4 要的正是全量基线，
+    §7.3 明写"记录全量用例基线状态"，只跑子集就拿不到 P2P 候选池。
+    正式评测不要传这个参数：跑全量会打爆 6 小时的时间预算。
+
     `client` 是 docker 客户端，原样透传给 `run_in_container`。
     `run_container` 是给测试用的接缝：传一个假的进来，就能在**不起容器**的前提下
     验证第 1–4 步和故障映射。真实评测两个都不用传。
     """
-    ids = plan.test_ids
+    # `is None` 不能写成 `or`：空元组是"跑全量"这个有意义的取值，
+    # `test_ids or plan.test_ids` 会把它悄悄换成子集，而且不会有任何报错
+    ids = plan.test_ids if test_ids is None else tuple(test_ids)
     patterns = enforcement_patterns(plan.test_patch_paths, plan.extra_protected_paths)
     restore = ProtectedPathRestore()
 

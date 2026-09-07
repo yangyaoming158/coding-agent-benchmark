@@ -173,6 +173,36 @@ class TaskValidationState(StrEnum):
     QUARANTINED = "QUARANTINED"
 
 
+class TaskInvalidReason(StrEnum):
+    """题目被判 INVALID 的原因（`docs/plan/03-benchmark-spec.md` §7.3 的八步流水线）。
+
+    七个值和流水线的步骤一一对应，**顺序就是流水线的顺序**：
+
+        S1 镜像仓库拉不到           REPO_UNAVAILABLE
+        S2 base_commit 不存在       COMMIT_MISSING
+        S3 环境镜像不可用           ENV_UNBUILDABLE
+        S4 基线全量套件超时         TEST_TOO_SLOW
+        S5 F2P 在修复前就通过       F2P_NOT_FAILING
+        S7 打了 gold 之后 F2P 仍挂  GOLD_NOT_FIXING
+        S8 gold 把 P2P 打挂了       GOLD_REGRESSION
+
+    **不注册进 `PLATFORM_ENUMS`**：那张表是给迁移建原生枚举类型用的，而
+    `benchmark_tasks.invalid_reason_code` 从迁移 0001 起就是 `varchar(100)`
+    （`07-platform-architecture.md` §13 里它也没标 enum，和旁边的
+    `validation_state enum(...)` 是两种写法）。注册进去会让迁移多建一个没人用的
+    类型，`downgrade base` 时还要记得 DROP 它。取值的正确性由本枚举在 Python
+    这一侧保证。
+    """
+
+    REPO_UNAVAILABLE = "REPO_UNAVAILABLE"
+    COMMIT_MISSING = "COMMIT_MISSING"
+    ENV_UNBUILDABLE = "ENV_UNBUILDABLE"
+    TEST_TOO_SLOW = "TEST_TOO_SLOW"
+    F2P_NOT_FAILING = "F2P_NOT_FAILING"
+    GOLD_NOT_FIXING = "GOLD_NOT_FIXING"
+    GOLD_REGRESSION = "GOLD_REGRESSION"
+
+
 class BenchmarkSetStatus(StrEnum):
     """数据集版本的状态。PUBLISHED 之后题目清单就冻结了，靠 benchmark_set_items 快照保证。"""
 
