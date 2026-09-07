@@ -161,16 +161,23 @@ def convert(md, toc, group):
         m = re.match(r"^(\s*)([-*]|\d+\.)\s+(.*)$", ln)
         if m:
             ordered = bool(re.match(r"^\d+\.$", m.group(2)))
+            # 缩进基准取第一项自己的缩进。原来写死"缩进 < 2"，于是**一段整体缩进的列表**
+            # （比如任务表里挂在交付说明下面的那种）一条都吃不进去：items 是空的、
+            # i 也没往前走，外层循环回到同一行，再走进这里，再空转 ——
+            # 表现是 `make report` 永远不返回，而且没有任何报错。2026-09-06 撞到。
+            # 顶格列表 base=0，判断退化成 `< 2`，和原来完全一样。
+            base = len(m.group(1))
             items, cur = [], None
             while i < n:
                 mm = re.match(r"^(\s*)([-*]|\d+\.)\s+(.*)$", lines[i])
-                if mm and len(mm.group(1)) < 2:
+                if mm and len(mm.group(1)) < base + 2:
                     if cur is not None:
                         items.append(cur)
                     cur = [mm.group(3)]
                     i += 1
                     continue
-                if lines[i].strip() and lines[i].startswith(("  ", "\t")) and cur is not None:
+                deeper = len(lines[i]) - len(lines[i].lstrip()) >= base + 2
+                if lines[i].strip() and (deeper or lines[i].startswith("\t")) and cur is not None:
                     cur.append(lines[i].strip())
                     i += 1
                     continue

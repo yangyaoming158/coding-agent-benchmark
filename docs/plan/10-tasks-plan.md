@@ -404,11 +404,102 @@
   预算控制靠墙钟）；轨迹只记用量和文件编辑两类确定能对上的事件，
   不去猜自然语言里哪句是"思考"；镜像分层仍是临时 Dockerfile，真正的构建器是 E2-T3。
 
-### E3-T5 ClaudeCodeRunner
+### E3-T5 ClaudeCodeRunner ✅ 已于 2026-09-06 完成
 - **Goal**：headless `-p` + `stream-json` 解析 + 凭据注入 + `--max-turns` 预算控制
 - **Req**：FR-09, MET-06 · **Deps**：E3-T4 · **🔑**
 - **AC**：同上；轨迹能还原工具调用序列
 - **Risk**：中（鉴权/并发额度） · **P1 · C:L · E:2d · 🐳🔑**
+- **实际交付**（2026-09-06）：`app/runner/adapters/claude_code.py` +
+  `images/claude-code/Dockerfile`（`bench-agent:py311-claude-code`，钉死
+  claude-code 2.1.236 + Node v22.16.0）。**第二个真实被测 AI，也是第一个
+  轨迹能完整还原工具调用序列的适配器。**
+
+  Golden 集实测（实验 #1，2026-09-06）：**4 题全解，严格解决率 100%**，
+  0 平台故障，makespan 101 秒，累计 601,578 token。逐题：
+
+  | 题 | Agent 用时 | token（输入/输出） | 其中缓存命中 | 轮数 |
+  |:---|---:|---:|---:|---:|
+  | cart-3 | 9.7 s | 83,353 / 1,009 | 61,696 | 4 |
+  | auth-2 | 11.0 s | 127,205 / 1,307 | 105,600 | 6 |
+  | pager-4 | 10.5 s | 104,097 / 841 | 82,560 | 5 |
+  | textkit-1 | 89.0 s | 272,195 / 11,571 | 246,912 | 12 |
+
+  对比 Aider（E3-T4，同一批题、同一段提示词、同名的底座模型 `deepseek-chat`）：
+  那边撞上复读循环，一轮卡在 cart-3、另一轮 pager-4 因为 SEARCH/REPLACE 块格式写错
+  产出 `EMPTY_PATCH`。**换个 Agent 外壳，结果差这么多** —— 这正是"评 Agent 而不是
+  评模型"值得单独立项的证据，也是报告里成本-能力矩阵最有说服力的一组数。
+  **这个对比要留有余地**：两边打的是 DeepSeek 的两个不同端点（Aider 走 OpenAI 兼容、
+  Claude Code 走 Anthropic 兼容），同名不等于同一份权重，而且各只跑了一轮。
+  要下"Agent 外壳造成多少差异"的结论，得等 E9-T1 的多轮取样。
+
+  **三个被真实报文推翻的假设。** 前两个都属于"不会报错、只会让数字悄悄错掉"那一类，
+  录下来的报文在 `backend/tests/fixtures/claude_code/`：
+
+  ① **一次 API 调用会发出多条 `assistant` 事件**（思考一条、工具调用一条），
+  而且**每条都带着同一份 usage**。我原本照 Aider 的做法逐条累加，
+  实测一次三轮的运行输入 token 从 20,019 变成 40,038 —— 正好翻倍。
+  改成按 `message.id` 去重。
+
+  ② **逐条消息的 `output_tokens` 全是 0**，真实的输出量只出现在 `result` 事件里。
+  所以聚合口径反过来了：**`result.usage` 才是权威**，逐条求和只在没有 `result`
+  事件（被杀在半路）时兜底 —— 协议 C-09a 要求超时也要留下证据。
+
+  ③ CLI 版本在 `claude_code_version` 字段，不是 `version`。按错的名字读不会报错，
+  只会每次都退回镜像里钉的常量，报表上于是写着一个可能没跑过的版本号。
+
+  **`total_cost_usd` 不能信，而且不是因为它是 0。** 实测那次运行 CLI 报
+  **$0.1244**，而同一批 token（2 万非缓存输入 + 4 万缓存 + 181 输出）按 DeepSeek
+  的价目算不到一美分 —— **差一个数量级**，stderr 里同时打着
+  `[claude-code:unrecognized_model]`。它是 CLI 拿自己那张价目表算的，不是服务端返回的。
+  所以规则是：**配了 `base_url` 就一律报 `unavailable`**，让平台按 token 去估
+  并标成 `estimated`（协议纪律 3）。一个错的数字比一个缺的数字危险得多。
+
+  **token 口径和 Aider 反着。** Anthropic 报文里的 `input_tokens` **不含**缓存，
+  缓存另用 `cache_read_input_tokens` / `cache_creation_input_tokens` 两个字段报；
+  而平台的口径（迁移 `0003`）是 `cache_read` 是 `input` 的一部分。三个数必须加起来
+  当 `input`，直接传 `input_tokens` 的话，一次命中缓存的运行少报九成输入量。
+
+  **抽出来两个共用模块**（都在 `app/runner/adapters/`）：
+  - `cli_text.py`：折行处理、鉴权报错清单、报错摘要。抽的理由就写在
+    `AUTH_MARKERS` 自己的注释里 —— 清单散成两份之后，加一种新的鉴权报错要改两处，
+    漏一处就是几百次评测被记成"AI 自己崩了"。顺带补进 Claude Code 那两条说法。
+  - `prompt.py`：下发给 CLI 的题面。**所有真实适配器必须共用同一段** ——
+    各写各的话，排行榜比出来的是"哪段提示词写得好"，不是哪个 Agent 更会修 bug。
+    有一条单测盯着两个适配器发出去的提示词逐字相同。
+
+  **镜像上踩的两个坑**：
+  - apt 走 dockerd 注进来的代理是 9.2 秒一个请求（直连 1.4 秒），第一次构建
+    挂了 14 分钟一个包都没下完。改成清华源 + 在 RUN 里 `env -u` 掉代理变量，
+    实测 417 kB/s。
+  - Debian 13 (trixie) 仓库里的 nodejs 是 20.19.2，而 claude-code 2.1.236 的
+    `package.json` 写着 `node: >=22.0.0`。**npm 只打一条 EBADENGINE 警告就照装不误**
+    —— 装完了、跑起来才崩，而且崩在容器里，表现成一次莫名其妙的 Agent 运行时错误。
+    改成装官方二进制 v22.16.0（tarball 自带配套 npm）。
+
+  **轨迹三类事件全落地**（§9.5 的 `tool_call` / `llm_usage` / `message`），
+  Aider 那边只有前两类。这次连 `thinking` 块也记，因为**类型是 CLI 自己标的，
+  不是从自然语言里猜的** —— E3-T4 拒绝写 `message` 事件针对的正是"猜"。
+  工具参数只留 sha256 指纹加一句摘要，不留原文（`Edit` 的参数里是整段新旧文本，
+  原样写进去等于把补丁又存了一遍）。`ts` 全都是开跑时刻、顺序看 `seq`：
+  事件流本身不带时间戳，而我们是等容器结束才读的 stdout，编不出每一步的真实时刻，
+  与其插值一串看着像真的时间，不如老实标序号。
+
+  **顺带修的**：`RunProgress` 加 `cost_missing_attempts`。这是第一场**全员报不出成本**
+  的实验，而汇总把 None 跳过再相加，成本栏显示成 `$0.0000` —— 读起来就是"没花钱"，
+  而钱一分不少地花掉了。协议纪律 3 管的是适配器，这一条是它在报表侧的影子。
+  现在会写成"其中 4 次报不出成本，这个金额是不全的"。
+
+  **测试仍是三层**：`tests/unit/test_claude_code_output.py`（52 条，纯解析，
+  其中 7 条喂的是录下来的真实报文）→ `tests/sandbox/test_claude_code_runner.py`
+  （24 条，真工作区 + 假容器）→ `tests/contract/test_claude_code_runner.py`
+  （六条契约，真容器真模型，标 `agent` 手动触发；第 4 条按套件规则跳过，
+  受保护路径那条线在假容器那层验过）。
+
+  **明确没做**：官方 Anthropic 端点没跑过（这台机器上没有 `ANTHROPIC_API_KEY`），
+  代码两条路都支持，切换只是 `agent_configs.params["base_url"]` 给不给的区别；
+  `--max-turns` 用完（`subtype=error_max_turns`）**不算故障** —— 它的含义是
+  "在给定预算内没修完"，和"改错了"同一类，该交给 Judge 判，照 `is_error` 的字面
+  判成故障会触发重试、白花钱，归因也会指错方向。
 
 ### E3-T6 自研 MiniAgent
 - **Goal**：ReAct 循环 + 工具（read_file/list_dir/grep/apply_edit[/run_tests]）+ token 记账
@@ -528,6 +619,16 @@
   **② 适配器错误码不能按子串猜。** Mock 的超时报的是 `deadline_exceeded`，里面没有
   "timeout" 这个词，超时被错判成运行时错误。规范错误码收进了
   `app/runner/protocol.py`，评测单元查表，认不出的一律算 AI 侧。
+
+### E4-T5 TEST_TIMEOUT 对照组执行（C-20）
+- **Goal**：测试阶段超时时，用**官方补丁**在同配置下再跑一次。对照组也超时 → 是这道题本身跑不完（题目侧）；只有被测补丁超时 → 是 AI 改出来的东西把测试拖慢了（AI 侧）
+- **Req**：FR-12 · **Deps**：E4-T4, E5-T2
+- **AC**：构造"补丁把测试拖慢"和"题目本身就跑不完"两种情形，定责结论相反；对照组按 C-72 **不计一次 attempt**，也不进解决率的任何一个分母
+- **Why**：现在 `TEST_TIMEOUT` 在 `app/evaluation/progress.py` 里保守算成**平台故障**，
+  并单独报进 `pending_control_run`。保守的方向是对的（宁可少进排行榜，也不冤枉被测 AI），
+  但代价是：**一道本来就跑不完的坏题会一直计进平台故障率**，按 C-26a 足以把整场实验
+  拖成 `PARTIAL`，而 `PARTIAL` 一律不能进排行榜。题库越大越容易撞上。
+- **P1 · C:M · E:1d · 🐳**
 
 ---
 
@@ -661,6 +762,20 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **Req**：NFR-02 · **Deps**：E5-T2
 - **AC**：由 manifest 可重建一次等价运行；两次运行的 manifest diff 只在时间戳上不同
 - **P0 · C:S · E:0.5d**
+
+### E5-T5 token→成本估算（协议纪律 3 的 `estimated`）
+- **Goal**：给 `agent_configs` 配一张单价表（输入 / 输出 / 缓存读**分开计价**），把 `cost_source=unavailable` 的 attempt 按 `token_usage × 单价` 估出 `cost_usd` 并标成 `estimated`
+- **Req**：MET-06 · **Deps**：E4-T4
+- **AC**：估出来的数和服务商账单在同一量级；`reported` / `estimated` / `unavailable` 三种来源在排行榜和报告里看得出区别（协议纪律 3 要求"必须区分显示"）；缓存读按缓存单价算 —— 它比普通输入便宜一个数量级，混着算会系统性偏高
+- **Why**：`04-runner-protocol.md` §9.2 纪律 3 一开始就写着这条路，但
+  **`CostSource.ESTIMATED` 在代码里一次都没出现过**。以前不要紧，Aider 自己报成本；
+  E3-T5 之后要紧了 —— Claude Code 走中转端点时一律报 `unavailable`（那边的
+  `total_cost_usd` 是 CLI 拿自己价目表算的，实测报 $0.1244，而同一批 token
+  按底座模型的真实价目算不到一美分，**差一个数量级**），于是**它的每一次运行成本栏都是空的**。
+  直接后果：§9.4 末尾那张"成本-能力矩阵"（`解决率 × 单题成本`）画不出 claude-code 那个点，
+  而那是报告里最有洞察力的一张图。E5-T2 已经补了 `RunProgress.cost_missing_attempts`，
+  能让人看见"这个金额不全"，但看见不等于补上。
+- **P1 · C:S · E:0.5d**
 
 ---
 

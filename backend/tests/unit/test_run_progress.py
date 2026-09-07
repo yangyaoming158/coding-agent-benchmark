@@ -226,3 +226,31 @@ def test_test_timeout_is_counted_as_a_platform_failure_and_flagged() -> None:
     result = summarize_done(rows, total=2)
     assert result.infra_failure_count == 1
     assert result.pending_control_run == 1
+
+
+def test_attempts_with_no_cost_are_counted_separately() -> None:
+    """一场全员报不出成本的实验会把金额加成 0，读起来就是"没花钱"。
+
+    2026-09-06 接 Claude Code 时撞到：走中转端点的运行一律报 unavailable
+    （那边的 `total_cost_usd` 是错的，不是缺的），于是整场实验的成本栏是
+    `$0.0000`，而钱一分不少地花掉了。协议纪律 3 管的是适配器，这一条是它在
+    报表侧的影子 —— 金额旁边必须能看到"有几次是不知道"。
+    """
+    progress = summarize(
+        [row(1, cost=None), row(2, cost=None), row(3, cost="0.02")],
+        total_tasks=3,
+        all_jobs_done=True,
+        current_status=EvaluationRunStatus.RUNNING,
+    )
+    assert progress.total_cost_usd == Decimal("0.02")
+    assert progress.cost_missing_attempts == 2
+
+
+def test_a_fully_priced_run_reports_nothing_missing() -> None:
+    progress = summarize(
+        [row(1), row(2)],
+        total_tasks=2,
+        all_jobs_done=True,
+        current_status=EvaluationRunStatus.RUNNING,
+    )
+    assert progress.cost_missing_attempts == 0

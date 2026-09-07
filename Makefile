@@ -6,7 +6,7 @@ SHELL := /bin/bash
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         seed-tasks worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
-        golden golden-verify images images-aider test-agent
+        golden golden-verify images images-aider images-claude-code test-agent
 
 BACKEND := backend
 FRONTEND := frontend
@@ -15,6 +15,8 @@ GOLDEN_IMAGE := bench-golden:py311
 # Aider 的 Agent 镜像。适配器里的默认值和这里对齐（app/runner/adapters/aider.py），
 # 数据库里那份在 agent_configs.params["image"]
 AIDER_IMAGE := bench-agent:py311-aider
+# Claude Code 的 Agent 镜像。同样在 app/runner/adapters/claude_code.py 里有默认值
+CLAUDE_CODE_IMAGE := bench-agent:py311-claude-code
 UV := cd $(BACKEND) && uv run
 
 help:                ## 显示这份帮助
@@ -150,6 +152,9 @@ images:              ## 建 Golden 题的测试镜像（E4-T2 用，E2-T3 到位
 
 images-aider:        ## 建 Aider 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)）
 	docker build -t $(AIDER_IMAGE) images/aider
+
+images-claude-code:  ## 建 Claude Code 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)）
+	docker build -t $(CLAUDE_CODE_IMAGE) images/claude-code
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
