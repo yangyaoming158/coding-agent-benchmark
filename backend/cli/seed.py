@@ -83,6 +83,25 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         # 那时改的是数据不是表结构
         params={"image": "bench-agent:py311-aider"},
     ),
+    SeedAgent(
+        name="claude-code",
+        display_name="Claude Code",
+        kind=AgentKind.CLI,
+        adapter_class="app.runner.adapters.claude_code.ClaudeCodeRunner",
+        config_label="claude-code@deepseek-chat",
+        note="第二个真实被测 AI（E3-T5），headless 模式 + stream-json 轨迹",
+        # 模型名写 DeepSeek 而不是 claude-*：这份配置让 Claude Code 打
+        # DeepSeek 的 Anthropic 兼容端点。报表上"Agent 是 claude-code、
+        # 模型是 deepseek-chat"就是事实 —— 写成 claude 系的名字才是撒谎。
+        # 想跑官方端点就再加一份 config（base_url 留空、模型名换成 claude-*），
+        # 同一个适配器接不同底座，和 Aider 那条路一样
+        model_name="deepseek-chat",
+        params={
+            "image": "bench-agent:py311-claude-code",
+            "base_url": "https://api.deepseek.com/anthropic",
+            "max_turns": 40,
+        },
+    ),
 )
 
 

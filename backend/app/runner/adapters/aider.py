@@ -38,6 +38,9 @@ Oracle / Noop / Mock 都**不碰工作区**，直接在结果里交一段补丁�
 补丁交的是**原始 diff**，受保护路径的改动留在里面不动 —— 过滤是平台在 E3-T3
 做的事（协议 C-08b，契约第 4 条）。适配器自己过滤掉的话，
 "AI 试图改测试文件"这条证据就没了。
+
+折行处理、鉴权报错清单、报错摘要这几样搬去了 `cli_text.py` —— 接第二个真实 CLI
+（Claude Code，E3-T5）时它们是共用的，复制一份等于让鉴权清单散成两处。
 """
 
 from __future__ import annotations
@@ -49,8 +52,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from app.domain.enums import CostSource, IssueLanguage
+from app.domain.enums import CostSource
 from app.infrastructure.logging import get_logger
+from app.runner.adapters.cli_text import (
+    AUTH_MARKERS,
+    failure_excerpt,
+    looks_like_auth_failure,
+    squash,
+    unwrap,
+)
+from app.runner.adapters.prompt import build_task_prompt as build_message
 from app.runner.patch import capture_workspace_diff
 from app.runner.protocol import (
     AGENT_STDERR_FILENAME,
@@ -97,10 +108,6 @@ AIDER_STOP_GRACE_S = 20
 #: 剩几秒钟的话，唯一确定的结果是白花一次容器启动的时间。
 MIN_USEFUL_SECONDS = 30
 
-#: `AgentError.message` 里最多放多少字符（两条流平分）。太短看不出问题，
-#: 太长会把 `evaluation_task_runs.error_message_excerpt` 撑爆。
-ERROR_EXCERPT_CHARS = 2000
-
 
 #: aider 的用量行。2026-09-05 实测抓到的两种真实形态：
 #:
@@ -131,30 +138,6 @@ VERSION_RE = re.compile(r"^\s*Aider\s+v(?P<version>[0-9][^\s,]*)", re.MULTILINE)
 
 #: 编辑落地的那一行，例如 `Applied edit to auth/password.py`。轨迹靠它还原改了哪些文件。
 APPLIED_EDIT_RE = re.compile(r"^Applied edit to (?P<path>.+?)\s*$", re.MULTILINE)
-
-#: 判成鉴权失败的标记。**写成挤掉空白之后的样子**，理由见 `squash()`。
-#:
-#: 这里只能靠子串：对面是外部 CLI 打出来的自由文本，没有一张可查的表。
-#: 所以把清单集中放在这一处，不要散到代码里 —— 散开之后，加一种新的鉴权报错
-#: 要改几个地方，漏一个就是几百次评测被记成"AI 自己崩了"。
-#:
-#: 判错的代价不对称：鉴权失败按 C-18 重试 3 次、运行时错误重试 1 次。
-#: 把鉴权当成运行时错误，一个配错的 Key 会安静地把解决率拉到 0。
-AUTH_MARKERS: tuple[str, ...] = (
-    "authenticationerror",
-    "authentication_error",
-    "authenticationfails",
-    "invalid_api_key",
-    "incorrectapikey",
-    "invalidapikey",
-    "noapikey",
-    "apikeynotfound",
-    "unauthorized",
-)
-
-#: HTTP 401。单独用正则而不是塞进上面的清单：裸写 `"401"` 会被
-#: `Tokens: 1401 sent` 命中，于是一次正常的运行被判成鉴权失败。
-AUTH_STATUS_RE = re.compile(r"\b401\b")
 
 #: litellm 抛出来的异常，例如 `litellm.BadRequestError`、`litellm.RateLimitError`。
 #:
@@ -227,50 +210,6 @@ def parse_version(stdout: str) -> str | None:
     return match.group("version") if match else None
 
 
-def unwrap(text: str) -> str:
-    """把折行接回去：连续空白（含换行）压成**一个空格**。
-
-    aider 按终端宽度折行，一条用量行经常被劈成两半。2026-09-05 实测抓到的三种劈法：
-
-        Cost: $0.00050 message, $0.00050\nsession.
-        Cost: $0.0012 message, $0.0012 \nsession.
-        Cost: $0.00074 message, \n$0.00074 session.
-
-    劈在哪儿看消息本身有多长，没有规律。压成一个空格之后这三种都一样了。
-
-    和 `squash()` 的区别：那个压成**空**，用来做子串匹配，顺带把被劈开的单词接回去；
-    这个压成**一个空格**，用来做正则匹配，词与词的边界必须留着。
-    """
-    return re.sub(r"\s+", " ", text)
-
-
-def squash(text: str) -> str:
-    """挤掉全部空白并转小写，再拿去比对。
-
-    aider 按终端宽度硬折行，而且**会从单词中间折**。2026-09-05 实测抓到的原文：
-
-        litellm.BadRequestError: DeepseekException - {"error":{"message":"Authentication
-        Fails, Your api key: ****9ca8 is
-        invalid","type":"authentication_error","param":null,"code":"invalid_request_erro
-        r"}}
-
-    `Authentication Fails` 被折成了两行，`invalid_request_error` 被从
-    `erro | r` 中间劈开。照原样做子串匹配的话，一段报错认不认得出来取决于它
-    恰好折在哪个字符上 —— 这种 bug 只在某些消息长度下出现，最难复现。
-
-    挤掉空白之后这两个问题一起没了，代价是清单里的标记也要写成没有空格的形式。
-    """
-    return re.sub(r"\s+", "", text).lower()
-
-
-def looks_like_auth_failure(text: str) -> bool:
-    """这段输出像不像鉴权失败。清单见 `AUTH_MARKERS`。"""
-    squashed = squash(text)
-    return any(marker in squashed for marker in AUTH_MARKERS) or bool(
-        AUTH_STATUS_RE.search(squashed)
-    )
-
-
 def has_model_side_failure(text: str) -> bool:
     """输出里有没有 litellm 抛出来的异常。
 
@@ -309,47 +248,6 @@ def build_trajectory(stdout: str, *, started_at: datetime) -> str:
     return "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events)
 
 
-#: 提示词的骨架。issue 用什么语言就用哪一份 —— 中文题干配英文指令，
-#: 模型有时会跟着指令切回英文回答，那会让轨迹和日志变得难读。
-_PROMPT_TEMPLATES: dict[IssueLanguage, str] = {
-    IssueLanguage.ZH: (
-        "请修复下面这个缺陷。\n\n"
-        "## {title}\n\n{body}\n\n"
-        "---\n\n"
-        "几点要求：\n\n"
-        "1. 只改产品代码。测试文件（{protected}）就算改了也会被丢弃，别在上面花时间。\n"
-        "2. 不要新增第三方依赖，跑测试的容器是断网的，装不上。\n"
-        "3. 改完就结束，不用写解释，也不用写总结。\n"
-    ),
-    IssueLanguage.EN: (
-        "Please fix the bug described below.\n\n"
-        "## {title}\n\n{body}\n\n"
-        "---\n\n"
-        "Requirements:\n\n"
-        "1. Only change production code. Edits to test files ({protected}) are discarded, "
-        "so do not spend effort there.\n"
-        "2. Do not add third-party dependencies; the test container has no network.\n"
-        "3. Stop when the fix is in place. No explanation or summary is needed.\n"
-    ),
-}
-
-
-def build_message(task: AgentTaskInput) -> str:
-    """拼给 aider 的 `--message`。
-
-    `protected_paths` 直接来自 `task.constraints`，那是
-    `agent_visible_patterns()` 的产物（通用规则），**不含**该题的
-    `test_patch_paths` —— 后者下发出去等于告诉 AI 官方改了哪几个文件（协议 C-76）。
-    这里原样用，不要自己另拼一份。
-    """
-    template = _PROMPT_TEMPLATES.get(task.issue.language, _PROMPT_TEMPLATES[IssueLanguage.EN])
-    return template.format(
-        title=task.issue.title,
-        body=task.issue.body,
-        protected=", ".join(task.constraints.protected_paths) or "tests/**",
-    )
-
-
 def build_command(
     task: AgentTaskInput, model: str, *, extra_args: tuple[str, ...] = ()
 ) -> list[str]:
@@ -358,6 +256,8 @@ def build_command(
     每个开关为什么必须给，见模块开头那张表。用列表不用字符串：题干里带引号、
     反引号、`$` 的情况多得是，走 shell 会改变命令的含义。
     """
+    # 提示词来自 `prompt.build_task_prompt`，和 Claude Code 用的是同一段 ——
+    # 各写各的话，排行榜比出来的就成了"哪段提示词写得好"
     return [
         "aider",
         "--model",
@@ -606,26 +506,6 @@ def _error_for(container: ContainerResult) -> AgentError | None:
     return AgentError(
         code=RUNTIME_ERROR, message=f"aider 失败（退出码 {container.exit_code}）：{excerpt}"
     )
-
-
-def failure_excerpt(container: ContainerResult) -> str:
-    """给人看的报错摘要，两条流各截一段尾巴。
-
-    **不能只取 stderr。** aider 把模型侧的报错打在 **stdout** 上，stderr 里往往
-    只有一句 `Warning: Input is not a terminal (fd=0).` —— 只取 stderr 的话，
-    `evaluation_task_runs.error_message_excerpt` 那一列里就只剩这句废话，
-    而真正的原因在 stdout 里躺着（2026-09-05 实测踩到）。
-
-    两条各截一半而不是拼起来再截：拼完再截的话，stderr 一长，stdout 的尾巴
-    （报错就在那儿）会被挤掉。
-    """
-    half = ERROR_EXCERPT_CHARS // 2
-    parts = [
-        f"{label}: {stream.strip()[-half:]}"
-        for label, stream in (("stdout", container.stdout), ("stderr", container.stderr))
-        if stream.strip()
-    ]
-    return "\n".join(parts)
 
 
 __all__ = [

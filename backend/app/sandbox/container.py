@@ -112,8 +112,11 @@ AGENT_ENV_ALLOWLIST: frozenset[str] = frozenset(
         "OPENAI_API_KEY",
         "DEEPSEEK_API_KEY",
         "DASHSCOPE_API_KEY",
-        # 中转网关要用
+        # 中转网关要用。`ANTHROPIC_AUTH_TOKEN` 是 claude CLI 走非官方端点时
+        # 认的那个名字（走官方端点认的是上面的 ANTHROPIC_API_KEY），
+        # 改名映射在 `app.runner.adapters.claude_code.credential_env()` 里
         "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
         "DEEPSEEK_BASE_URL",

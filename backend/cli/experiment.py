@@ -187,9 +187,13 @@ def _status_detail(session: Session, run_id: int) -> int:
         f"  重试          {snapshot.retry_count} 次，"
         f"其中救回来 {snapshot.recovered_infra_failure_count} 次"
     )
+    # 报不出成本的那几次要单独说。不说的话，一场全员 unavailable 的实验
+    # 会显示成 `$0.0000`，读起来就是"没花钱"——而钱是实实在在花掉了的
+    missing = snapshot.cost_missing_attempts
+    caveat = f"；其中 {missing} 次报不出成本，这个金额是不全的" if missing else ""
     print(
         f"  成本 / token  ${float(snapshot.total_cost_usd):.4f} / {snapshot.total_tokens}"
-        "（累计全部 attempt，C-56）"
+        f"（累计全部 attempt，C-56{caveat}）"
     )
     print(f"  makespan      {_ms(snapshot.makespan_ms)}")
     print(f"  并发设置      agent={run.agent_concurrency}  sandbox={run.sandbox_concurrency}")
