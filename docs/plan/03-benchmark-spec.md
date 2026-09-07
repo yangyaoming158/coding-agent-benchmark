@@ -298,6 +298,148 @@ grep 的写法会凭空多出一个"被改的文件"，而这份清单是要并�
 git 对非 ASCII 路径的八进制转义（`"a/\346\265\213.py"`）也要还原，
 不然中文文件名和存的路径对不上，第 6 条的防篡改校验会对好题误报。
 
+## 7.10 验证流水线落地实录（2026-09-07，E1-T3）
+
+> **本节是追加的实现记录，没有改动 §7.1 ~ §7.9 的任何一条。**
+
+八步流水线在 `backend/app/evaluation/validation.py`，命令是
+`python -m cli.validate {run,show}`（`make validate-tasks`）。
+四道 Golden 题全部判 `VALID`，人为构造的**七种**坏任务各自落到对应的 reason code
+（验收标准写的是 6 种，§7.3 列了 7 个 code，7 个都构造出来了）。
+
+### 八步只起三次容器
+
+S5 **不逐条跑测试**，而是查 S4 的全量报告。S4 本来就要求"记录全量用例基线状态"，
+junit 报告里每条用例的状态都在，S5 要的"每一条 F2P 都失败"从这张表里直接读得出来。
+§7.2(6) 说的 P2P 候选池同样来自这份报告。
+
+对比：`cli/golden.py` 的六步验证是逐条起 pytest 的（`_step_f2p_all_fail`），
+因为它只跑指定用例，一次跑完只能得出"至少挂了一条"。F2P 有 20 条就要跑 20 遍。
+
+于是真正起容器的只有三次：S4 基线、S6/S7 打上 gold、S8 复跑。
+
+### 跑测试复用 `execute_tests`，没有第二套实现
+
+    S4      = execute_tests(plan, agent_patch="")           ← 空补丁，等价于 Noop 哨兵
+    S6/S7/S8 = execute_tests(plan, agent_patch=gold_patch)  ← 官方补丁，等价于 Oracle 哨兵
+
+不是图省事。验证要是走另一条跑测试的路，"这道题验过了"就**不保证**正式评测时判得对 ——
+中间隔着容器规格、断网策略、补丁应用顺序、报告解析、用例 ID 归一化五道关，
+任何一道两边不一致，结论都可能不同。协议 C-50 把 Oracle 100% / Noop 0% 定成题库
+发布门槛，这条流水线给出的正是每道题的那份证据。
+
+`execute_tests` 为此加了一个参数：`test_ids=()` 表示跑全量套件
+（默认仍是 C-17 的 F2P ∪ P2P 子集，正式评测不受影响）。
+
+### 模块为什么放在 `app.evaluation` 而不是 `app.benchmark`
+
+import-linter 的分层里 `app.evaluation | app.benchmark` 是并排的，并排就是互不可见，
+放进 `app.benchmark` 就 import 不到执行器。两害相权：
+
+| 方案 | 代价 |
+|:---|:---|
+| 放 `app.evaluation`（**采用**）| 文件位置和 `11-acceptance-testing-risk.md` §30 的目录草图对不上 |
+| 放 `app.benchmark` | 要重写打补丁 + 造容器规格 + 解析报告约 60 行，两套跑测试的代码会漂，上面那条保证也没了 |
+
+`gold_patch` 是**函数参数**、不进 `ExecutionPlan`，所以"官方答案不进执行计划"
+（见 `app/domain/execution_plan.py` 的模块文档）那条边界不受影响。
+
+### 七个 reason code 分别在哪一步落地
+
+| 步 | reason code | 触发条件 |
+|:---|:---|:---|
+| S1 | `REPO_UNAVAILABLE` | 镜像不在本地，且 `repo_url` 拉不到（`golden://` 没有上游）|
+| S2 | `COMMIT_MISSING` | `base_commit` 不在镜像里（fetch 一次仍然没有），或物化失败 |
+| S3 | `ENV_UNBUILDABLE` | 环境镜像不在本地 |
+| S4 / S7 / S8 | `TEST_TOO_SLOW` | 容器跑到 `test_timeout_s` 被杀 |
+| S5 | `F2P_NOT_FAILING` | 有 F2P 在基线上不是 `FAILED`/`ERROR`（含 `MISSING`、`SKIPPED`）|
+| S7 | `GOLD_NOT_FIXING` | 打完 gold 仍有 F2P 不通过；或 F2P 复跑结果不一致 |
+| S8 | `GOLD_REGRESSION` | 基线上通过的 P2P 被 gold 打挂 |
+
+### 三种失败，结论不一样
+
+| 情况 | 结论 |
+|:---|:---|
+| 命中上表七个 code 之一 | `INVALID` + code（题目原本是 `VALID` 的话记 `QUARANTINED`）|
+| 步骤失败但七个 code 都不对应 | `REVIEW_REQUIRED`，原文记进证据 |
+| 平台自己出故障（OOM、容器起不来、连不上 docker）| **不下结论**，`state` 为 None，调用方不动题目状态 |
+
+第二行的典型情况：`test_patch` 在 base 上打不上、junit 报告没生成。
+硬套一个 code 是在编 —— §7.3 没有对应项，而报错原文比一个错误的分类有用得多。
+第三行是底线：把平台故障写成题目无效，真正的原因就再没人去查了。
+
+### 一次超时不等于隔离（C-20a 的边界）
+
+首次验证时 S4 超时就是 `INVALID(TEST_TOO_SLOW)`，这是 §7.3 明写的。
+C-20a 禁止的是另一件事：**已发布题目**在正式评测时超时一次就被隔离 ——
+那种情况要先按 C-20 跑对照组（E4-T5）。两者不是一回事。
+
+`QUARANTINED` 在本流水线里只有一个来源：`previous_state` 已经是 `VALID` 的题目复验没过。
+
+### 一处细化：声明的 P2P 在基线上就要全过
+
+§7.3 的 S5 只写了检查 F2P。实现里在 S4 顺带查了"声明的 P2P 在 `base + test_patch`
+上必须全过"（§7.2(6) 本来就这么定义 P2P），不满足判 `REVIEW_REQUIRED`。
+
+不加这一条的话，一条在 base 上就挂的 P2P 会一路漏到 S8，被记成 `GOLD_REGRESSION` ——
+而 gold 根本没碰它，那是**错误的诊断**。
+
+### 不稳定用例只报不改
+
+§7.2(7) 写的是"P2P 连跑 2 次不一致 → 该用例剔除"。实现里**只报不改**：
+把该剔的用例列进证据，状态判 `REVIEW_REQUIRED`，不动题目 JSON。
+
+理由是剔除会改 `pass_to_pass`，进而改 `content_hash`，而 `content_hash` 是数据集
+快照的身份证（§7.5）—— 验证过程顺手改题目定义，"同一个数据集版本"就不再成立。
+改不改由人或者数据集发布环节（E1-T6）决定。不稳定的 F2P 直接判
+`GOLD_NOT_FIXING`：它不能稳定通过，就不算修好了。
+
+复跑只跑 gold 那一侧（`--repeat`，默认 2）。F2P 的"必须通过"和 P2P 的"必须仍然通过"
+两条断言都在这一侧；基线侧的抖动会表现成"F2P 有时候通过"，由 S5 当场拦下。
+再多跑一遍基线会让最贵的一步再贵一倍，收益小得多。
+
+### S3 现在只有 reuse 那一半
+
+§7.3 的 S3 是"build/reuse env image + install"。镜像分层构建是 E2-T3，还没做，
+所以这里只查镜像在不在本地、取它的 digest（协议 C-36），不在就判 `ENV_UNBUILDABLE`，
+错误信息里明说要先 `make images`。**不会自动 build，也不会自动 pull**（ADR-008）。
+
+### 证据制品
+
+按 §17.2 的命名规范落在 `tasks/{task_id}/validation/{stamp}/` 下：
+
+    evidence.json          结论 + 八步逐步记录 + 镜像身份 + 全量用例基线 + 耗时基线 + 复跑对照
+    s4-baseline.junit.xml  三次容器运行各自的 junit 报告和 stdout / stderr
+    s7-gold.junit.xml
+    s8-rerun-2.junit.xml
+
+`benchmark_tasks.validation_evidence_uri` 指向 `evidence.json`，每份制品在
+`artifacts` 表里有一行索引（`owner_type=VALIDATION`、`kind=VALIDATION_EVIDENCE`）。
+
+`{stamp}` 用 `20260907T142514Z` 这种紧凑写法，**不能用 ISO 8601**：
+`validate_key()` 只放行 `[A-Za-z0-9._/-]`，ISO 里的冒号会被当场拒收。
+
+### 数据库没动
+
+`benchmark_tasks.invalid_reason_code` 从迁移 0001 起就存在（`varchar(100)`），
+**不需要新迁移**。七个取值定义成 `TaskInvalidReason`（`app/domain/enums.py`），
+**不注册进 `PLATFORM_ENUMS`** —— 那张表是给迁移建原生枚举类型用的，
+注册进去会多建一个没人用的类型，`downgrade base` 时还要记得 DROP 它。
+
+### 实测数字（本机，2026-09-07）
+
+- 四道 Golden 题跑完八步（含复跑）合计 **6 秒**，单题 1.4–1.6 秒；
+  其中 S4/S7/S8 三次容器各 450–520 ms，S1/S2/S3 合计不到 60 ms。
+- 基线耗时（S4 跑完全量套件）**399–516 ms**，远低于 `test_timeout_s`。
+- `bench-golden:py311` 在 Docker 29 的 containerd 镜像存储下**有 `RepoDigests`**
+  （`bench-golden@sha256:d7815f…`），digest 恰好等于 image Id。所以本地构建的镜像
+  也拿得到一个稳定的 digest，只是它不是"能回仓库验证"的那种内容地址。
+- 构造坏任务时踩到一处：把 `test_timeout_s` 压到 1 秒**不足以**稳定触发
+  `TEST_TOO_SLOW` —— 本机容器起来加跑完七条用例还不到 1 秒。
+  改成"`test_command` 睡 30 秒、预算 5 秒"，结果就只取决于这两个数。
+
+---
+
 ---
 
 # 8 Benchmark Construction Strategy

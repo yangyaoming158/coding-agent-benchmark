@@ -466,6 +466,54 @@ def reset_docker_client() -> None:
     _client = None
 
 
+@dataclass(frozen=True, slots=True)
+class ImageInfo:
+    """一个本地镜像的身份。
+
+    `digest` 是**内容哈希**，协议 C-36 要求正式实验引用 digest 而不是 tag ——
+    tag 会被覆盖（同一个 `bench-golden:py311` 今天和下周可能是两个镜像），
+    digest 不会。题目验证要把它记进证据里，否则"这道题在哪个环境下验过"就说不清。
+
+    `digest` 可能为 None：镜像是本机 `docker build` 出来的、从没推过仓库时，
+    它没有 `RepoDigests`。这时只能退回 `image_id`（本机唯一，跨机器无意义），
+    如实记成 None 比编一个假 digest 好。
+    """
+
+    tag: str
+    #: `sha256:...`，docker 里的 `Id`。
+    image_id: str
+    #: `repo@sha256:...` 里的那一段，没推过仓库的本地镜像为 None。
+    digest: str | None = None
+
+
+def inspect_image(image: str, *, client: Any = None) -> ImageInfo:
+    """查一个本地镜像，拿它的 id 和 digest。镜像不在就抛 `ImageNotFoundError`。
+
+    **不会自动拉镜像**，和 `run_in_container` 一个口径（ADR-008）：评测或验证跑到
+    一半去拉镜像会打爆时间预算，也让结果不可复现。
+    """
+    docker_client = client or get_docker_client()
+    try:
+        obj = docker_client.images.get(image)
+    except ImageNotFound as exc:
+        raise ImageNotFoundError(image) from exc
+    except (DockerException, requests.RequestException) as exc:
+        raise SandboxError(f"查镜像 {image} 失败：{exc}") from exc
+
+    attrs = getattr(obj, "attrs", None) or {}
+    repo_digests = attrs.get("RepoDigests") or []
+    # RepoDigests 长这样：["bench/env@sha256:abc..."]。取 @ 后面那一段；
+    # 多条时取排序后的第一条 —— 同一个镜像推到几个仓库会有几条，内容哈希是同一个，
+    # 但要保证每次取到的是同一条，证据里才不会莫名其妙地变
+    digest = None
+    for entry in sorted(str(d) for d in repo_digests):
+        if "@" in entry:
+            digest = entry.split("@", 1)[1]
+            break
+    image_id = str(getattr(obj, "id", "") or attrs.get("Id", ""))
+    return ImageInfo(tag=image, image_id=image_id, digest=digest)
+
+
 # ══════════════════════════════════════════════════════════════
 # 主入口
 # ══════════════════════════════════════════════════════════════
@@ -729,6 +777,7 @@ __all__ = [
     "ContainerSpec",
     "DockerUnavailableError",
     "EnvNotAllowedError",
+    "ImageInfo",
     "ImageNotFoundError",
     "NetworkMode",
     "ResourceLimits",
@@ -738,6 +787,7 @@ __all__ = [
     "classify_outcome",
     "default_container_user",
     "get_docker_client",
+    "inspect_image",
     "kill_containers_by_run_prefix",
     "parse_docker_time",
     "reap_orphans",

@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
-        seed-tasks worker enqueue queue \
+        seed-tasks validate-tasks worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent
 
@@ -118,6 +118,9 @@ seed:                ## 写入哨兵 Agent 的种子数据
 
 seed-tasks:          ## 把 Golden 题写进库（开发用，不跑验证流水线）
 	$(UV) python -m cli.queue seed-golden
+
+validate-tasks:      ## 跑八步验证流水线（要 Docker），把结论写回 benchmark_tasks
+	$(UV) python -m cli.validate run
 
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker

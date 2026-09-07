@@ -93,11 +93,20 @@
   新增 20 个测试（合计 376 全绿），含两条反向用例证明验证器不是空转。
   落地方式记在 `03-benchmark-spec.md` §8.7。
 
-### E1-T3 Task Validation Pipeline（8 步验证）
+### E1-T3 Task Validation Pipeline（8 步验证）✅ 已于 2026-09-07 完成
 - **Goal**：§7.3 流水线实现 + 证据制品
 - **Req**：FR-01, NFR-01 · **Deps**：E1-T1, E2-T2, E4-T2
 - **AC**：对 Golden Task 全部判 VALID；对人为构造的 6 种坏任务全部判对应 INVALID reason_code
 - **P0 · C:L · E:2d · 🐳**
+- **实际交付**（2026-09-07）：`app/evaluation/validation.py` + `python -m cli.validate {run,show}`
+  （`make validate-tasks`）。四道 Golden 题全部判 VALID 并落库，人为构造的**七种**坏任务
+  各自落到对应 reason code（AC 写 6 种，§7.3 列了 7 个 code，7 个都构造出来了）。
+  八步只起**三次**容器：S5 不逐条跑测试，改查 S4 全量报告里每条用例的基线状态。
+  跑测试复用 E4-T2 的 `execute_tests`（空补丁 = Noop 哨兵，gold 补丁 = Oracle 哨兵），
+  所以验证和正式评测走的是同一条路 —— 这正是协议 C-50 那道发布门槛的逐题证据。
+  平台自己出故障时**不下结论**，不动题目状态。新增 44 个测试（26 个不要 Docker、
+  12 个真起容器、6 个落库），四道题跑完八步合计 6 秒。
+  落地方式和七处实现决策记在 `03-benchmark-spec.md` §7.10。
 
 ### E1-T4 GitHub 挖掘器
 - **Goal**：GraphQL 批量拉取 merged PR + 关联 Issue → `task_candidates`；缓存与断点续跑
@@ -689,7 +698,8 @@ Worker 用自己的时钟写、数据库用自己的时钟读，差几秒就会�
 **明确没做（留给后续任务）**：C-20 的对照组执行（`needs_control_run` 只落库不消费，
 C-72 规定它不算一次 attempt，够单开一个任务）；双层并发信号量、进度聚合、取消
 （E5-T2）；限流令牌桶（E5-T3）。`cli/queue.py` 的 `seed-golden` 只是把题原样写进库，
-**不是** E1-T3 的验证流水线，`validation_state` 停在 `DISCOVERED`。
+**不是** E1-T3 的验证流水线，`validation_state` 停在 `DISCOVERED`
+（E1-T3 已于 2026-09-07 完成，跑 `make validate-tasks` 把它们推到 `VALID`）。
 
 ### E5-T2 EvaluationRun 编排与双层并发 ✅
 - **Goal**：展开 N 个 task_run、双层信号量、进度聚合、取消、失败重跑
