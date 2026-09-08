@@ -809,7 +809,17 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ## E8 — Benchmark Dataset Production
 
-### E8-T1 仓库选型实测与打分表 · **P0 · C:M · E:1d · 🌐**（安装/测试耗时、候选深度、中文比例 → 定档 8–15 仓库）
+### E8-T1 仓库选型实测与打分表 ✅ 已于 2026-09-08 完成 · **P0 · C:M · E:1d · 🌐**（安装/测试耗时、候选深度、中文比例 → 定档 8–15 仓库）
+- **实际交付**（2026-09-08）：`app/benchmark/{github,survey}.py` + `python -m cli.survey
+  {probe,measure,report}`（`make survey` / `make survey-measure`）。**32 个候选实测，
+  定档 9 个仓库、国产 5 个、合计候选池约 1162**，落在 §8.3 要求的区间里。
+  数据在 `datasets/survey/repos-2026-09-08.json`，名单在 `datasets/survey/candidates.txt`。
+  改了 §8.3 的两条阈值（Python 占比 80%→50%、候选池 80→15），逐条理由记在
+  `03-benchmark-spec.md` §8.8。
+  **一个走了弯路才看清的结论**：第一批 20 个候选全军覆没，当时判断"中文生态题源不够"
+  是错的 —— 真实原因是名单里全是轻量工具库，这类项目和语言无关地浅（国际的 httpx
+  严口径也只有 1 个）。有深度的是大型项目，国产这边不缺（sglang 188、xorbitsai 84）。
+  新增 39 个测试（不联网不用 Docker）；九条建镜像会踩的坑记进了 §8.8，给 E2-T3。
 ### E8-T2 L1 `benchmark-dev` 20–30 题 · **P1 · C:L · E:3d（跨天，含机时）· 🐳**
 ### E8-T3 L2 `benchmark-cn-v1` 60–100 题 · **P1 · C:XL · E:4d（跨天，含机时）· 🐳**
 ### E8-T4 校准集 50 题 · **P1 · C:M · E:1d · 🌐🐳**

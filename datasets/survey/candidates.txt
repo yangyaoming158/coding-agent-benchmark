@@ -1,0 +1,52 @@
+# E8-T1 仓库选型的候选池（03-benchmark-spec.md §8.3）。
+#
+# 一行一个 `owner/repo`。`#` 开头是注释，`[组名]` 开一个分组 —— 组名只用来在
+# 报表里分面，不参与门槛判定。
+#
+# 这份名单是**输入**不是结论。哪些能当题源由 `python -m cli.survey` 实测之后
+# 的打分表决定，明知会掉队的（jieba 已经两年没动、mmengine 要装 torch）
+# 也留在里面：负面结果同样是选型依据，删掉它们等于把判断藏进了这个文件。
+
+[国产/中文社区]
+nonebot/nonebot2
+mozillazg/python-pinyin
+pyecharts/pyecharts
+wechatpy/wechatpy
+akfamily/akshare
+open-mmlab/mmengine
+nonebot/nb-cli
+nonebot/adapter-onebot
+ArcletProject/Alconna
+sml2h3/ddddocr
+fxsjy/jieba
+apache/apisix-python-plugin-runner
+
+[国产/中文社区·大型]
+# 第一轮 12 个国产仓库全部卡在"候选池深度"上，最好的只有 8 个候选题。
+# 原因是那一批全是**轻量工具库** —— PR 体量天然小，两年也攒不出 80 个
+# "带测试的 bugfix"。这一组补的是大型国产项目：PR 体量够，代价是依赖重。
+# 2026-09-08 手工探底：xorbitsai/inference 严口径就有约 179 个候选。
+xorbitsai/inference
+hiyouga/LlamaFactory
+PaddlePaddle/PaddleOCR
+modelscope/modelscope
+PaddlePaddle/PaddleNLP
+microsoft/qlib
+sgl-project/sglang
+InternLM/lmdeploy
+milvus-io/pymilvus
+open-mmlab/mmcv
+FlagOpen/FlagEmbedding
+alibaba/EasyRec
+
+[中文开发者主导]
+tortoise/tortoise-orm
+long2ice/fastapi-cache
+
+[国际对照]
+sqlfluff/sqlfluff
+encode/httpx
+pallets/click
+Delgan/loguru
+python-jsonschema/jsonschema
+PyMySQL/PyMySQL

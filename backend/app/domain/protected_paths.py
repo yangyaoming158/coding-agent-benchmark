@@ -20,18 +20,27 @@ from __future__ import annotations
 
 from fnmatch import fnmatchcase
 
-#: 受保护路径的默认清单，逐条抄自协议 C-42。
+#: **测试代码**路径。这是受保护清单里"真的装着测试用例"的那一半。
 #:
-#: **不要在这里删条目**。环境规格只能在这份清单上追加，不能替换或删减（C-61）——
-#: 允许替换的话，某个仓库配错一次，防作弊就整体失效，而且不会有任何报错。
-DEFAULT_PROTECTED_PATTERNS: tuple[str, ...] = (
-    # 测试代码（含嵌套目录，不只是仓库根下的 tests/）
+#: 单独命名是因为有第二个问题要问它：**这个 PR 带了测试改动吗**
+#: （§7.2(7)"无 test_files → 丢弃"、§8.4 的挖掘过滤、E8-T1 的候选池深度）。
+#: 那个问题不能用整份 `DEFAULT_PROTECTED_PATTERNS` 回答 —— 一个只改了
+#: `pyproject.toml` 的 PR 会被算成"带了测试"，候选池深度就虚高了。
+TEST_CODE_PATTERNS: tuple[str, ...] = (
+    # 含嵌套目录，不只是仓库根下的 tests/
     "tests/**",
     "test/**",
     "**/tests/**",
     "**/test/**",
     "**/test_*.py",
     "**/*_test.py",
+)
+
+#: 能**改变测试行为**、但本身不是测试用例的路径。
+#:
+#: `conftest.py` 放这一边而不是上面：它装的是 fixture 不是用例，
+#: 一个只动 conftest 的 PR 带不来任何 F2P 候选，算进"带了测试改动"是虚报。
+TEST_CONFIG_PATTERNS: tuple[str, ...] = (
     # 测试收集与运行配置
     "**/conftest.py",
     "pytest.ini",
@@ -47,6 +56,15 @@ DEFAULT_PROTECTED_PATTERNS: tuple[str, ...] = (
     # CI 配置
     ".github/**",
 )
+
+#: 受保护路径的默认清单，逐条抄自协议 C-42。
+#:
+#: 写成两段拼接而不是再抄一遍：抄一遍的话，往上面任何一段加规则时都可能忘了
+#: 同步这份，于是"受保护"和"是测试文件"两个判断悄悄用上不同的清单。
+#:
+#: **不要在这里删条目**。环境规格只能在这份清单上追加，不能替换或删减（C-61）——
+#: 允许替换的话，某个仓库配错一次，防作弊就整体失效，而且不会有任何报错。
+DEFAULT_PROTECTED_PATTERNS: tuple[str, ...] = TEST_CODE_PATTERNS + TEST_CONFIG_PATTERNS
 
 
 def normalize_path(path: str) -> str:
@@ -115,6 +133,8 @@ def protected_hits(paths: tuple[str, ...], patterns: tuple[str, ...]) -> list[st
 
 __all__ = [
     "DEFAULT_PROTECTED_PATTERNS",
+    "TEST_CODE_PATTERNS",
+    "TEST_CONFIG_PATTERNS",
     "agent_visible_patterns",
     "enforcement_patterns",
     "is_protected",
