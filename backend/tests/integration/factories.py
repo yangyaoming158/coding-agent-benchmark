@@ -21,6 +21,7 @@ from app.infrastructure.models.benchmark import (
     BenchmarkTask,
     EnvironmentSpec,
     Repository,
+    TaskCandidate,
 )
 from app.infrastructure.models.evaluation import (
     EvaluationRun,
@@ -110,6 +111,9 @@ def wipe(session: Session) -> None:
         EnvironmentSpec,
         AgentConfig,
         Agent,
+        # 外键上有 ON DELETE CASCADE，删 Repository 时它会跟着走；
+        # 仍然显式列出来，是为了让"这张表也归 wipe 管"在代码里看得见（E1-T4）
+        TaskCandidate,
         Repository,
     ):
         session.execute(sa.delete(table))

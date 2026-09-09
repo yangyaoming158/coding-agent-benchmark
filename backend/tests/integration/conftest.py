@@ -2,6 +2,21 @@
 
 需要一个真的 PostgreSQL。本地起法：`./scripts/dev_db.sh up`。
 连不上就整体跳过，不让没起数据库的人被一堆红叉挡住。
+
+## ⚠️ 跑**任何一个**集成测试都会清空开发库
+
+下面那个 `engine` 夹具开头就是 `downgrade base` + `upgrade head`，整库连表带数据
+抹掉重建。这不只发生在 `make check`：
+
+    uv run pytest tests/integration/test_mining_persistence.py   ← 这一条也会清
+
+2026-09-09 被咬了两次：挖好的 80 条候选和预筛结果各没了一回，
+而且当时完全没往"我刚跑了个集成测试"上想 —— 表还在、只是数据空了，
+看起来像是数据库自己出了问题。
+
+所以：**开发数据（`make seed`、挖出来的候选、Golden 题）和集成测试不能同时活着。**
+跑完记得按 `AGENTS.md` 的规程重灌。E1-T4/T5 的三层文件缓存正是为此设计的 ——
+重灌一遍不花配额也不花钱。
 """
 
 import os

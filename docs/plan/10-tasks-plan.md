@@ -108,18 +108,57 @@
   12 个真起容器、6 个落库），四道题跑完八步合计 6 秒。
   落地方式和七处实现决策记在 `03-benchmark-spec.md` §7.10。
 
-### E1-T4 GitHub 挖掘器
+### E1-T4 GitHub 挖掘器 ✅ 已于 2026-09-09 完成
 - **Goal**：GraphQL 批量拉取 merged PR + 关联 Issue → `task_candidates`；缓存与断点续跑
 - **Req**：FR-01 · **Deps**：E1-T1 · **Modules**：`benchmark/mining`
 - **Output**：`bench mine --repo X --since Y` CLI；候选产出率报表
 - **AC**：单仓库能产出 ≥30 条 CANDIDATE；限流下不崩、可续跑；重复运行不产生重复候选
 - **Risk**：中（API 限流、关联关系不规范） · **P1 · C:L · E:2d · 🌐**
+- **实际交付**（2026-09-09）：`app/benchmark/{mining,gh_cache}.py` +
+  `python -m cli.mine {run,report,show}`（`make mine` / `make mine-report`）。
+  `pallets/click` 近两年扫过 116 个 merged PR，产出 **80 条候选**（AC 要 ≥30），
+  产出率 69.0%，全程只花 26 个 GraphQL 点。重跑一遍"新增 13、更新 67"，
+  行数不变 —— 幂等靠 `UNIQUE(repository_id, pr_number)` 的 upsert，
+  而且**不覆盖已被 E1-T5 打过分的行**。
+  缓存**没建 `gh_cache` 表**，改成 `var/gh-cache/` 文件缓存（GraphQL 没有 ETag、
+  `make check` 会清库、它不是评测数据），这是对 §8.4 的一处偏离，理由记在 §8.9。
+  实测推翻了 AC 假设的主要风险：配额根本不是瓶颈，**GitHub 的偶发失败才是**
+  （13 页里撞了 6 次 `Something went wrong` 加一次代理断连，都已补进重试清单）。
+  修掉三种"不报错的丢数据"：窗口超 1000 条不二分、降级响应（`issueCount` 说有
+  14 条但 `nodes` 是空的）、窗口收尾数目对不上 —— 第二种真咬了一口，
+  修好前 67 条、修好后 80 条。新增 72 个测试（62 个不联网、10 个落库）。
+  落地方式和七处实现决策记在 `03-benchmark-spec.md` §8.9。
 
-### E1-T5 候选清洗与 LLM 预筛
+### E1-T5 候选清洗与 LLM 预筛 ✅ 已于 2026-09-09 完成
 - **Goal**：脱敏（去 PR 链接/commit hash/修复代码块）、拆 test_patch/code_patch、抽候选 F2P、LLM 质量打分
 - **Req**：FR-01, NFR-04 · **Deps**：E1-T4
 - **AC**：脱敏后 Issue 中不含仓库 PR 链接与 40 位 hash（正则断言）；预筛分数分布合理；抽 20 条人工核对一致率 ≥80%
 - **P1 · C:M · E:1.5d · 🔑**
+- **实际交付**（2026-09-09）：`app/benchmark/{cleaning,prescreen}.py` +
+  `app/infrastructure/llm.py` + `python -m cli.prescreen {clean,score,report,export-review}`
+  （`make prescreen-clean` / `make prescreen`）。E1-T4 挖的 80 条候选全跑通：
+  **清洗 80 条，脱敏后残留泄题 0 条**（AC 第一条，正则断言 + 全量实测），
+  劈不出补丁 0 条，共剥掉 38 处链接/哈希/补丁块。
+  **打分 80 条**（DeepSeek，温度 0），六个分档都有分布（5 分 47、4 分 14、3 分 1、
+  2 分 14、1 分 2、0 分 2），分流 PASS 53 / REVIEW 14 / REJECT 13（AC 第二条）。
+  终点是 `PRESCREENED`/`REJECTED`，**不建题目** —— 一道题必须有 P2P，
+  而 P2P 只能从验证流水线 S4 的全量报告来（§7.10），那是 E8-T2 的活。
+  分流在 §8.4 的分数规则之外加了**泄题一票否决**：12 条泄题里有 3 条模型给了 4 分以上。
+  LLM 客户端放 `app/infrastructure/` 是被分层逼的（`app.attribution` 在
+  `app.benchmark` 下面一层，E6-T2 要复用）；顺带修了 httpx 默认吃 shell 代理变量
+  导致 `socks5h://` 直接 ImportError 的坑。新增 79 个测试（68 个不联网、11 个落库）。
+  落地方式和七处实现决策记在 `03-benchmark-spec.md` §8.10。
+  **人工核对（AC 第三条）**：分层抽 20 条（6 个分档全覆盖，种子 20260909），
+  **一致率 90%（18/20）**，门槛 80%，达标。对照表和统计在
+  `datasets/prescreen/review-{2026-09-09.csv,result-2026-09-09.json}`。
+  但**两条错的全在 PASS 那一格**（REJECT 5/5 对、REVIEW 4/4 对、PASS 9/11），
+  分数差是人评低 8 条 / 持平 12 条 / **高 0 条** —— 模型系统性偏松、从不偏严。
+  而 §8.4 让 PASS 直接进 VALIDATING，**PASS 恰好是唯一不经人眼的那一格**。
+  漏掉的 #2933 是"修复方案用大白话写在题面里"，正则无形可匹配，
+  LLM 是唯一防线而它没认出来。没有当场调 prompt —— 调了的话 90%
+  描述的就是一份没人复核过的 prompt，要改就得连着重跑一轮核对。
+  这个取舍和三个可用的数（PASS 假通过率 18%、REJECT 误杀率 0%、
+  候选→PASS 收率 66%）留给 E8-T2，记在 §8.10 第八~十节。
 
 ### E1-T6 数据集版本化与发布
 - **Goal**：`benchmark_sets` + `benchmark_set_items` 快照发布、Oracle/Noop 自检门禁
