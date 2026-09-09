@@ -1,0 +1,19 @@
+{
+  "environment_id": "pallets__click__py311",
+  "repo_name": "pallets/click",
+  "repo_url": "https://github.com/pallets/click.git",
+  "snapshot_commit": "6aabf099bfdd4c1e75fe8d0e0d4241372b988ab1",
+  "python_version": "3.11",
+  "install_steps": [
+    "python -m pip install -q --no-cache-dir -e ."
+  ],
+  "workspace_source_roots": [
+    "src",
+    ""
+  ],
+  "import_check": [
+    "click"
+  ],
+  "collect_check": true,
+  "note": "src 布局，包在 src/click —— 正好用来验 sys.path 前插那一步。E8-T1 实测安装 4.6 秒。快照取的是 2026-09-08 的默认分支顶端；真正按题目分桶的 environment_spec 要等 E1-T4 挖掘器。"
+}

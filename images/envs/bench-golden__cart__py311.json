@@ -1,0 +1,16 @@
+{
+  "environment_id": "bench-golden__cart__py311",
+  "repo_name": "bench-golden/cart",
+  "repo_url": "golden://bench-golden/cart",
+  "snapshot_commit": "7b2fdefd3cc76e35aa1e1a29e379eabc76512f56",
+  "python_version": "3.11",
+  "install_steps": [],
+  "workspace_source_roots": [
+    ""
+  ],
+  "import_check": [
+    "cart"
+  ],
+  "collect_check": true,
+  "note": "Golden 题不装任何东西：仓库是手写的极小包，没有 pyproject.toml，跑测试只要 bench-base 里那份 pytest。快照 commit 就是题目的 base_commit。"
+}

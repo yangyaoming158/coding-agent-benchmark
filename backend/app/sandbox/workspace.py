@@ -412,9 +412,22 @@ def _describe_tree_mismatch(workspace: Workspace, mirror_path: Path, source_tree
             shown = ", ".join(paths[:10])
             suffix = f" …共 {len(paths)} 个" if len(paths) > 10 else ""
             lines.append(f"  {label}：{shown}{suffix}")
-    if missing:
+    # 子模块（gitlink，模式 160000）单独说。`git archive` **导不出**子模块的内容，
+    # 这是它的既定行为，不是这个仓库配错了什么 —— 报成 export-ignore 会让人
+    # 去翻一个根本不存在的 .gitattributes（2026-09-08 在 milvus-io/pymilvus 上踩到）。
+    submodules = sorted(p for p in missing if expected[p].startswith("160000 "))
+    if submodules:
         lines.append(
-            "  最常见的原因：仓库的 .gitattributes 里有 export-ignore，"
+            f"  这些路径是 git 子模块：{', '.join(submodules[:5])}"
+            + (f" …共 {len(submodules)} 个" if len(submodules) > 5 else "")
+        )
+        lines.append(
+            "  git archive 不导出子模块内容，所以树哈希必然对不上。"
+            "带子模块的仓库目前用不了这套物化方案"
+        )
+    if missing and len(submodules) < len(missing):
+        lines.append(
+            "  另一个常见原因：仓库的 .gitattributes 里有 export-ignore，"
             "git archive 会跳过这些路径。这道题应在题目验证阶段判为无效"
         )
     return "\n".join(lines)

@@ -298,6 +298,8 @@ class ArtifactOwnerType(StrEnum):
     TASK_RUN = "TASK_RUN"
     EVAL_RUN = "EVAL_RUN"
     VALIDATION = "VALIDATION"
+    #: 环境镜像。构建日志和依赖锁挂在这里（E2-T3），owner_id 是 `environment_specs.id`。
+    ENVIRONMENT = "ENVIRONMENT"
 
 
 class ArtifactKind(StrEnum):

@@ -558,7 +558,7 @@ Golden 题没有真实上游。`build` 用固定的提交人和提交时间造�
 （`make survey` / `make survey-measure`）。原始数据在 `datasets/survey/repos-2026-09-08.json`，
 候选名单在 `datasets/survey/candidates.txt`。
 
-### 定档结果：9 个仓库，国产 5 个，合计候选池约 1162
+### 定档结果：8 个仓库，国产 4 个，合计候选池约 1144
 
 | 仓库 | 候选池 | 中文 issue | 归属 |
 |:---|---:|---:|:---|
@@ -569,11 +569,22 @@ Golden 题没有真实上游。`build` 用固定的提交人和提交时间造�
 | `tortoise/tortoise-orm` | 51 | 4% | 中文开发者主导 |
 | `hiyouga/LlamaFactory` | 25 | 40% | 国产 |
 | `Delgan/loguru` | 20 | 1% | 国际对照 |
-| `milvus-io/pymilvus` | 18 | 2% | 国产 |
+| ~~`milvus-io/pymilvus`~~ | ~~18~~ | ~~2%~~ | **已去掉，见下** |
 | `InternLM/lmdeploy` | 17 | 42% | 国产 |
 
 「候选池」= 近 2 年**关联了 issue 且同时改了测试和源码**的 merged PR 条数。
-后五个的安装/测试耗时还没量到（见"没量到的那一格"）。
+
+> **2026-09-08 二次修订（E2-T3 建镜像时发现）**：原定档是 9 个仓库、国产 5 个、
+> 候选池约 1162。`milvus-io/pymilvus` **去掉了**，因为它和本平台的物化方案不兼容 ——
+> 两条互相独立的原因，见下面第 ⑪⑫ 条。
+>
+> 代价：8 个仓库 / 4 个国产，仍然满足 §8.3 的"8–15 个、国产至少 4–6 个"，
+> **但踩在国产数量的下限上，没有余量**。丢掉的 18 道候选占总数 1.5%，
+> 而且 pymilvus 的中文 issue 只有 2%，所以中文覆盖不受影响。
+>
+> **没有候补可换**：选型数据里国产排在它后面的是 nonebot2（候选池 8，低于门槛 15，
+> 而且构建后端是 uv-build 装不上），再往下 modelscope 只有 3。想把国产补回 5 个
+> 只能重新扩一轮候选名单，那是 E8 的事。
 
 ### 怎么量的
 
@@ -629,6 +640,10 @@ nonebot2 最近几百个关联 issue 的 merged PR 几乎全是插件商店的 r
 取 15 是让 (b) 成立的最低门槛（9 个仓库、国产 5 个）。再低会放进只出得起个位数题目的
 仓库，那些仓库的 env 镜像建起来不划算（E2-T3 的成本）。
 
+> **2026-09-08 补**：pymilvus 去掉之后是 8 个仓库、国产 4 个，仍然满足 (b)，
+> 但**国产数量已经踩在下限上**。再掉一个就不够了，而门槛 15 之下没有候补
+> （下一个是 nonebot2，候选池 8）。也就是说这条阈值现在没有余量可让了。
+
 ### 一个走了弯路才看清的结论
 
 第一批 20 个候选（12 个国产轻量工具库 + 国际对照）**全军覆没**，最好的国产仓库
@@ -658,6 +673,59 @@ pyecharts 1 → 6，nonebot2 反而更低（8 → 4），akshare 693 个 merged 
 前 20 个轻量候选的实测数字倒是全齐：**安装 2–21 秒、测试 4–19 秒**，
 §8.3 的 120/180 秒门槛对这一档根本不起作用。
 
+**2026-09-08 补：E2-T3 建镜像时量到了其中三个**（`images/envs/*.json` 是配方，
+`envs/{environment_id}/builds/{stamp}/` 下有构建日志和依赖锁）：
+
+| 仓库 | clone（浅） | 建 env 镜像 | 收集到的用例 | 镜像增量 |
+|:---|---:|---:|---:|---:|
+| `pallets/click` | 秒级 | 12.7 s | 33084 | ~3 MB |
+| `tortoise/tortoise-orm` | 秒级 | 43.3 s | 2062 | ~190 MB |
+| `sqlfluff/sqlfluff` | 秒级 | 53.3 s | 13688 | ~190 MB |
+| `hiyouga/LLaMA-Factory` | 秒级 | **10 分 26 秒** | 359 | ~3.3 GB |
+
+"建 env 镜像"含装本体 + 补测试依赖 + 写依赖锁，是**从零构建**（没有层缓存）的墙钟时间，
+比 §8.3 那条 120 秒门槛量的口径更全。
+
+前三个轻量仓库都远在门槛之内。**LLaMA-Factory 是第一个真建成的大型国产项目**：
+10 分 26 秒、镜像涨 3.3 GB（torch 那一套），换算下来 §8.3 的 120 秒门槛对这一档
+**完全不适用** —— 但这正是 ADR-008 说的"可在实验前夜完成"，一次性成本，
+和评测时的单题耗时无关。改配方之后重建只要 17.7 秒（13 步里 11 步命中层缓存），
+装依赖那一层原样复用。
+
+**`milvus-io/pymilvus` 没建成**，原因不是耗时 —— 见下面第 ⑪⑫ 条，它已经被去掉了。
+
+**剩下四个大型国产项目单独探过一轮**（2026-09-08，只读 GitHub 上的构建元数据，不建镜像），
+问的是"它们会不会踩 pymilvus 那两条坑"：
+
+| 仓库 | 子模块 | 版本号从哪来 | 没有 git 元数据时 |
+|:---|:---|:---|:---|
+| `sgl-project/sglang` | 无 | setuptools-scm | `fallback_version = "0.0.0.dev0"`，注释明写"允许没有 .git 时装" ✅ |
+| `hiyouga/LLaMA-Factory` | 无 | 从 `src/llamafactory/extras/env.py` 正则抠 | 和 git 无关 ✅ |
+| `InternLM/lmdeploy` | 无 | 从 `lmdeploy/version.py` 读 | 和 git 无关 ✅ |
+| `xorbitsai/inference` | 无 | setuptools-scm | `fallback_version = "0.0.0+unknown"`，注释明写为了无 git 构建 ✅ |
+| ~~`milvus-io/pymilvus`~~ | **有** | hatchling 自定义钩子调 setuptools-scm | **没有 fallback，直接 LookupError** ❌ |
+
+**四个都不会踩。** 分水岭是 `fallback_version` 配没配 —— 用 setuptools-scm 本身不是问题，
+不给退路才是。顺带查了 `.gitattributes`：定档的仓库一个 `export-ignore` 都没有（坑 ⑦ 那条）。
+
+另外三件元数据读不出来、只有真动手才看得见的事，记在这里免得下次重新踩：
+
+- **sglang 的构建文件在 `python/` 子目录**，不在仓库根，配方的 `install_steps` 要
+  先 `cd python`；它还要编 Rust 扩展。
+- **lmdeploy 的 `setup.py` 按目标设备挑依赖**（`requirements/runtime_{device}.txt`，
+  还会去探 CUDA 版本），CPU 机器上装到的和 GPU 机器上不是同一套。
+- **sglang 的 git 仓库 341 MB**，`--depth 1` 过代理也慢（实测几分钟才动 200 KB，
+  第一次直接 `curl 28 Operation too slow` 断掉）。另外三个是 13/15/85 MB，
+  浅克隆几秒到一分钟就好。
+
+四个都要拉 torch，镜像预计 3–5 GB。
+
+顺带纠正 E8-T1 当时的一个判断：**"走代理 clone 这些仓库反复超时"是 `--mirror` 的问题，
+不是仓库大小的问题。** `git clone --mirror milvus-io/pymilvus` 过代理跑了 4 分 32 秒之后
+`Connection reset by peer`；同一时刻换成 `git clone --bare --depth 1 --single-branch`
+**一次就成，2.3 MB、几秒钟**。建镜像只要一个 commit 的文件树，浅克隆完全够用
+（放 `var/build-snapshots/`，和 `var/mirrors/` 分开，理由见 `05-sandbox.md` §10.9(7)）。
+
 ### 中文占比：如实标注，不够就走 §8.5 的 Plan B
 
 定档的 9 个里，中文 issue 比例最高的是 lmdeploy 42%、LlamaFactory 40%、xorbitsai 39%。
@@ -668,6 +736,10 @@ pyecharts 1 → 6，nonebot2 反而更低（8 → 4），akshare 693 个 merged 
 ### 实测踩到的坑（给 E2-T3 建镜像）
 
 每一条都让某个仓库看起来"装不上"或"没有测试"，而真实原因完全不同。
+
+第 ①–⑨ 条来自 E8-T1 的选型实测（2026-09-08）；**第 ⑩⑪ 条是 E2-T3 真建镜像时新踩到的**
+（同日），两条都是被"建完自查"当场拦下的，否则会各自留下一个"看起来能用、
+实际上一条用例都跑不了"的环境镜像。
 
 | # | 坑 | 表现 |
 |:--|:---|:---|
@@ -680,6 +752,10 @@ pyecharts 1 → 6，nonebot2 反而更低（8 → 4），akshare 693 个 merged 
 | 7 | **只有 `setup.py` 的老项目在构建隔离里缺 setuptools** | 先装 setuptools 没用（构建隔离是独立环境），要 `--no-build-isolation` |
 | 8 | **nonebot2 的构建后端是 `uv-build`，pip 装不上** | 这类仓库的 env 镜像得用 uv |
 | 9 | **linguist 会把数据文件误判成源码** | jieba 的词典被算成 "OpenEdge ABL" 6.8MB |
+| 10 | **PEP 735 的 `[dependency-groups]` 对 `pip install -e .` 完全不可见** | tortoise-orm 的测试依赖全写在那儿。装完一切正常，然后 `pytest --collect-only` **72 个模块 import 失败**。要 `pip install --group test .`，而这需要 **pip ≥ 25.1** —— `python:3.11-slim` 自带的是 24.0（2026-09-08，E2-T3 建镜像时被自查当场拦下）|
+| 11 | **`git archive` 不导出 git 子模块** | pymilvus 的 `pymilvus/grpc_gen/milvus-proto` 是 gitlink，物化出来的树哈希必然对不上上游。E2-T1 的自查会拦下，但**报错信息原来只提 export-ignore**，会把人引到一个根本不存在的 `.gitattributes` 上。已改成先认子模块 |
+| 12 | **版本号从 git 元数据算出来的包，装不进 env 镜像** | pymilvus 用 hatchling 的自定义钩子调 setuptools-scm 取版本，而 env 镜像的构建上下文里没有 `.git`（评测工作区也只有一个合成提交、没有 tag，那是 C-43 的防泄题设计）。结果是 `LookupError: setuptools-scm was unable to detect version`，而官方给的绕过办法 `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_*` **对它不生效**。**有没有 `fallback_version` 是分水岭** —— 剩下四个大型国产项目里 sglang 和 xorbitsai 也用 setuptools-scm，但两家都配了 fallback 并在注释里明写"为了没有 git 元数据时也能装"，所以不受影响 |
+| 13 | **"这个环境能不能跑测试"要按仓库自己的口径问** | 从工作区根 `pytest --collect-only` 收全部，会扫到不是测试的东西。LLaMA-Factory 的 `scripts/api_example/` 底下有两个叫 `test_*.py` 的 API 用法示例（import 没装的 `openai` 就报错），还有两个同名的 `test_converter.py`（默认导入模式下撞车）。按我们编的口径是 348 条 + 3 个错，按仓库自己的 `pytest --import-mode=importlib tests/ tests_v1/` 是 **359 条 + 0 个错**。环境是好的，是问法不对 —— 配方因此加了 `test_args`，照抄仓库自己的测试命令 |
 
 另有一条是本工具自己的 bug，一并记下：`subprocess.TimeoutExpired` 当初没被包成
 `GitHubError`，探大仓库时一次超时把整轮探测的结果连同烧掉的 API 配额一起扔了 ——

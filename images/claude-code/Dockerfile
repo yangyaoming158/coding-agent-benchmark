@@ -1,12 +1,17 @@
 # Claude Code 的 Agent 镜像（E3-T5）。
 #
-# 分层方式和 Aider 那份一致：在环境镜像上加一层 Agent 的 CLI。底座暂时直接用
-# Golden 题的测试镜像 —— 好处是 Agent 阶段和测试阶段跑的是同一个 Python，
-# AI 在容器里看到的依赖就是判定时用的那一份。E2-T3 的构建器到位后，
-# 底座换成 bench-env:<环境 id> 即可，这份 Dockerfile 的其余部分不用动。
+# 分层方式和 Aider 那份一致，就是 E2-T3 的第三层：在环境镜像上加一层 Agent 的 CLI。
+# 底座和测试阶段用同一个镜像 —— AI 在容器里看到的依赖就是判定时用的那一份。
 #
-# 建：make images-claude-code
-FROM bench-golden:py311
+# 建：make images-claude-code（叠在 bench-golden 上）
+#     python -m cli.images build --env <环境 id> --agent claude-code（叠在 bench-env 上）
+# 底座由构建参数决定（E2-T3）。
+#
+# 默认值是 Golden 题那个手写镜像，`make images-claude-code` 照旧能用。
+# 三层构建器会传 `--build-arg BASE_IMAGE=bench-env:<环境 id>`，把这一层叠到
+# 某个仓库的环境镜像上 —— 这份 Dockerfile 的其余部分一个字不用改。
+ARG BASE_IMAGE=bench-golden:py311
+FROM ${BASE_IMAGE}
 
 # git 是被测 AI 的常用工具（读历史、看 diff），另外三个是装 Node 用的。
 #

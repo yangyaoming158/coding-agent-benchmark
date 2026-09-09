@@ -164,12 +164,73 @@
   报错不自动拉**（ADR-008）。不需要 Docker 的那一半（白名单、结果分类、日志截断）
   另有 37 条纯函数测试进 `make test`。实现决策记在 `05-sandbox.md` §10.8。
 
-### E2-T3 镜像分层与构建器
+### E2-T3 镜像分层与构建器 ✅ 已于 2026-09-08 完成
 - **Goal**：`bench-base` / `bench-env:{environment_id}` / `bench-agent:{env}-{agent}` 三层；digest 记录；`bench images build/gc`
 - **Req**：FR-05, MET-02 · **Deps**：E2-T2
 - **AC**：同一 env 重复构建命中缓存；digest 写入 `environment_specs`；构建日志落制品；磁盘水位检查生效
 - **Why**：**MET-02 的必要条件**（§18.2）
 - **P0 · C:L · E:2d · 🐳**
+- **实际交付**（2026-09-08）：`app/sandbox/images.py`（纯逻辑）+ `cli/images.py`（落库落制品）
+  + `images/base/Dockerfile` + `images/envs/*.json` 七份配方。四条 AC 全部达成：
+  同一 env 重跑直接"已是最新，跳过"，`--force` 12 步里 11 步命中层缓存、image id 不变；
+  digest / build_status / built_at / build_log_uri 四列写进 `environment_specs`；
+  构建日志和依赖锁落在 `envs/{env_id}/builds/{stamp}/`（`artifacts` 表有索引行）；
+  水位阈值调到 99% 能当场拦下构建。**第二层不写 Dockerfile，从配方渲染**——
+  8 个仓库最多 16 个环境，写 16 份等于改一处公共逻辑要改 16 遍。
+  第三层只给现有两份 Agent Dockerfile 换了个 `ARG BASE_IMAGE`，其余一字未动。
+
+  **最要紧的一条是规划里没写的**：env 镜像里躺着一份仓库快照（装依赖要读它的
+  `pyproject.toml`），而评测时挂进来的工作区是另一个 commit。要是 `import` 解析到了
+  镜像里那一份，**被测 AI 的改动根本不会被执行**——测试照跑、可能全绿，
+  Oracle 哨兵却会悄悄掉下去。src 布局的仓库必然中招（sqlfluff、click 都是）。
+  处理方式是写一个 `.pth` 前插工作区源码目录，**并且建完当场验一遍**，
+  验不过就让构建失败（`05-sandbox.md` §10.9(4)）。反向用例也钉了：
+  同一个仓库把 `workspace_source_roots` 写错，构建必须红。
+
+  这道严自查当场抓到两个真问题，都记进了 `03-benchmark-spec.md` §8.8 的坑 ⑩⑪：
+  **PEP 735 的 `[dependency-groups]` 对 `pip install -e .` 完全不可见**
+  （tortoise-orm 装完一切正常，72 个测试模块 import 失败；要 pip≥25.1 的 `--group`，
+  而 `python:3.11-slim` 自带 24.0）；**`git archive` 不导出 git 子模块**
+  （pymilvus 因此建不出来，见下面"没做的部分"）。
+
+  新增 51 条不需要 Docker 的用例（进 `make test`）+ 12 条 `docker` 标记的（107 秒）。
+  库里加了一个枚举取值（`ArtifactOwnerType.ENVIRONMENT`，迁移 0004，回滚验过）——
+  `ArtifactKind.BUILD_LOG` 从 0001 起就有，缺了这个 owner 类型一直没法用。
+  端到端证据：四道 Golden 题现在跑在 `bench-env:bench-golden__*` 上判 VALID，
+  执行器和验证流水线**一行代码没改**（它们只读 `environment_specs.image_tag`）。
+
+  **顺带改了定档名单**：`milvus-io/pymilvus` 的 env 镜像建不出来，而且有**两条
+  互相独立**的原因（§8.8 坑 ⑪⑫）：`pymilvus/grpc_gen/milvus-proto` 是 git 子模块，
+  `git archive` 导不出，E2-T1 的树哈希自查必然失败；就算绕过那一条，它的版本号是
+  hatchling 的自定义钩子调 setuptools-scm 从 git tag 算的，而工作区按 C-43 只有一个
+  合成提交、没有 tag，装的时候直接 `LookupError`，官方那个
+  `SETUPTOOLS_SCM_PRETEND_VERSION_FOR_*` 对它还不生效。
+
+  这不只是建镜像的问题：**这个仓库的任何一道题都物化不出工作区**，验证流水线在 S2
+  就挂。查过九个仓库只有它带子模块，所以**去掉它，不改物化逻辑**（改了也救不回来，
+  第二条还在）。定档变成 8 个仓库 / 4 个国产，仍在 §8.3 范围内但踩在国产下限上，
+  §8.8 已回填。物化的报错信息也改了：原来只提 `export-ignore`，会把人引到一个
+  根本不存在的 `.gitattributes` 上，现在先认子模块。
+
+  顺带纠正 E8-T1 的一个判断：那几个大仓库"走代理 clone 反复超时"**多数**是 `--mirror`
+  的问题，不是仓库大小的问题，`--depth 1` 几秒就下来了 —— 但 sglang（341 MB）和
+  xorbitsai（85 MB）连浅克隆都反复断，那两个是真拉不动（§8.8 已回填）。
+
+  **顺带把剩下四个大型国产项目探了一轮**（`03-benchmark-spec.md` §8.8）：查构建元数据
+  确认四个都不会踩 pymilvus 那两条坑（分水岭是 setuptools-scm 有没有配 `fallback_version`）；
+  并且**真建成了一个** —— `hiyouga/LLaMA-Factory`，10 分 26 秒、镜像 3.42 GB、
+  收集到 359 条用例，是第一个真实的大型仓库构建耗时。
+
+  这一轮还修了自己两处报错的账。**一是磁盘大小算错了**：`images.list()` 那个 `Size`
+  在 containerd 存储下报的是压缩后的大小，和磁盘实际占用差三四倍（`bench-base` 0.20 对
+  0.78 GiB，装了 torch 那个 3.42 对 10.51 GiB），而 `gc` 和磁盘水位都用了它 ——
+  错的方向还恰好是"看起来很宽裕"。改成走 `/system/df`，`gc` 现在报的是
+  `Size - SharedSize`（删了真能腾出多少），配了两条用例盯着。
+  **二是自查的收集范围**：**收集要按仓库自己的口径问**。从工作区根收全部会
+  扫到 `scripts/api_example/` 底下的 API 用法示例（叫 `test_*.py` 但不是测试），
+  348 条加 3 个错，看着像环境坏了；换成仓库自己的
+  `pytest --import-mode=importlib tests/ tests_v1/` 是 359 条零错误。配方因此加了
+  `test_args` 字段（进配方哈希），它之后会变成 `environment_specs.test_command` 的一部分。
 
 ### E2-T4 出站网络白名单代理
 - **Goal**：Agent 阶段只放行 LLM API 域名，禁止 github.com
@@ -813,6 +874,8 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **实际交付**（2026-09-08）：`app/benchmark/{github,survey}.py` + `python -m cli.survey
   {probe,measure,report}`（`make survey` / `make survey-measure`）。**32 个候选实测，
   定档 9 个仓库、国产 5 个、合计候选池约 1162**，落在 §8.3 要求的区间里。
+  （**2026-09-08 二次修订**：E2-T3 建镜像时发现 `milvus-io/pymilvus` 和物化方案
+  不兼容，已去掉，现为 8 个仓库 / 国产 4 个 / 约 1144。原因见 §8.8 坑 ⑪⑫。）
   数据在 `datasets/survey/repos-2026-09-08.json`，名单在 `datasets/survey/candidates.txt`。
   改了 §8.3 的两条阈值（Python 占比 80%→50%、候选池 80→15），逐条理由记在
   `03-benchmark-spec.md` §8.8。

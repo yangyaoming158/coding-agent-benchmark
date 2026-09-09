@@ -1,0 +1,16 @@
+{
+  "environment_id": "bench-golden__pager__py311",
+  "repo_name": "bench-golden/pager",
+  "repo_url": "golden://bench-golden/pager",
+  "snapshot_commit": "04e06a70c5f5c92fa3ece2d98bd91203345654d6",
+  "python_version": "3.11",
+  "install_steps": [],
+  "workspace_source_roots": [
+    ""
+  ],
+  "import_check": [
+    "pager"
+  ],
+  "collect_check": true,
+  "note": "Golden 题不装任何东西：仓库是手写的极小包，没有 pyproject.toml，跑测试只要 bench-base 里那份 pytest。快照 commit 就是题目的 base_commit。"
+}

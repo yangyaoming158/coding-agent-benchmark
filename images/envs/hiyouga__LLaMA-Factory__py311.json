@@ -1,0 +1,24 @@
+{
+  "environment_id": "hiyouga__LLaMA-Factory__py311",
+  "repo_name": "hiyouga/LLaMA-Factory",
+  "repo_url": "https://github.com/hiyouga/LLaMA-Factory.git",
+  "snapshot_commit": "673048c6a543cbbeaed5b8444b8223dc4e23c721",
+  "python_version": "3.11",
+  "install_steps": [
+    "python -m pip install -q --no-cache-dir -e '.[dev]'"
+  ],
+  "workspace_source_roots": [
+    "src",
+    ""
+  ],
+  "import_check": [
+    "llamafactory"
+  ],
+  "collect_check": true,
+  "note": "定档 9 个里的国产项目之一，候选池 25、中文 issue 40%。src 布局，包在 src/llamafactory。版本号从 src/llamafactory/extras/env.py 正则抠出来，和 git 无关，所以不会踩 pymilvus 那条坑。test_args 照抄仓库自己的 Makefile（pytest --import-mode=importlib tests/ tests_v1/）：从仓库根收全部会扫到 scripts/api_example/ 底下两个叫 test_*.py 的 API 用法示例（import 没装的 openai 就报错），还会撞上两个同名的 test_converter.py。按仓库口径收是 359 条零错误，按我们编的口径是 348 条加 3 个错。",
+  "test_args": [
+    "--import-mode=importlib",
+    "tests/",
+    "tests_v1/"
+  ]
+}

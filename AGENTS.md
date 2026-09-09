@@ -217,6 +217,7 @@ chore(E0): 引入 import-linter 模块边界规则
 | `var/workspaces/**` | 每次评测物化的代码工作区，数量随运行次数线性增长 |
 | `var/artifacts/**` | 日志、补丁、测试报告，单次实验几百 MB |
 | `var/mirrors/**` | Git 镜像仓库，单个仓库几百 MB |
+| `var/build-snapshots/**` | 建镜像用的浅克隆（E2-T3），和 mirrors 分开放 |
 | `datasets/exports/*.jsonl` | 数据集导出文件，MB 级 |
 | `.env` / `*.env` / `**/secrets*` | **API 密钥**。这个项目要接好几个大模型服务商，泄漏风险高 |
 

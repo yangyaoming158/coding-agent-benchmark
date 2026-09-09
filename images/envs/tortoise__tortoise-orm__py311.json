@@ -1,0 +1,20 @@
+{
+  "environment_id": "tortoise__tortoise-orm__py311",
+  "repo_name": "tortoise/tortoise-orm",
+  "repo_url": "https://github.com/tortoise/tortoise-orm.git",
+  "snapshot_commit": "ffc946ebd2d1715c3cc3196ada2c2da04f6188d4",
+  "python_version": "3.11",
+  "install_steps": [
+    "python -m pip install -q --no-cache-dir -e '.[asyncpg,psycopg]'",
+    "python -m pip install -q --no-cache-dir --group test --group contrib ."
+  ],
+  "workspace_source_roots": [
+    "",
+    "src"
+  ],
+  "import_check": [
+    "tortoise"
+  ],
+  "collect_check": true,
+  "note": "平铺布局，包在仓库根的 tortoise/。E8-T1 实测安装 9.7 秒、测试 19.0 秒。两条 install_steps 分别补两种「pip install -e . 看不见」的依赖：① PEP 735 的 [dependency-groups]（test / contrib 两组，测试依赖全在那儿）；② [project.optional-dependencies] 里的数据库后端 extra（asyncpg / psycopg）。不补的话 72 个测试模块 import 失败、一条用例都跑不了 —— 都是建完自查当场拦下的。--group 要 pip>=25.1，bench-base 因此钉了 pip 26.2.1。"
+}
