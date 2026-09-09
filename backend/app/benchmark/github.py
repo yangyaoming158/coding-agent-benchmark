@@ -51,6 +51,24 @@ _RETRYABLE = (
     "503 Service Unavailable",
     "timeout",
     "connection reset",
+    # 网络层的偶发断开。这台开发机走代理连 GitHub 很不稳
+    # （`AGENTS.md` §10；E2-T3 建镜像时 `git clone --mirror` 也反复被 reset）。
+    # `gh` 用 Go 写的，代理半路掐断连接时报的原话是
+    # `Post "https://api.github.com/graphql": EOF`（2026-09-09 实测，E1-T4 撞上）。
+    # 匹配 `: eof` 连着冒号和空格，不匹配裸 `eof`：
+    # 后者会误伤正文里恰好带这三个字母的正常错误信息。
+    ": eof",
+    "unexpected eof",
+    "connection refused",
+    "broken pipe",
+    "tls handshake",
+    "i/o timeout",
+    # GitHub 自己那边的偶发失败，原话是
+    # "Something went wrong while executing your query. Please include <id>..."。
+    # 它**不是**我们查询写错了 —— 同一条查询隔几秒重发就过（2026-09-09 实测，
+    # E1-T4 挖 pallets/click 时第一页就撞上一次，重发即成功）。
+    # 不放进来的话，一次偶发就把整个仓库的挖掘作业打断。
+    "something went wrong while executing your query",
 )
 
 
@@ -112,9 +130,10 @@ def _run(args: Sequence[str], *, timeout_s: int) -> str:
         if attempt >= MAX_RETRIES or not any(m.lower() in lowered for m in _RETRYABLE):
             break
         wait = RETRY_BACKOFF_S[min(attempt, len(RETRY_BACKOFF_S) - 1)]
-        logger.warning(
-            "gh 调用撞上限流，退避重试", wait_s=wait, attempt=attempt + 1, error=last[:200]
-        )
+        # 不写"撞上限流"：可重试的失败里限流只是一种，还有 GitHub 自己出错
+        # 和代理掐断连接。写死成限流会把人往配额那边引（2026-09-09 实测，
+        # 一条 `: EOF` 的代理断连被日志说成了限流）
+        logger.warning("gh 调用失败，退避重试", wait_s=wait, attempt=attempt + 1, error=last[:200])
         time.sleep(wait)
     raise GitHubError(f"gh {' '.join(args[:2])} 失败：{last[:400]}")
 
@@ -122,6 +141,16 @@ def _run(args: Sequence[str], *, timeout_s: int) -> str:
 def rest(path: str, *, timeout_s: int = DEFAULT_TIMEOUT_S) -> Any:
     """调一次 REST，返回解析好的 JSON。`path` 形如 `repos/nonebot/nonebot2`。"""
     return json.loads(_run(["api", path], timeout_s=timeout_s))
+
+
+def rest_text(path: str, *, accept: str, timeout_s: int = DEFAULT_TIMEOUT_S) -> str:
+    """调一次 REST，返回**原始文本**而不是解析好的 JSON。
+
+    存在的理由只有一个：`Accept: application/vnd.github.v3.diff` 拿回来的是
+    unified diff，不是 JSON。拿 `rest()` 去调会当场 `JSONDecodeError`，
+    而错误信息完全看不出是媒体类型的问题（E1-T5 取 PR 补丁时要用）。
+    """
+    return _run(["api", "-H", f"Accept: {accept}", path], timeout_s=timeout_s)
 
 
 def graphql(
@@ -166,4 +195,5 @@ __all__ = [
     "gh_available",
     "graphql",
     "rest",
+    "rest_text",
 ]

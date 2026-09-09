@@ -199,6 +199,17 @@ class Settings(BaseSettings):
     judge_model: str | None = None
     judge_api_key: SecretStr | None = None
     judge_base_url: str | None = None
+    #: 调大模型时走的代理。**默认不走**，而且**不继承 shell 的 `HTTP_PROXY`**。
+    #:
+    #: 两个理由，都吃过亏：
+    #:
+    #: 1. **国产模型不该走境外代理。** DeepSeek、通义在国内，绕一圈只会更慢更不稳。
+    #: 2. **这台机器的 `ALL_PROXY` 是 `socks5h://`**，httpx 认它要装 `socksio`，
+    #:    没装就在**建客户端时**直接 ImportError —— 错误信息只说"缺个包"，
+    #:    完全看不出是环境变量带进来的（2026-09-09 实测，E1-T5 写客户端时撞上）。
+    #:
+    #: 要打境外的模型（OpenAI、Anthropic）时在 `.env` 里显式设这一项。
+    llm_http_proxy: str | None = None
 
     # ── 其他外部服务 ──
     github_token: SecretStr | None = None
@@ -228,6 +239,7 @@ class Settings(BaseSettings):
         "judge_model",
         "judge_api_key",
         "judge_base_url",
+        "llm_http_proxy",
         "github_token",
         "sandbox_http_proxy",
         "admin_token",

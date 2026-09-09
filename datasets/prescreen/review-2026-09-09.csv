@@ -1,0 +1,589 @@
+﻿序号,仓库,PR,issue 链接,标题,脱敏后正文（截断到 1200 字）,改了哪些源码,候选 F2P,模型分数,模型判定,模型理由,自足,泄题,过度指定,可定位,你的分数(0-5),你同意吗(y/n),备注
+1,pallets/click,2873,https://github.com/pallets/click/issues/2789,v8.2.0: Release Plan,"_This release follows and is worked on together with the [8.1.8 Release Plan](［链接已移除］
+
+This summarises the work still needing to be done for 8.2.0, particularly on the PRs and issues attached to the milestone. The summary is based on the comments and additionally some of my own thoughts. This is an attempt to make the `8.2.0` changes easier to review as there has been a lack of time by contributors. This was following a brief discussion on Discord where I asked what can be done to help contribute even though there is a lack of time by the contributors themselves:
+> Coming up with a list of “here’s bug fixes PRs that work, merge the and make a fix release” could be helpful as well
+
+# Pull Requests & Issues
+
+- [x] #605 could be resolved by either
+	- ~~#2210~~
+	  - ~~Document `EnumChoice`~~
+	  - I propose we leave the aliasing functionality out of the implementation for now. It can be added and discussed in a separate issue.
+  - [x] #2796
+- [x] #2263
+	- [x] #2271
+	  - [x] _Better title: add `deprecated` to `Option`._
+	  - [x] This does not add `deprecated` to `Parameter` so it is not available to `@click.argument`.
+	  - [x] Align deprecation implementation between it a",CHANGES.rst CONTRIBUTING.rst README.md docs/arguments.rst docs/contrib.rst docs/handling-files.rst docs/index.rst requirements/build.txt requirements/dev.txt requirements/docs.txt requirements/tests.txt requirements/typing.txt src/click/_termui_impl.py src/click/core.py src/click/shell_completion.py src/click/testing.py src/click/types.py,tests/test_commands.py::test_iter_params_for_processing tests/test_commands.py::test_help_param_priority tests/test_utils.py::test_echo_via_pager,0.0,REJECT,Issue 是发布计划，非 bug 描述，无具体问题可修。,False,False,False,False,0,y,REJECT：发布计划汇总多个 PR，没有单一可验收的 bug。
+2,pallets/click,3030,https://github.com/pallets/click/issues/1992,Binary flags vs `default=None`: semantics and issue with prompt,"The current behavior is:
+- if `default` is not provided, the option default is set to `False`
+- if `default` is set to `None`, default is set to `None`.
+
+I think this may be accidental behavior but it's not senseless: settings `default=None` you can force the prompt to require an explicit value to be provided (it'll be `[y/n]` rather than `[y/N]`).
+
+Nonetheless, I noticed that if you provide `default=None` to a flag not having a secondary option, the prompt message is broken: it won't include ""[y/n]"" at the end.
+
+_Originally posted by @janluke in ［链接已移除］
+
+---
+
+I'd like to be able to specify a default for arguments with multiple values.
+
+A currently failing test case:
+```
+import pytest
+import click
+from click.testing import CliRunner
+
+@pytest.fixture(scope=""function"")
+def runner(request):
+    return CliRunner()
+
+def test_multivalue_args_with_default(runner):
+    @click.command()
+    @click.argument('files', nargs=-1, default=['arg1'])
+    def cmd(files):
+        for filename in files:
+            click.echo(filename)
+
+    result = runner.invoke(cmd, ['--'])
+    assert result.output == 'arg1\n'
+```
+
+Fails with:
+
+```
+TypeError: 'default' is not suppo",CHANGES.rst docs/options.md src/click/_utils.py src/click/core.py src/click/parser.py,tests/test_arguments.py::test_required_argument tests/test_arguments.py::test_good_defaults_for_nargs tests/test_arguments.py::test_bad_defaults_for_nargs tests/test_basic.py::test_boolean_switch tests/test_basic.py::test_flag_value_dual_options tests/test_options.py::test_invalid_nargs tests/test_options.py::test_good_defaults_for_multiple tests/test_options.py::test_bad_defaults_for_multiple tests/test_options.py::test_boolean_flag_envvar tests/test_options.py::test_boolean_envvar_bad_values tests/test_options.py::test_required_option tests/test_options.py::test_flag_value_and_default tests/test_options.py::test_invalid_flag_definition tests/test_options.py::test_default_dual_option_callback tests/test_options.py::test_envvar_string_flag_value tests/test_options.py::test_flag_auto_detection tests/test_options.py::test_dual_options_custom_type_sentinel_flag_value tests/test_options.py::test_custom_type_flag_value_standalone_option tests/test_options.py::test_custom_type_flag_value_dual_options tests/test_options.py::test_custom_type_frozenset_flag_value tests/test_termui.py::test_flag_value_prompt tests/test_utils.py::test_unset_sentinel,1.0,REJECT,正文混杂多个问题且含具体修复建议，泄题严重，难以定位,False,True,False,False,1,y,REJECT：完整正文混合多个 issue，并给出唯一哨兵对象及 flag_value 改法；另有候选 F2P 过多标记。
+3,pallets/click,2816,https://github.com/pallets/click/issues/2813,_is_incomplete_option incorrectly processes last_option in loop,"The _is_incomplete_option function in the Click library has a logic issue in its loop that sets the last_option variable. The function does not break the loop after assigning last_option, which leads to wrong shell completion.
+
+
+## Replication:
+See https://github.com/msaipraneeth/click-tuple-param
+### RCA:
+We can reproduce issue If we have flag option before tuple option
+
+## Environment:
+
+- Python version: 3.11
+- Click version: 8.1.7
+
+## Possible solution :
+
+Once we identify the last option we have the break the loop in _is_incomplete_option function
+
+```python .numberLines
+def _is_incomplete_option(ctx: Context, args: t.List[str], param: Parameter) -> bool:
+    """"""Determine if the given parameter is an option that needs a value.
+
+    :param args: List of complete args before the incomplete value.
+    :param param: Option object being checked.
+    """"""
+    if not isinstance(param, Option):
+        return False
+
+    if param.is_flag or param.count:
+        return False
+
+    last_option = None
+
+    for index, arg in enumerate(reversed(args)):
+        if index + 1 > param.nargs:
+            break
+
+        if _start_of_option(ctx, arg):
+           ",CHANGES.rst src/click/shell_completion.py,tests/test_shell_completion.py::test_flag_option_with_nargs_option,2.0,REJECT,问题描述清楚，但正文直接给出修复代码，泄露答案且钉死实现细节。,True,True,True,True,0,y,REJECT：正文直接贴出加 break 的完整修复函数；按评分标准应为 0 分，分流一致。
+4,pallets/click,3235,https://github.com/pallets/click/issues/843,`click.testing.CliRunner.invoke` prevents use of `pdb`,"Will someone please re-open #138.  It's still a problem with Click 6.7.  In particular, my stack trace ends with:
+
+```
+  File ""/home/rsyring/projects/agari-adm-src/agariadm/cli.py"", line 64, in batch
+    import pdb; pdb.set_trace()
+  File ""/usr/lib/python3.5/bdb.py"", line 52, in trace_dispatch
+    return self.dispatch_return(frame, arg)
+  File ""/usr/lib/python3.5/bdb.py"", line 96, in dispatch_return
+    if self.quitting: raise BdbQuit
+bdb.BdbQuit
+```
+
+And there is explanation about why this is happening in the related issue.",.pre-commit-config.yaml CHANGES.rst src/click/testing.py,tests/test_testing.py::test_pdb_uses_real_streams tests/test_testing.py::test_pdb_explicit_streams_honored tests/test_testing.py::test_pdb_init_restored_after_invoke,3.0,REVIEW,问题描述清楚但缺少复现步骤，需结合历史issue理解，可定位到testing模块。,False,False,False,True,3,y,REVIEW：有 BdbQuit 堆栈和模块线索，但缺少可独立复现的命令与测试代码，依赖历史 issue。
+5,pallets/click,3068,https://github.com/pallets/click/issues/3066,`ctx.invoke` passes `Sentinel` to command,"In a GitHub action that worked in the past I get an error
+
+```
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/__init__.py:221 in main                                                    │
+│                                                                              │
+│   218                                                                        │
+│   219 def main():  # no cov                                                  │
+│   220 │   try:                                                               │
+│ ❱ 221 │   │   hatch(prog_name='hatch', windows_expand_args=False)            │
+│   222 │   except Exception:  # noqa: BLE001                                  │
+│   223 │   │   import sys                                                     │
+│   224
+
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/run/__init__.py:147 in run                                                 │
+│                                                                              │
+│   144 │   elif not env_name:                                                 │
+│   145 │   │   env_name = 'system'                                 ",CHANGES.rst src/click/core.py,tests/test_commands.py::test_other_command_invoke_with_defaults,4.0,PASS,问题清晰可复现，但需结合链接推断根因，未直接泄题。,True,False,False,True,3,n,建议 REVIEW：完整正文只有 Hatch 调用堆栈和已移除链接，缺少触发命令、选项定义及默认值条件；能定位但不足以独立复现。
+6,pallets/click,2273,https://github.com/pallets/click/issues/2193,`ctx.color` is ignored in `ClickException.show()`,"I have tried to set `ctx.color = True` as suggested in #1090 in order to enable colour output in Gitlab CI. This worked out great for normal `click.secho` but unfortunately it does not work for output generated via raising `ClickException` subclass. Essentially the `echo` inside `ClickException.show()` ignores `ctx.color`.
+
+After some digging, I am almost sure this is because the `get_current_context` returns `None`, there is no context when exceptions are handled:
+https://github.com/pallets/click/blob/［提交哈希已移除］/src/click/globals.py#L63
+
+## Test code
+```python
+import click
+from click import ClickException
+
+
+class CLIError(ClickException):
+    def format_message(self) -> str:
+        return click.style(self.message, fg='red')
+
+
+@click.command()
+@click.option('--ansi', is_flag=True)
+@click.pass_context
+def cli(ctx, ansi):
+    if ansi:
+        ctx.color = True
+
+    click.secho('some output', fg='green')
+
+    raise CLIError('some error')
+
+
+if __name__ == '__main__':
+    cli()
+```
+
+## Test cases
+1. `python test.py`
+2. `python test.py --ansi`
+3. `python test.py &> test.log; cat test.log`
+4. `python test.py --ansi &> test.log; cat test.log`
+
+## Expect",src/click/exceptions.py,tests/test_testing.py::test_with_color_errors,5.0,PASS,问题描述清晰，复现步骤完整，定位到exceptions.py，未泄露修复方案。,True,False,False,True,5,y,PASS：完整正文给出代码、四种运行方式及预期/实际颜色；根因猜测未直接提供改法。
+7,pallets/click,3739,https://github.com/pallets/click/issues/3731,"echo_via_pager on Windows fails with WinError 32, masking a TypeError from writing str to a binary temp file (8.4.0 regression)","On Windows, `click.echo_via_pager()` fails with a `PermissionError: [WinError 32]` naming a temp file. The reported error is cleanup noise masking the real one: a `TypeError` from writing `str` into a binary-mode temp file.
+
+Regression introduced in 8.4.0 by the `get_pager_file` / `_pager_contextmanager` rewrite. Reproduced on 8.4.0, 8.4.1, 8.4.2, and the code shape is unchanged on `main`.
+
+Windows-only. `_pipepager`'s `Popen(..., text=True).stdin` is a `TextIOWrapper` with a real `.buffer`, so POSIX takes a different path and is unaffected.
+
+### Cause
+
+`_tempfilepager` yields a `NamedTemporaryFile(mode=""wb"")` to the caller:
+
+```python
+f = tempfile.NamedTemporaryFile(mode=""wb"", delete=False)
+try:
+    yield t.cast(t.BinaryIO, f), encoding, color
+```
+
+`get_pager_file` then decides whether to wrap it for text writes:
+
+```python
+if _has_binary_buffer(stream):
+    wrapper = MaybeStripAnsi(stream.buffer, color=color, encoding=encoding)
+    stream = wrapper
+```
+
+`_has_binary_buffer` is `getattr(stream, ""buffer"", None) is not None`. A `NamedTemporaryFile` returns a `_TemporaryFileWrapper`, which has **no** `.buffer` attribute, so the check is False and the text wrapper is never installed. ",CHANGES.md src/click/_termui_impl.py,tests/test_termui.py::test_tempfile_pager_accepts_text tests/test_termui.py::test_tempfile_pager_handles_ansi,2.0,REJECT,问题描述清晰可复现，但正文包含详细修复方案和代码，明显泄题。,True,True,True,True,0,y,REJECT：完整正文 Suggested fix 保留了修复 diff，明确给出文本包装及关闭后删除的实现；应为 0 分。
+8,pallets/click,2972,https://github.com/pallets/click/issues/2971,Error hint shows env var when one doesn't exist,"#2696 added the environment variable to the error hint when `show_envvar` is set. However, it does not check to see if an `envvar` exists.
+
+click-test.py
+```python
+import click
+
+@click.command()
+@click.option(""--foo"", envvar=""FOO"", show_envvar=True, type=click.types.BOOL)
+@click.option(""--bar"", show_envvar=True, type=click.types.INT)
+def main(foo: bool, bar: int) -> None:
+    print(f""{foo=} {bar=}"")
+
+if __name__ == '__main__':
+    main()
+```
+
+Examples of running this file where each argument is invalid. And one example of the help output.
+```
+$ python ./click-test.py --bar aaa
+Usage: click-test.py [OPTIONS]
+Try 'click-test.py --help' for help.
+
+Error: Invalid value for '--bar' (env var: 'None'): 'aaa' is not a valid integer.
+$ python ./click-test.py --foo aaa
+Usage: click-test.py [OPTIONS]
+Try 'click-test.py --help' for help.
+
+Error: Invalid value for '--foo' (env var: 'FOO'): 'aaa' is not a valid boolean.
+$ python ./click-test.py --help
+Usage: click-test.py [OPTIONS]
+
+Options:
+  --foo BOOLEAN  [env var: FOO]
+  --bar INTEGER
+  --help         Show this message and exit.
+```
+
+I would expect the error hint for `--bar` to act like the help output by not displaying any information about",CHANGES.rst src/click/core.py,,5.0,REVIEW,问题清晰可复现，未泄题，可定位到core.py的get_error_hint,True,False,False,True,5,y,REVIEW：题面自足且无修复代码；缺少候选 F2P，按规则需复核，不能仅凭 5 分放行。
+9,pallets/click,3533,https://github.com/pallets/click/issues/3449,"""I/O operation on closed file"" error with CliRunner and echo_via_pager under 8.4","When `echo_via_pager` is used in the command, `CliRunner.invoke` fails with:
+
+> ValueError: I/O operation on closed file.
+
+This started happening with Click 8.4, does not happen with 8.3.3.
+
+Reproducer:
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+Environment:
+
+- OS: Ubuntu 24.04.4, Linux 6.17
+- Python version: 3.13.5
+- Click version: 8.4
+",CHANGES.rst src/click/_termui_impl.py src/click/utils.py,tests/test_termui.py::test_get_pager_file_missing_pager_keeps_borrowed_stream_open tests/test_termui.py::test_echo_via_pager_tty_pager_missing,5.0,PASS,问题清晰可复现，未泄题，能定位到echo_via_pager相关模块,True,False,False,True,5,y,PASS：最小复现、异常堆栈和回归版本齐全；与第 18 条来自同一 issue，后续建题需核对重复。
+10,pallets/click,3493,https://github.com/pallets/click/issues/3487,Echoing empty bytes or bytearray raises TypeError,"Hopefully this isn't too frivolous but I think it's an easy fix: echoing an empty byte string will cause a crash if `nl=True`.
+
+To replicate:
+
+```shell
+$ python -c ""import io; import click; click.echo(b'', io.BytesIO(), nl=True)""
+
+Traceback (most recent call last):
+  File ""<string>"", line 1, in <module>
+  File ""/myproject/click/src/click/utils.py"", line 337, in echo
+    file.write(out)  # type: ignore
+    ^^^^^^^^^^^^^^^
+TypeError: a bytes-like object is required, not 'str'
+```
+
+Expected behaviour:
+
+We expect `b""\n""` to be written to the stream and for `TypeError` not to be thrown.
+
+Environment:
+
+- Python version: 3.11.2
+- Click version: 8.5.0.dev0
+
+Suggested fix:
+
+Change https://github.com/pallets/click/blob/［提交哈希已移除］/src/click/utils.py#L297
+
+```diff
+    if nl:
+-      out = out or """"
++      out = """" if out is None else out
+       if isinstance(out, str):
+            out += ""\n""
+        else:
+            out += b""\n""
+```
+",CHANGES.rst src/click/utils.py,,2.0,REJECT,问题清晰可复现，但正文直接给出建议修复代码，泄题严重。,True,True,False,True,0,y,REJECT：Suggested fix 直接给出 out is None 的替换 diff；应为 0 分，分流一致。
+11,pallets/click,2991,https://github.com/pallets/click/issues/824,ValueError: I/O operation on closed file in testing,"I am getting a `ValueError` when using `CliRunner` to test my CLI tool. Unfortunately I can't isolate, but I can give a reproduction:
+
+```bash
+pip install git+git://github.com/ResidentMario/datablocks.git@［提交哈希已移除］
+pip install pytest
+cd datablocks/tests
+pytest cli_tests.py
+```
+
+Which raises the following traceback:
+
+```
+=================================== FAILURES ===================================
+_________________________ TestLink.test_depositor_link _________________________
+
+self = <cli_tests.TestLink testMethod=test_depositor_link>
+
+    def test_depositor_link(self):
+>       result = runner.invoke(cli.link, [""test_depositor.py"", ""--outputs"", ""['bar2.txt']""])
+
+cli_tests.py:41:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <click.testing.CliRunner object at 0x7f2c833a6cc0>
+cli = <click.core.Command object at 0x7f2c82e7a5f8>
+args = ['test_depositor.py', '--outputs', ""['bar2.txt']""], input = None
+env = None, catch_exceptions = True, color = False, extra = {}
+exc_info = (<class 'SystemExit'>, SystemExit(0,), <traceback object at 0x7f2c82e1eb08>)
+out = <_io.BytesIO object at 0x7f2c82e0a5c8>, exception = None, e",src/click/testing.py,,4.0,REVIEW,问题清晰可复现，但需结合上下文推断修复位置，略需思考。,True,False,False,True,3,y,REVIEW：完整正文包含多个关闭流场景，首个复现依赖已脱敏的外部仓库版本；且未抽到候选 F2P。
+12,pallets/click,3507,https://github.com/pallets/click/issues/3059,"With `invoke_without_command` set, commands are not marked as optional","Having
+
+```python
+@click.group(invoke_without_command=True)
+def main():
+    if ctx.invoked_subcommand is not None:
+        return
+    # do something by default
+```
+
+I expect `--help` to output:
+
+```
+Usage: app.py [OPTIONS] [COMMAND] [ARGS]...
+```
+
+But it outputs:
+
+```
+Usage: app.py [OPTIONS] COMMAND [ARGS]...
+```
+
+Environment:
+
+- Python version: 3.11.8
+- Click version: 8.2.0
+",CHANGES.rst docs/documentation.md src/click/core.py,tests/test_arguments.py::test_argument_metavar_marks_optional tests/test_commands.py::test_subcommand_metavar_marks_optional,5.0,PASS,问题清晰可复现，未泄题，可定位到click的usage生成逻辑。,True,False,False,True,4,y,PASS：可选 COMMAND 的预期和实际输出清楚；示例缺少 ctx 注入，但不影响定位 help 生成逻辑。
+13,pallets/click,3021,https://github.com/pallets/click/issues/3019,click.prompt and click.confirm argument prompt_suffix no longer works when suffix is empty,"After #1836 and #2093 were merged the behavior of the `prompt_suffix` argument in the `click.prompt` and `click.confirm` functions changed.
+
+# Before these changes in click version 7.1.2
+
+Prior to the #1836 and #2093 PRs when an empty `prompt_suffix` was passed, no suffix was applied to the prompt.
+
+Here's how `prompt` used to behave
+
+```python
+>>> import click
+>>> click.prompt(""test"", prompt_suffix="""")
+testfoo
+'foo'
+>>> click.prompt(""test"", prompt_suffix="" "")
+test foo
+'foo'
+```
+
+Notice that when a `prompt_suffix of `""""` is passed, there is no suffix after the prompt text of `test`. This is illustrated by how the text typed by the user (in this case `foo`) displays immediately after the prompt without a space character.
+
+# Current behavior in click 8.0.0 and newer
+
+```python
+>>> import click
+>>> click.prompt(""test"", prompt_suffix="""")
+test foo
+'foo'
+>>> click.prompt(""test"", prompt_suffix="" "")
+test foo
+'foo'
+```
+
+Notice now that if you tell `prompt` to use no suffix, it still applies a space character suffix.
+
+This is because the fixes in #1836 and #2093 presumes that the last character of the prompt is a space character. It then [`rstrip`s the space character and adds the space char",CHANGES.rst src/click/termui.py,,5.0,REVIEW,问题描述清晰，含复现示例，未泄露修复方案，可定位到termui.py,True,False,False,True,5,y,REVIEW：完整正文说明空后缀的回归和复现，并未提供修复实现；未抽到候选 F2P，需复核。
+14,pallets/click,3858,https://github.com/pallets/click/issues/3822,`click.Path` should be generic on `path_type`,"Click 8.5.0 made `click.prompt` and `click.ParamType` generic, so the return type of `click.prompt` is now normally clever enough to reveal the actual type of the value as converted from raw input.
+
+However, `click.Path` has a `path_type` parameter to which the input is converted, but  that information is not reflected in the return type of `click.Path.convert`, so it's always typed as `str | bytes | os.PathLike[str]`, regardless of the value of `path_type`.
+
+```python
+# mre.py
+import pathlib
+
+from typing_extensions import assert_type
+
+import click
+
+my_type = click.Path(file_okay=False, path_type=pathlib.Path)
+path = click.prompt(""Enter a name"", type=my_type)
+
+# expected: pathlib.Path, actual: str | bytes | os.PathLike[str]
+assert_type(path, pathlib.Path)
+```
+
+I checked the above MRE with mypy and pyright, as well as ty for completeness, on a local clone of the repo @ `main`:
+
+```console
+$ uv run mypy mre.py
+mre.py:12: error: Expression is of type ""str | bytes | PathLike[str]"", not ""Path""  [assert-type]
+    assert_type(path, pathlib.Path)
+    ^
+Found 1 error in 1 file (checked 1 source file)
+```
+
+```console
+$ uv run pyright mre.py
+WARNING: there is a new pyright version available (",CHANGES.md src/click/types.py,tests/test_types/test_Path.py::test_path_converted_type_parameter_at_runtime,5.0,PASS,问题清晰可复现，类型标注缺陷明确，未泄露修复方案。,True,False,False,True,5,y,PASS：类型检查复现及期望返回类型完整，无修复代码；后续验证应覆盖 tests/typing/typing_path.py，候选运行时测试不能替代静态类型检查。
+15,pallets/click,3578,https://github.com/pallets/click/issues/1272,Choices.get_metavar makes all choices look optional,"Creating a required parameter with a `Choice` type leads to confusing helpstrings.
+
+From https://en.wikipedia.org/wiki/Command-line_interface#Command_description_syntax
+
+> Built-in usage help and man pages commonly employ a small syntax to describe the valid command form:
+> * angle brackets for required parameters: `ping <hostname>`
+> * square brackets for optional parameters: `mkdir [-p] <dirname>`
+> * ellipses for repeated items: `cp <source1> [source2...] <dest>`
+> * vertical bars for choice of items: `netstat {-t|-u}`",CHANGES.md src/click/core.py,tests/test_basic.py::test_choice_argument_optional_metavar tests/test_basic.py::test_datetime_argument_optional_metavar,5.0,PASS,问题清晰，引用标准说明期望格式，可定位到Choice的metavar处理,True,False,False,True,4,y,PASS：required Choice 的帮助格式问题明确，缺少具体调用示例；仍可定位并推导预期行为。
+16,pallets/click,2523,https://github.com/pallets/click/issues/2522,`CliRunner`: restrict `mix_stderr` influence to `<output>`; keep `<stderr>` and `<stdout>` stable,"Let's start with the current behaviour of `CliRunner` regarding [its `mix_stderr` option](https://click.palletsprojects.com/en/8.1.x/api/#click.testing.CliRunner).
+
+Here is a simple CLI:
+```python
+from click import command, echo
+from click.testing import CliRunner
+
+
+@command()
+def hello():
+    echo(""1 - Hello world"")
+    echo(""2 - Hello error"", err=True)
+    echo(""3 - Good bye world"")
+    echo(""4 - Good bye error"", err=True)
+
+
+if __name__ == ""__main__"":
+
+    print(""\n*** mix_stderr=True (default) ***\n"")
+    runner = CliRunner(mix_stderr=True)
+    result = runner.invoke(hello)
+    print(f""--- <stdout> ---\n{result.stdout}"")
+    print(f""--- <stderr> ---\n(raises error)\n"")
+    print(f""--- <output> ---\n{result.output}"")
+
+    print(""\n*** mix_stderr=False ***\n"")
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(hello)
+    print(f""--- <stdout> ---\n{result.stdout}"")
+    print(f""--- <stderr> ---\n{result.stderr}"")
+    print(f""--- <output> ---\n{result.output}"")
+
+```
+
+When called, the CLI above produces:
+```shell-session
+$ python ./cli_runner_stderr_test.py
+
+*** mix_stderr=True (default) ***
+
+--- <stdout> ---
+1 - Hello world
+2",CHANGES.rst src/click/testing.py,tests/test_termui.py::test_secho_non_text tests/test_testing.py::test_stderr,5.0,PASS,问题描述清晰，含复现代码和期望行为，未泄露修复方案，可定位到testing模块。,True,False,False,True,5,y,PASS：完整正文给出两种 mix_stderr 设置下的实际与期望输出；规定公开 API 行为，不是泄露内部实现。
+17,pallets/click,2933,https://github.com/pallets/click/issues/2682,Revisiting stderr flush in CLIRunner,"This bug is described in detail at ［链接已移除］ and ［链接已移除］  I've read through those issues and am not convinced the current behavior is accurate or beneficial.
+
+From: ［链接已移除］
+
+> This isn't a bug. When using print in general, you have to flush to be sure all output is sent to stderr. That's one of the reasons Click provides echo instead.
+
+From: ［链接已移除］
+
+> Another way to put it is: you need to explain why your suggested behavior is correct. It's certainly different than current, but that doesn't mean it's more correct.
+
+> What I know is that stdout is flushed, and stderr isn't. I don't know why that's the case, but I do know that this is the behavior I've encountered all over the place, and if I want stderr to show up at a specific time I need to flush manually. This is what click.echo does automatically. If what I know and click's test runner's current behavior is incorrect, then you need to show me sources that explain why. Otherwise, it would just mean we're hiding the actual behavior of the calls you're making.
+
+I believe the current behavior of not flushing stderr is wrong because it results in semantics during testing that aren't present during a normal run of the comma",CHANGES.rst src/click/testing.py,tests/test_testing.py::test_isolation_flushes_unflushed_stderr,5.0,PASS,问题清晰可复现，未泄题，可定位到测试运行器,True,False,False,True,1,n,建议 REJECT：完整正文末尾明确要求在 invoke 结束时 flush stderr；与官方补丁新增 sys.stderr.flush() 一致，按当前预筛口径属于泄题。
+18,pallets/click,3482,https://github.com/pallets/click/issues/3449,"""I/O operation on closed file"" error with CliRunner and echo_via_pager under 8.4","When `echo_via_pager` is used in the command, `CliRunner.invoke` fails with:
+
+> ValueError: I/O operation on closed file.
+
+This started happening with Click 8.4, does not happen with 8.3.3.
+
+Reproducer:
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+Environment:
+
+- OS: Ubuntu 24.04.4, Linux 6.17
+- Python version: 3.13.5
+- Click version: 8.4
+",CHANGES.rst src/click/_termui_impl.py,tests/test_termui.py::test_get_pager_file_nullpager_keeps_stringio_stream tests/test_testing.py::test_with_echo_via_pager,5.0,PASS,问题清晰可复现，未泄题，可定位到pager相关模块,True,False,False,True,5,y,PASS：最小复现与回归版本完整，没有直接给出修复；与第 9 条为同一 issue 的不同 PR，后续需核对重复。
+19,pallets/click,3225,https://github.com/pallets/click/issues/3121,Using a class as a `flag_value` causes the default to be instantiated in click 8.3.0,"Consider the following code:
+
+```python
+import click
+
+class Foo:
+    pass
+
+class Bar:
+    pass
+
+@click.command()
+@click.option(""--foo"", ""ty"", flag_value=Foo, type=click.UNPROCESSED, default=True)
+@click.option(""--bar"", ""ty"", flag_value=Bar, type=click.UNPROCESSED)
+def main(ty):
+    click.echo(repr(ty))
+
+if __name__ == ""__main__"":
+    main()
+```
+
+When run with no arguments using click 8.3.0, this prints `<__main__.Foo object at 0x10bed92b0>`, indicating that `Foo` has been instantiated, which is not what I want.  When using an older version of click, the script outputs `<class '__main__.Foo'>`, which is what I want.
+
+If the script is passed an explicit `--foo` or `--bar` option, a class is output, indicating that the problem lies with the default handling.
+
+Changing the `default=True` to `default=Foo` does not help.",CHANGES.rst src/click/core.py,tests/test_defaults.py::test_default_map_with_callable_flag_value tests/test_options.py::test_callable_flag_value_not_instantiated tests/test_options.py::test_callable_flag_value_default_map tests/test_options.py::test_callable_flag_value_show_default tests/test_options.py::test_callable_flag_value_get_default_override,5.0,PASS,问题清晰可复现，未泄题，可定位到click选项默认值处理,True,False,False,True,5,y,PASS：代码完整，对比无参数、显式 flag 及旧版本行为，清楚区分类对象和实例；无修复方案。
+20,pallets/click,3678,https://github.com/pallets/click/issues/2819,help not resolving automatically,"From the docs:
+
+The help parameter is implemented in Click in a very special manner. Unlike regular parameters it’s automatically added by Click for any command and it performs automatic conflict resolution. By default it’s called --help, but this can be changed. If a command itself implements a parameter with the same name, the default help parameter stops accepting it. There is a context setting that can be used to override the names of the help parameters called [help_option_names](https://click.palletsprojects.com/en/stable/api/#click.Context.help_option_names).
+
+What is wrong:
+Help does not automatically resolve if there is an arg or kwarg called help. In the sample the file is called help.py
+
+```
+import click
+
+# This works
+@click.command()
+@click.argument('helps')
+def this_works(helps):
+    print(helps)
+
+# > python -m help this
+# this
+
+# > python -m help --help
+# Usage: help.py [OPTIONS] HELPS
+
+# Options:
+#   --help  Show this message and exit.
+
+# This does not work
+@click.command()
+@click.argument('help')
+def this_does_not_work(help):
+    print(help)
+
+# > python -m help this
+# Usage: help.py [OPTIONS] HELP
+# Try 'help.py --help' for help.",CHANGES.md docs/documentation.md src/click/core.py,tests/test_basic.py::test_param_named_help tests/test_basic.py::test_param_squatting_help_option_name tests/test_basic.py::test_option_reusing_help_flag tests/test_options.py::test_argument_sharing_param_name_warning tests/test_options.py::test_options_sharing_name_no_warning,5.0,PASS,问题清晰可复现，未泄题，可定位到参数解析模块。,True,False,False,True,5,y,PASS：完整正文对比正常命名、help 参数及自定义 --help 的行为，触发条件和预期明确。

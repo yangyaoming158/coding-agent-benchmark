@@ -1,0 +1,49 @@
+{
+  "generated_at": "2026-09-09T15:40:15.362325+00:00",
+  "source_csv": "datasets/prescreen/review-2026-09-09.csv",
+  "model": "deepseek/deepseek-chat",
+  "prompt_version": "1.0",
+  "sample": 20,
+  "seed": 20260909,
+  "agreement": 0.9,
+  "agree": 18,
+  "disagree": 2,
+  "ac_threshold": 0.8,
+  "ac_met": true,
+  "by_decision": {
+    "PASS": {
+      "总数": 11,
+      "一致": 9
+    },
+    "REJECT": {
+      "总数": 5,
+      "一致": 5
+    },
+    "REVIEW": {
+      "总数": 4,
+      "一致": 4
+    }
+  },
+  "score_delta": {
+    "人评低于模型": 8,
+    "一致": 12,
+    "人评高于模型": 0,
+    "平均差": -0.7
+  },
+  "disagreements": [
+    {
+      "pr_number": 3068,
+      "model_score": 4.0,
+      "model_decision": "PASS",
+      "human_score": 3.0,
+      "human_note": "建议 REVIEW：完整正文只有 Hatch 调用堆栈和已移除链接，缺少触发命令、选项定义及默认值条件；能定位但不足以独立复现。"
+    },
+    {
+      "pr_number": 2933,
+      "model_score": 5.0,
+      "model_decision": "PASS",
+      "human_score": 1.0,
+      "human_note": "建议 REJECT：完整正文末尾明确要求在 invoke 结束时 flush stderr；与官方补丁新增 sys.stderr.flush() 一致，按当前预筛口径属于泄题。"
+    }
+  ]
+}

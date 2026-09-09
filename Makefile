@@ -4,7 +4,7 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
-        seed-tasks validate-tasks survey survey-measure worker enqueue queue \
+        seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
         images-base images-envs images-list images-gc
@@ -128,6 +128,28 @@ survey:              ## 仓库选型：查 GitHub 并打分（要网络；容器
 
 survey-measure:      ## 仓库选型第二段：容器里实测安装与测试耗时（要 Docker，慢）
 	$(UV) python -m cli.survey measure
+
+# 默认挖一个已经有 env 镜像的仓库：挖出候选之后能直接接上验证流水线跑通闭环。
+# 换仓库：make mine MINE_REPO=sqlfluff/sqlfluff
+MINE_REPO ?= pallets/click
+
+mine:                ## GitHub 挖掘：merged PR + 关联 issue → task_candidates（要网络）
+	$(UV) python -m cli.mine run --repo $(MINE_REPO)
+
+mine-report:         ## 候选产出率报表（读 datasets/mining/ 的存档，不联网）
+	$(UV) python -m cli.mine report
+
+prescreen-clean:     ## 候选清洗：脱敏 + 拆补丁 + 抽候选 F2P（要网络，不花钱）
+	$(UV) python -m cli.prescreen clean
+
+# 会真的调大模型、会花钱。先用 SCORE_LIMIT 小批量试，确认分数分布合理再全量。
+SCORE_LIMIT ?=
+
+prescreen:           ## LLM 预筛打分（**要 API Key，会花钱**）
+	$(UV) python -m cli.prescreen score $(if $(SCORE_LIMIT),--limit $(SCORE_LIMIT),)
+
+prescreen-report:    ## 清洗与分数分布（读库，不联网不花钱）
+	$(UV) python -m cli.prescreen report
 
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker

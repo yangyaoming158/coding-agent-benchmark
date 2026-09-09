@@ -272,6 +272,20 @@ api → evaluation / benchmark / report
 
 单元测试和集成测试每次提交都跑（3 分钟内）。带 `@pytest.mark.docker` 标记的每日跑。消耗大模型额度的适配器测试手动触发。
 
+### ⚠️ 跑集成测试会清空开发库
+
+不只是 `make check`——**单跑一个集成测试文件也会**：
+
+```bash
+uv run pytest tests/integration/test_mining_persistence.py   # 这一条就把库清了
+```
+
+`tests/integration/conftest.py` 的 `engine` 夹具开头是 `downgrade base` + `upgrade head`。
+表还在、数据没了，看起来很像"数据库自己出了问题"（2026-09-09 因此排查过两次）。
+
+跑完按第 12 节的规程重灌。挖掘和预筛的数据不用重新花钱——
+GitHub 响应和大模型回答都有本地文件缓存（`var/cache/`），重灌走缓存。
+
 ---
 
 ## 10. 开发环境须知
