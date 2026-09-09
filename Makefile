@@ -6,7 +6,8 @@ SHELL := /bin/bash
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         seed-tasks validate-tasks survey survey-measure worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
-        golden golden-verify images images-aider images-claude-code test-agent
+        golden golden-verify images images-aider images-claude-code test-agent \
+        images-base images-envs images-list images-gc
 
 BACKEND := backend
 FRONTEND := frontend
@@ -156,8 +157,20 @@ golden:              ## 从 datasets/golden/sources/ 生成任务 JSON 和本地
 golden-verify:       ## 对每道 Golden Task 跑六步验证
 	$(UV) python -m cli.golden verify
 
-images:              ## 建 Golden 题的测试镜像（E4-T2 用，E2-T3 到位后由构建器接管）
+images:              ## 建 Golden 题的手写测试镜像（E4-T2 用；env_spec 没填 image_tag 时的兜底）
 	docker build -t $(GOLDEN_IMAGE) images/golden
+
+images-base:         ## 建第一层 bench-base（E2-T3）
+	$(UV) python -m cli.images build --base-only
+
+images-envs:         ## 建全部环境镜像（第一层 + images/envs/*.json，写回 environment_specs）
+	$(UV) python -m cli.images build
+
+images-list:         ## 列出构建器建出来的镜像（tag / digest / 大小 / 磁盘水位）
+	$(UV) python -m cli.images list
+
+images-gc:           ## 列出可回收的镜像（默认只列不删，真删加 ARGS=--yes）
+	$(UV) python -m cli.images gc $(ARGS)
 
 images-aider:        ## 建 Aider 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)）
 	docker build -t $(AIDER_IMAGE) images/aider

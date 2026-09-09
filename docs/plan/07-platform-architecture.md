@@ -413,6 +413,12 @@ runs/{run_id}/task-runs/{task_run_id}/test_report.xml.gz
 runs/{run_id}/task-runs/{task_run_id}/trajectory.jsonl.gz
 runs/{run_id}/report.html
 ```
+> **2026-09-08（E2-T3）**：镜像构建的制品实际落在
+> `envs/{environment_id}/builds/{stamp}/` 下（`build.log`、`requirements.lock`、`build.json`），
+> 比上表**多一级时间戳**。原因是调环境镜像时最常做的事就是对比"上次能装、这次装不上"
+> 的两份日志和两份依赖锁，覆盖式的 key 就没得比了。
+> `environment_specs.build_log_uri` 指向最新那一次。
+
 - 全部文本制品 **gzip 压缩**后存储（日志压缩比常 10:1）；
 - 每个制品记录 `sha256`，支持完整性校验与去重；
 - 保留策略：任务/数据集制品永久；运行制品默认永久（磁盘充裕），提供 `bench artifacts gc --before <date>` 手动清理。

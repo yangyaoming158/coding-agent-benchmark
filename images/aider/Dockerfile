@@ -1,12 +1,17 @@
 # Aider 的 Agent 镜像（E3-T4）。
 #
-# 分层方式和 E2-T3 规划的一致：在环境镜像上加一层 Agent 的 CLI。
-# 这里的底座暂时直接用 Golden 题的测试镜像 —— 好处是 Agent 阶段和测试阶段跑的是
-# 同一个 Python，AI 在容器里看到的依赖就是判定时用的那一份。E2-T3 的构建器到位后，
-# 底座换成 bench-env:<环境 id> 就行，这份 Dockerfile 的其余部分不用动。
+# 分层方式就是 E2-T3 的第三层：在环境镜像上加一层 Agent 的 CLI。
+# 底座和测试阶段用同一个镜像 —— AI 在容器里看到的依赖就是判定时用的那一份。
 #
-# 建：make images-aider
-FROM bench-golden:py311
+# 建：make images-aider（叠在 bench-golden 上）
+#     python -m cli.images build --env <环境 id> --agent aider（叠在 bench-env 上）
+# 底座由构建参数决定（E2-T3）。
+#
+# 默认值是 Golden 题那个手写镜像，`make images-aider` 照旧能用。
+# 三层构建器会传 `--build-arg BASE_IMAGE=bench-env:<环境 id>`，把这一层叠到
+# 某个仓库的环境镜像上 —— 这份 Dockerfile 的其余部分一个字不用改。
+ARG BASE_IMAGE=bench-golden:py311
+FROM ${BASE_IMAGE}
 
 # git 是 aider 的硬依赖（它自己要读仓库、算 diff），而 python:*-slim 里没有。
 # 少了它 aider 起来就报 "GitRepo not found"，而那条报错很容易被当成工作区的问题。

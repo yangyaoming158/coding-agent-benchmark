@@ -116,6 +116,13 @@ class Settings(BaseSettings):
     mirror_root: Path = Path("var/mirrors")
     #: 每次评测物化出来的代码工作区放这里。目录数随运行次数线性增长，已在 .gitignore 里排除。
     workspace_root: Path = Path("var/workspaces")
+    #: 建镜像用的浅克隆放这里（E2-T3）。
+    #:
+    #: **刻意和 `mirror_root` 分开。** 建 env 镜像只要一个 commit 的文件树，
+    #: `--depth 1` 就够；而这台机器过代理拉 GitHub 很不稳，完整 mirror 经常中途断。
+    #: 但题目验证要按各题的 base_commit 物化工作区，需要完整历史 —— 浅克隆混进
+    #: `var/mirrors/` 会让 `MirrorManager.exists()` 返回真、后面的代码以为历史是全的。
+    build_snapshot_root: Path = Path("var/build-snapshots")
     #: 单条 git 命令的超时（秒）。最坏情况是第一次 clone 一个大仓库，还要过代理。
     git_timeout_s: int = Field(default=1800, ge=1)
 
@@ -173,6 +180,14 @@ class Settings(BaseSettings):
     #: **一台机器上跑多个 Worker 时必须设成大于最长容器寿命的值**，
     #: 否则新起的 Worker 会把别人正在用的容器删掉。
     worker_reap_min_age_s: float = Field(default=0.0, ge=0)
+
+    # ── 镜像构建（E2-T3，`05-sandbox.md` §10.4「镜像治理」）──
+    #: 镜像存储所在分区的剩余比例低于这个数就拒绝开建。
+    #:
+    #: 为什么拦在**开建之前**：docker 把磁盘写满之后，倒霉的不只是这次构建 ——
+    #: daemon 自己开始报错，正在跑的评测容器跟着崩，而那时候的错误信息
+    #: （某个 pytest 输出里的 "no space left on device"）根本指不到真正的原因。
+    image_disk_min_free_ratio: float = Field(default=0.15, ge=0.0, le=1.0)
 
     # ── 被测 AI 的密钥 ──
     anthropic_api_key: SecretStr | None = None

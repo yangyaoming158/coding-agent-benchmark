@@ -152,6 +152,52 @@ def check_golden_image() -> None:
     )
 
 
+#: 三层镜像的第一层（E2-T3）。标签要和 app/sandbox/images.py 的 BASE_TAG 一致。
+BASE_IMAGE = "bench-base:py311"
+
+#: 镜像分区剩余低于这个比例就该回收了。和 Settings.image_disk_min_free_ratio 的默认值一致。
+MIN_FREE_RATIO = 0.15
+
+
+def check_base_image() -> None:
+    """三层镜像的第一层在不在。
+
+    没有它，`python -m cli.images build` 会从头建一遍（几十秒），
+    而 `tests/sandbox/test_images_docker.py` 那一组会整批跳过 —— **跳过不报错**。
+    """
+    code, _ = run_cmd(["docker", "image", "inspect", BASE_IMAGE])
+    check(
+        f"环境镜像底座 {BASE_IMAGE} 已构建",
+        code == 0,
+        "已构建" if code == 0 else "不存在",
+        "跑 `make images-base` 建一个；没有它 E2-T3 的容器用例会静默跳过",
+        warn_only=True,
+    )
+
+
+def check_image_disk() -> None:
+    """镜像分区还剩多少。
+
+    水位低到一定程度之后，docker 会在构建中途把磁盘写满 —— 那时候倒霉的不只是
+    这次构建：daemon 自己开始报错，正在跑的评测容器跟着崩，而错误信息
+    （某个 pytest 输出里的 "no space left on device"）根本指不到真正的原因。
+    所以在这里先看一眼，构建器开建前还会再拦一次。
+    """
+    code, out = run_cmd(["docker", "info", "--format", "{{.DockerRootDir}}"])
+    root = out.strip() if code == 0 and out.strip() else "/var/lib/docker"
+    probe = pathlib.Path(root)
+    while not probe.exists() and probe != probe.parent:
+        probe = probe.parent
+    usage = shutil.disk_usage(probe)
+    ratio = usage.free / usage.total if usage.total else 0.0
+    check(
+        "镜像分区余量",
+        ratio >= MIN_FREE_RATIO,
+        f"{root} 剩 {usage.free / 2**30:.1f} GiB（{ratio:.1%}）",
+        f"低于 {MIN_FREE_RATIO:.0%} 时构建器会拒绝开建；跑 `make images-gc ARGS=--yes` 回收",
+    )
+
+
 def main() -> int:
     print("=== 开发环境自检 ===\n")
 
@@ -216,6 +262,8 @@ def main() -> int:
 
     check_git()
     check_golden_image()
+    check_base_image()
+    check_image_disk()
     check_database()
     check_artifact_store()
 

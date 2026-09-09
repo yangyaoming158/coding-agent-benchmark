@@ -1,0 +1,20 @@
+{
+  "environment_id": "sqlfluff__sqlfluff__py311",
+  "repo_name": "sqlfluff/sqlfluff",
+  "repo_url": "https://github.com/sqlfluff/sqlfluff.git",
+  "snapshot_commit": "d3e8358bca3bb237d9389efe77f1683d86ecdc2f",
+  "python_version": "3.11",
+  "install_steps": [
+    "python -m pip install -q --no-cache-dir -e .",
+    "python -m pip install -q --no-cache-dir -r requirements_dev.txt"
+  ],
+  "workspace_source_roots": [
+    "src",
+    ""
+  ],
+  "import_check": [
+    "sqlfluff"
+  ],
+  "collect_check": true,
+  "note": "候选池最深的仓库（682）。src 布局。E8-T1 实测安装 12.3 秒、测试 14.7 秒。"
+}

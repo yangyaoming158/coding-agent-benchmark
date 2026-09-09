@@ -1,0 +1,16 @@
+{
+  "environment_id": "bench-golden__auth__py311",
+  "repo_name": "bench-golden/auth",
+  "repo_url": "golden://bench-golden/auth",
+  "snapshot_commit": "b0cf5d15c9d1933b4f7741e3843e1a8c8495c35a",
+  "python_version": "3.11",
+  "install_steps": [],
+  "workspace_source_roots": [
+    ""
+  ],
+  "import_check": [
+    "auth"
+  ],
+  "collect_check": true,
+  "note": "Golden 题不装任何东西：仓库是手写的极小包，没有 pyproject.toml，跑测试只要 bench-base 里那份 pytest。快照 commit 就是题目的 base_commit。"
+}

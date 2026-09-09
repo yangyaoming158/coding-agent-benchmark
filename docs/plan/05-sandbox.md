@@ -284,3 +284,227 @@ git 的树哈希覆盖每个文件的路径、权限位和内容，相等就说�
 - **`docker run` 命令行会把 `~/.docker/config.json` 里的 `proxies` 注入每个容器**，
   Python SDK 不读那份配置。我们走 SDK，所以容器里只有 `build_env()` 拼出来的变量。
   这是有意的：起容器不要改成调命令行，否则代理变量会绕过白名单进到测试容器里。
+
+---
+
+## 10.9 镜像分层构建器的实现决策（E2-T3 落地回填，2026-09-08）
+
+代码在 `backend/app/sandbox/images.py`（纯逻辑）+ `backend/cli/images.py`（落库、落制品）
++ `images/base/Dockerfile` + `images/envs/*.json`。§10.4 的三层结构没有变，
+下面是实现时才浮出来的问题和处理方式。
+
+### (1) 第二层不写 Dockerfile，从配方渲染
+
+`images/envs/{environment_id}.json` 是配方（几百字节，进版本库），
+`render_env_dockerfile()` 把它渲染成 Dockerfile。8 个仓库最多 16 个环境，
+彼此只差四五个变量，写 18 份 Dockerfile 等于改一处公共逻辑要改 18 遍。
+
+**`install_steps` 故意不给默认值。** 一个仓库怎么装是它自己的事实（有的要
+`--no-build-isolation`，有的要 `--group`，Golden 题压根不用装），藏进 Python 常量里的话，
+三周后没人查得到当初到底跑了什么。空列表是合法的，但必须显式写出来。
+
+第三层不新建文件：`images/{aider,claude-code}/Dockerfile` 的 `FROM` 改成
+`ARG BASE_IMAGE=bench-golden:py311` + `FROM ${BASE_IMAGE}`。`make images-aider` 照旧能用，
+构建器传 `--build-arg BASE_IMAGE=bench-env:<环境 id>` 就把同一份 Dockerfile 叠到了环境镜像上。
+
+### (2) 走 docker SDK 的经典构建器，事件流直接当构建日志
+
+`client.api.build(..., decode=True)` 吐的是 `{"stream": "..."}` 的事件流，
+拿它当日志就不用去解析终端输出，也不会踩"管道吃掉退出码"那一条（§8.8 坑 ①）。
+
+**实测确认它在 Docker 29.7.2 / API 1.55 上仍然可用，缓存也正常**：同一份上下文
+第一次 4.71 秒，第二次 0.03 秒、每一步都是 `---> Using cache`。
+
+一个必须显式处理的地方：**出错时流照样正常结束，不抛异常**，只是多一条
+`{"error": ...}` 事件。不检查它的话，构建失败会被当成成功 —— 和 §8.8 坑 ① 是同一类问题，
+失败信号在一条没人看的通道上。
+
+### (3) 两层缓存，而且镜像标签里不能有时间戳
+
+- **配方哈希**（`bench.recipe_hash` 标签）：底座 digest + 渲染出来的 Dockerfile +
+  快照树哈希 + 配方本身。相等就整个跳过，连构建上下文都不打包。
+- **docker 自己的层缓存**：`--force` 绕过上面那层，但层缓存还在。
+
+实测（Golden 的 auth 环境）：首次 10.2 秒；再跑一次 `已是最新，跳过`；
+`--force` 1.2 秒、12 步里 11 步命中缓存，**产出的 image id 和首次完全一致**。
+
+**标签里绝对不能放构建时间。** label 是镜像配置的一部分，带时间戳的话每次构建都产生
+新的 image id，"重复构建命中缓存"这条验收标准就再也观察不到了。构建时间写进
+`environment_specs.built_at` 和构建证据，不写进镜像。
+
+`--skip-base` 时也要去查一次底座的 digest，不能就这么留空：留空的话配方哈希用的是一个
+固定的 tag 字符串，"底座变了"对缓存完全不可见，env 镜像会安静地停在旧底座上。
+
+### (4) 建完必须自查，验不过这次构建就算失败
+
+这是整个 E2-T3 里最要紧的一条，起因是一个规划文档里没写的问题：
+
+**env 镜像里躺着一份仓库快照（`/opt/repo`，装依赖要读它的 `pyproject.toml`），
+而评测时挂进来的工作区（`/workspace`）是另一个 commit、还被被测 AI 改过。**
+要是 `import sqlfluff` 解析到了镜像里那一份，被测 AI 的改动根本不会被执行 ——
+测试照跑、可能还全绿，而 Oracle 哨兵会从 100% 悄悄掉下去，日志里一点异常都没有。
+
+平铺布局（包目录直接在仓库根）碰巧没事：pytest 把 rootdir 放进 `sys.path` 最前面。
+src 布局就会中招 —— `/workspace` 底下压根没有 `sqlfluff` 这个名字，它在 `src/sqlfluff`。
+定档的仓库里 sqlfluff 和 click 都是 src 布局。
+
+处理方式是三步：
+
+1. 照常 `pip install -e /opt/repo`，拿到依赖、版本号、entry_points；
+2. 写一个 `.pth`（`zzz-bench-workspace.pth`），把配方声明的 `workspace_source_roots`
+   插到 `sys.path` 最前面。`zzz-` 前缀是必要的：`site` 按文件名字典序处理 `.pth`，
+   排在 pip 的 editable 安装那几个后面才轮得到我们插；
+3. **建完当场验**：把快照挂成 `/workspace`，跑 `bench-import-check --root /workspace <包名>`，
+   解析结果不在 `/workspace` 底下就让这次构建失败。
+
+第 3 步不能省，因为第 2 步不保证成功：pip 的 editable 安装有两种实现，新的那种注册的是
+meta path finder，优先级高于 `sys.path`，`.pth` 插不进去。用哪一种取决于 setuptools 版本
+和仓库布局，猜不准。**所以不猜，验一次。** 这和 E2-T1「物化完自查树哈希」是同一个套路：
+宁可建镜像时报错，也不要跑完 300 次评测才发现补丁根本没生效。
+
+同一次自查顺手还跑一遍 `pytest --collect-only`（收不到用例就是 §8.8 坑 ⑥ 的症状）
+并记下装完之后 pytest 的实际版本（仓库的测试依赖有可能把 base 层钉的 9.1.1 降下去，
+而报告解析器的 fixture 是按 9.1.1 录的）。
+
+**收集要按仓库自己的口径问，不能按我们编的口径问。** 配方的 `test_args` 就是干这个的 ——
+照抄仓库自己的测试命令。这一条是被 LLaMA-Factory 教的：从工作区根收全部会扫到
+`scripts/api_example/` 底下两个叫 `test_*.py` 的 API 用法示例（import 一个没装的 `openai`
+就报错），还会撞上两个同名的 `test_converter.py`。348 条 + 3 个错，看起来像环境坏了；
+换成仓库自己的 `pytest --import-mode=importlib tests/ tests_v1/` 是 **359 条 + 0 个错**。
+环境一直是好的，是问法不对。
+
+`test_args` 之后会变成 `environment_specs.test_command` 的一部分（E8-T2），
+现在先在自查里用上，等于建镜像时就把它验过一遍。
+
+自查容器**断网**（`--network none`）：评测的测试阶段就是断网的（协议 C-31、C-35），
+自查也断网才能证明这个镜像离线可用，装漏的依赖会在这里现形而不是在第一道题上。
+
+`--no-smoke` 存在，但只该在调试时用；`tests/sandbox/test_images_docker.py` 里有一条用例
+专门钉死"跳过自查确实会放行一个坏镜像"，让这个开关的代价有据可查。
+
+### (5) HOME 和 TMPDIR 放进第一层，不靠每次传环境变量
+
+§8.8 坑 ⑤（踩过两次）的根治位置就在 bench-base：`ENV HOME=/home/bench TMPDIR=/var/tmp/bench`，
+两个目录都在镜像的可写层上、权限 0777。
+
+为什么不能靠调用方传：评测容器跟着宿主机 uid 跑，那个 uid 在 `/etc/passwd` 里没有条目，
+docker 于是把 `HOME` 设成 `/`（不可写）；写进镜像，上面每一层、每一个调用点都不用再操心。
+现有的两份 Agent Dockerfile 写的是 `HOME=/tmp`，那是 tmpfs、吃内存额度 ——
+它们只写点配置所以没炸，但 env 镜像是给真仓库用的，pip 一退回 user 安装就会
+`No space left on device`。
+
+### (6) dockerd 会把代理注进每个构建步骤（实测）
+
+§10.6 记的是「`docker run` 命令行会注入 `~/.docker/config.json` 里的 proxies，SDK 不会」。
+**构建这一侧不一样**：2026-09-08 实测，走 SDK 触发的构建里
+`RUN env | grep -i proxy` 照样打得出 `HTTP_PROXY` —— 那是 daemon 自己注进去的。
+
+所以 `images/claude-code/Dockerfile` 里那一串 `env -u http_proxy ...` 不是多余的
+（走代理拉 `deb.debian.org` 是 9.2 秒一个请求、直连 1.4 秒），bench-base 和渲染出来的
+env Dockerfile 的 apt 步骤都照抄了这个写法。pip 走清华源，实测走不走代理都够快，没有绕开。
+
+### (7) 快照来源分两个目录，浅克隆不许混进 `var/mirrors/`
+
+建 env 镜像只要**一个** commit 的文件树，`--depth 1` 就够；而题目验证要按各题的
+`base_commit` 物化工作区，需要完整历史。
+
+这个区分是被网络逼出来的：`git clone --mirror milvus-io/pymilvus` 过代理跑了
+**4 分 32 秒之后 `Connection reset by peer`**（和 E8-T1 描述的现象一致）；
+换成 `git clone --bare --depth 1 --single-branch` **一次就成，2.3 MB、几秒钟**。
+
+浅克隆放 `var/build-snapshots/`，不放 `var/mirrors/`：混进去的话
+`MirrorManager.exists()` 会返回真，后面的代码以为历史是全的，然后在某个具体题目上
+莫名其妙地找不到 commit。两个目录分开，这个歧义就不存在。
+
+### (8) 磁盘水位拦在开建之前
+
+`shutil.disk_usage(docker info 报的 DockerRootDir)`，剩余比例低于
+`IMAGE_DISK_MIN_FREE_RATIO`（默认 0.15）就拒绝开建。
+
+为什么拦在前面：docker 把磁盘写满之后倒霉的不只是这次构建 —— daemon 自己开始报错，
+正在跑的评测容器跟着崩，而那时候的错误信息（某个 pytest 输出里的
+"no space left on device"）根本指不到真正的原因。同一个函数 `scripts/check_env.py`
+也用了一份，E9-T3 的「磁盘水位」直接复用。
+
+### (9) 回收：判据是"有没有 tag"，不是 `bench.layer` 标签
+
+`bench images gc` 删两类镜像：**环境已经不存在的**（配方和 `environment_specs`
+里都没有了），和**被新版本顶掉、已经没有 tag 的旧构建**。
+
+两条护栏：
+
+- **`environment_specs.image_digest` 整列都不许删**（不只是活环境那几行）。
+  协议 C-36 要求运行记录按 digest 引用镜像，删掉一个还被记着的 digest，
+  等于把那次实验的可复现性抹掉，而且不会有任何报错。
+- **手工建的镜像碰不到。** `bench-golden:py311`、`bench-agent:py311-aider` 没有
+  `bench.owner` 标签，`gc` 的镜像列表压根不包含它们。
+
+两处实现时才发现的事：
+
+**① `bench.layer` 判不了"这是不是第一层"。** docker 的 label 会被子镜像继承：
+建 env 时产生的中间层顶着从 bench-base 继承来的 `bench.layer=base`，
+按它判断就会把这些中间层当成第一层一律保留，`gc` 于是永远收敛不掉
+（实测剩 3 个、0.65 GiB）。改成看 **tag**：tag 是我们自己打上去的，不会被继承。
+`bench-base:py311` 靠"有 tag 但没有环境 id"这一条保住。
+
+**② 一轮删不干净，要循环。** 每次构建留下一条中间层的链，删掉最外面那个会让上一层
+**变成**新的悬空镜像。所以 `gc` 循环到没有新候选为止（上限 20 轮）。
+实测一次 `gc --yes` 删掉 74 个镜像条目，之后再跑就是"没有可以回收的镜像"。
+
+被删掉的都是旧构建分叉之后的层，和现役镜像共用的层由 docker 自己按引用计数保住 ——
+所以回收不会让下次重建从零开始，只有"改回上一版配方"才会重新付一次构建代价。
+
+**③ 算镜像大小不能用 `images.list()` 里那个 `Size`。** 在这台机器的 containerd 镜像
+存储下，那个字段报的是内容仓库里**压缩后**的大小，而磁盘上躺着的是解包后的快照，
+实测差三到四倍：
+
+| 镜像 | `images.list()` 的 Size | `/system/df` 的 Size | `docker images` 显示 |
+|:---|---:|---:|---:|
+| `bench-base:py311` | 0.20 GiB | 0.78 GiB | 839 MB |
+| `bench-env:hiyouga__LLaMA-Factory__py311` | 3.42 GiB | 10.51 GiB | 11.3 GB |
+
+用错的后果不是"数字不好看"：`gc` 会说自己只能回收 15 GiB 而实际是 50 GiB，
+磁盘水位那套账也跟着错，而**账错的方向恰好是"看起来还很宽裕"**。
+已改成走 `/system/df`（`image_disk_usage()`），它报的和 `docker images` 一致。
+
+`gc` 报的是 **`Size - SharedSize`**，也就是"删掉它真能腾出多少"，不是"这个镜像总共多大"：
+装了 torch 那个总大小 10.51 GiB、独占 9.73 GiB，底座 0.78 GiB 是和另外七个环境共用的，
+删它一个腾不出 10.51。同理，`list` 底部那行把各镜像的「独占」相加，
+**不等于**这批镜像占的总磁盘 —— 共用的层一次都没算进去，要总数得看 `docker system df`。
+
+这一条是被真实磁盘教的：一轮工作下来 WSL 里从 45 GB 涨到 58 GB，而当时的工具报的
+只有其中三分之一。另外 **WSL 的虚拟磁盘文件（`ext4.vhdx`）只增不减** ——
+`gc` 删掉的空间在 WSL 里看是回来了，宿主机上那个文件一点没缩，
+要真还回去得 `wsl --shutdown` 之后压缩它。跑重依赖仓库之前值得先看一眼余量。
+
+### (10) 构建制品的 key 比 §17.2 多一级时间戳
+
+`envs/{environment_id}/builds/{stamp}/` 下放 `build.log`、`requirements.lock`、`build.json`。
+§17.2 那张表写的是 `envs/{environment_id}/build.log.gz`，覆盖式的。
+
+改成带时间戳是因为：调环境镜像时最常做的事就是对比"上次能装、这次装不上"的两份日志和
+两份依赖锁，覆盖掉就没得比了。`environment_specs.build_log_uri` 指向最新那一次。
+
+**自查失败时也要落制品。** 那正是最需要看构建日志的时候（"到底装了什么，才让 import
+落在了快照上"），所以 `SmokeCheckError` 带着这次构建的 `BuildOutcome` 一起抛出来。
+第一版没这么做，tortoise-orm 那次失败把日志全丢了。
+
+### (11) 实测数字（本机，2026-09-08）
+
+| 镜像 | 首次构建 | 命中缓存重建 | 镜像大小 |
+|:---|---:|---:|---:|
+| `bench-base:py311` | 48.9 s | 21.3 s（15 步 4 步命中） | 831 MB |
+| Golden 四个环境 | 各 9–10 s | 跳过 / 1.2 s | +0.1 MB |
+| `pallets/click` | 12.7 s | — | 834 MB |
+| `sqlfluff/sqlfluff` | 53.3 s | — | 1.02 GB |
+| `tortoise/tortoise-orm` | 43.3 s | — | 1.05 GB |
+| `hiyouga/LLaMA-Factory` | **10 分 26 秒** | 17.7 s（13 步 11 步命中） | 3.42 GB |
+
+env 镜像共享 base 层，表里的"大小"是 `docker images` 报的总量，
+**不是**每个环境额外占的磁盘。8 个环境 + 1 个 Agent 层实际增量约 4.5 GB，
+其中 LLaMA-Factory 一个就占 3.2 GB（torch 那一套）。按这个比例，
+剩下三个大型国产项目建完大约再加 10 GB，离 §10.4 说的 80 GB 上限仍然很远。
+
+**大仓库的一次性成本是真的大**：LLaMA-Factory 从零建要 10 分半。但这正是 ADR-008 说的
+"可在实验前夜完成"—— 它和评测时的单题耗时无关，改配方之后重建只要 17.7 秒，
+装依赖那一层原样复用。
