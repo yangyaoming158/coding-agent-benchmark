@@ -160,7 +160,7 @@
   这个取舍和三个可用的数（PASS 假通过率 18%、REJECT 误杀率 0%、
   候选→PASS 收率 66%）留给 E8-T2，记在 §8.10 第八~十节。
 
-### E1-T6 数据集版本化与发布
+### E1-T6 数据集版本化与发布 ✅ 已于 2026-09-10 完成
 - **Goal**：`benchmark_sets` + `benchmark_set_items` 快照发布、Oracle/Noop 自检门禁
 - **Req**：NFR-02, MET-05 · **Deps**：E1-T3, E4-T4 · **Modules**：`benchmark/dataset`
 - **Output**：`python -m cli.dataset {stage,gate,publish,show,verify,quarantine}`；
