@@ -4,6 +4,9 @@
   "repo_url": "https://github.com/pallets/click.git",
   "snapshot_commit": "6aabf099bfdd4c1e75fe8d0e0d4241372b988ab1",
   "python_version": "3.11",
+  "apt_packages": [
+    "less"
+  ],
   "install_steps": [
     "python -m pip install -q --no-cache-dir -e ."
   ],
@@ -15,5 +18,9 @@
     "click"
   ],
   "collect_check": true,
-  "note": "src 布局，包在 src/click —— 正好用来验 sys.path 前插那一步。E8-T1 实测安装 4.6 秒。快照取的是 2026-09-08 的默认分支顶端；真正按题目分桶的 environment_spec 要等 E1-T4 挖掘器。"
+  "test_args": [
+    "-W",
+    "ignore::pytest.PytestRemovedIn10Warning"
+  ],
+  "note": "src 布局，包在 src/click —— 正好用来验 sys.path 前插那一步。E8-T1 实测安装 4.6 秒。快照取的是 2026-09-08 的默认分支顶端；真正按题目分桶的 environment_spec 要等 E1-T4 挖掘器。 2026-09-10（E8-T2）补 apt_packages=[less]：不装的话 tests/test_utils/test_echo_via_pager.py 里 PAGER=less 的 24 条参数化用例恒挂 —— 它们进不了 P2P 候选池（回归护栏少 24 条），而且 F2P 落在 pager 相关测试上的候选（实测 5 条）会因为打完 gold 仍然失败被误判成 GOLD_NOT_FIXING。 2026-09-10（E8-T2）补 test_args=-W ignore::pytest.PytestRemovedIn10Warning：click 自己的 pyproject 写了 filterwarnings=[\"error\"]，把 pytest 9 对「parametrize 收到 itertools.chain」的弃用警告升成收集期错误；pytest 一个文件收集出错就中断整轮，junit 里零条用例，表现是所有 F2P 都 MISSING、题目被误判成 F2P_NOT_FAILING。命令行 -W 的优先级高于 ini，只关掉 pytest 自身 API 的这一类警告，不动 click 运行时的任何警告断言 —— 等于把 2024 年那会儿 pytest 8 的行为还原回来。实测：2024-10 的 base commit 收集 0 条 → 615 条。"
 }

@@ -1,0 +1,40 @@
+﻿task_id,pr,branch,prescreen_decision,prescreen_score,prescreen_leaks_fix,validation_state,difficulty,f2p_count,p2p_count,issue_title,issue_body,fail_to_pass,gold_patch,verdict,reason
+pallets__click-3642,3642,main,PASS,5.0,False,VALID,easy,1,1678,[Python forward compat] click.types.Path.covert: BytesWarning: Comparison between bytes and string,"So I've hit this through pip-tools' `pip-compile` executable some time ago but forgot to report immediately.
+
+I tend to run Python with strictness like `python -I -s -E -bb -Werror -m piptools compile --some --args`. And that's how I've found this warning. I imagine, it's easy to address by changing the check here: https://github.com/pallets/click/blob/c9f7d9d/src/click/types.py#L929C64-L929C75. Perhaps, by converting the data type.
+
+Here's a minimal repro. In needs a modern enough Python for `-bb` IIRC.
+```console
+$ python -Im pip install Click
+$ python -bb -Werror
+Python 3.12.9 (main, Feb 22 2025, 21:46:24) [GCC 14.2.1 20241221] on linux
+Type ""help"", ""copyright"", ""credits"" or ""license"" for more information.
+>>> from click.types import Path
+>>> Path(allow_dash=True).convert('', '', '')
+Traceback (most recent call last):
+  File ""<stdin>"", line 1, in <module>
+  File ""/path/to/venv/lib/python3.12/site-packages/click/types.py"", line 865, in convert
+    is_dash = self.file_okay and self.allow_dash and rv in (b""-"", ""-"")
+                                                     ^^^^^^^^^^^^^^^^^
+BytesWarning: Comparison between bytes and string
+```
+
+Environment:
+
+- Python version: 3.12.9
+- Click version: 8.1.8
+",tests/test_types.py::test_path_dash_no_byteswarning,"diff --git a/src/click/types.py b/src/click/types.py
+index 1e9872e41..a27983b3a 100644
+--- a/src/click/types.py
++++ b/src/click/types.py
+@@ -1104,7 +1104,8 @@ def convert(
+     ) -> str | bytes | os.PathLike[str]:
+         rv = value
+
+-        is_dash = self.file_okay and self.allow_dash and rv in (b""-"", ""-"")
++        dash = b""-"" if isinstance(rv, bytes) else ""-""
++        is_dash = self.file_okay and self.allow_dash and rv == dash
+
+         if not is_dash:
+             if self.resolve_path:
+",ACCEPT,"补 easy 档：第一轮定档的 21 道全是 medium 以上。题面有最小复现和完整 traceback，F2P 只有 1 条且和题面对得上，没有题面没提的要求。题面里 ""Perhaps, by converting the data type"" 属于方向性提示 —— 官方补丁并没有转换类型，而是按类型挑对应的字面量比，所以不算给出了具体改法，比 #3299 弱一档，收下"

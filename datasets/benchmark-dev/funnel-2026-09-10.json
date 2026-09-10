@@ -1,0 +1,33 @@
+{
+  "dataset_id": "benchmark-dev",
+  "generated_at": "2026-09-10T10:23:03.956383+00:00",
+  "candidates_total": 80,
+  "prescreen": {
+    "PASS": 53,
+    "REVIEW": 14,
+    "REJECT": 13
+  },
+  "no_f2p_candidate": 8,
+  "probe": {
+    "OK": 51,
+    "F2P_NOT_FAILING": 5,
+    "ASSEMBLY_FAILED": 3
+  },
+  "final_review": {
+    "ACCEPT": 22,
+    "REJECT": 9
+  },
+  "tasks_total": 31,
+  "validation": {
+    "VALID": 22,
+    "INVALID": 9
+  },
+  "kept_total": 22,
+  "difficulty": {
+    "medium": 17,
+    "hard": 4,
+    "easy": 1
+  },
+  "f2p_total": 85,
+  "p2p_total": 29796
+}

@@ -283,8 +283,9 @@ uv run pytest tests/integration/test_mining_persistence.py   # 这一条就把�
 `tests/integration/conftest.py` 的 `engine` 夹具开头是 `downgrade base` + `upgrade head`。
 表还在、数据没了，看起来很像"数据库自己出了问题"（2026-09-09 因此排查过两次）。
 
-跑完按第 12 节的规程重灌。挖掘和预筛的数据不用重新花钱——
+跑完按第 12 节的**重灌规程**照抄一遍。挖掘和预筛的数据不用重新花钱——
 GitHub 响应和大模型回答都有本地文件缓存（`var/cache/`），重灌走缓存。
+真正费时间的只有起容器那两步（探测 + 验证），加起来二十分钟左右。
 
 ---
 
@@ -366,6 +367,32 @@ make web-lint        # eslint + tsc
 make web-build       # 生产构建
 make gen-api         # 从后端 OpenAPI 生成前端类型（需要后端在跑）
 ```
+
+### 清库之后怎么重灌
+
+第 9 节说的"按规程重灌"就是这一串。**顺序不能换**：`promote-assemble` 会建出
+`environment_specs` 那一行，而 `cli.images build` 的写回**只更新已有的行、不建行**——
+反过来跑的话镜像 digest 永远是空的，而协议 C-36 要求引用镜像用 digest 不用 tag。
+
+```bash
+make migrate                       # 表结构
+make seed && make seed-tasks       # 哨兵 Agent + 四道 Golden 题
+# Golden 四个镜像的 digest 写回库
+cd backend && uv run python -m cli.images build --force --env bench-golden__auth__py311 --env bench-golden__cart__py311 --env bench-golden__pager__py311 --env bench-golden__textkit__py311
+# 候选：全走文件缓存，不联网不花钱
+cd backend && uv run python -m cli.mine run --repo pallets/click --restart
+cd backend && uv run python -m cli.prescreen clean
+# 模型名必须显式给（.env 里没有 JUDGE_MODEL 就会直接报"没配模型"）。
+# 它只用来拼缓存 key，回答全在 var/cache/ 里，实测 80 次调用 80 次命中、0 次计费
+cd backend && uv run python -m cli.prescreen score --model deepseek/deepseek-chat
+# benchmark-dev 的题。探测结果在 var/promote/ 下，没被清库带走，所以这一步走缓存、
+# 只有上次没探成的那几条会真起容器（想全部重探加 --redo）
+make promote-probe && make promote-assemble
+cd backend && uv run python -m cli.images build --env pallets__click__py311
+make validate-tasks                # 八步验证，约 8 分钟
+```
+
+逃生口：`BENCH_TEST_FORCE_DB_RESET=1`。
 
 **前端类型不要手写。** 改完后端接口跑一次 `make gen-api`，
 用错字段的地方会直接编译不过。手写的类型漂移了不会报错，只会在运行时拿到 undefined。

@@ -90,11 +90,20 @@ def upsert_environment(
     return env
 
 
-def upsert_task(session: Session, task: TaskDefinition, environments: dict[str, Any]) -> bool:
+def upsert_task(
+    session: Session,
+    task: TaskDefinition,
+    environments: dict[str, Any],
+    *,
+    patch_uri_scheme: str = "golden",
+) -> bool:
     """写一道题，返回是不是新建的。
 
     `raw_definition` 存**完整的题目 JSON**，Worker 跑的时候从它还原 `TaskDefinition`。
     那十几个列只是给 SQL 查询用的投影——`test_patch` 和 `gold_patch` 根本不在列里。
+
+    `patch_uri_scheme` 只影响那两个 uri 列的写法，用来一眼看出补丁是哪来的：
+    Golden 题是 `make golden` 生成的，挖掘来的题是 E1-T5 从真实 PR 劈出来的。
     """
     spec = environments.get(task.environment_id)
     if spec is None:
@@ -121,9 +130,9 @@ def upsert_task(session: Session, task: TaskDefinition, environments: dict[str, 
     row.fail_to_pass = list(task.fail_to_pass)
     row.pass_to_pass = list(task.pass_to_pass)
     # 补丁正文在 raw_definition 里，这两个 uri 列留给 E1-T3 落制品之后回填
-    row.test_patch_uri = f"golden://{task.task_id}/test.patch"
+    row.test_patch_uri = f"{patch_uri_scheme}://{task.task_id}/test.patch"
     row.test_patch_paths = list(task.test_patch_paths)
-    row.gold_patch_uri = f"golden://{task.task_id}/gold.patch"
+    row.gold_patch_uri = f"{patch_uri_scheme}://{task.task_id}/gold.patch"
     row.difficulty = task.difficulty
     row.tags = list(task.tags)
     row.agent_timeout_s = task.agent_timeout_s
@@ -131,9 +140,14 @@ def upsert_task(session: Session, task: TaskDefinition, environments: dict[str, 
     row.sandbox_cpu = task.sandbox_cpu  # type: ignore[assignment]
     row.sandbox_memory_mb = task.sandbox_memory_mb
     row.sandbox_pids_limit = task.sandbox_pids_limit
-    # 没跑过验证流水线，状态就只能是 DISCOVERED。写成 VALID 是在撒谎，
-    # 而下游（E8 的数据集发布）会拿这个状态当发布门槛
-    row.validation_state = TaskValidationState.DISCOVERED
+    if created:
+        # 没跑过验证流水线，状态就只能是 DISCOVERED。写成 VALID 是在撒谎，
+        # 而下游（E8 的数据集发布）会拿这个状态当发布门槛。
+        #
+        # **只在新建时写。** 每次 upsert 都重置的话，重跑一遍入库就会把已经验过的题
+        # 打回 DISCOVERED —— 不报错，只是那几十个容器白跑了，而且下一次
+        # `make validate-tasks` 才看得出来。
+        row.validation_state = TaskValidationState.DISCOVERED
     row.content_hash = (task.content_hash or "").removeprefix("sha256:") or "0" * 64
     row.raw_definition = json.loads(task.model_dump_json())
     session.flush()
