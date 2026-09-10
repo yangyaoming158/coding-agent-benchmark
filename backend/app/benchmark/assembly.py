@@ -423,6 +423,45 @@ def round_trippable(test_id: str) -> bool:
     return test_id.isascii()
 
 
+#: 已知**不稳定**、一律不许进 `pass_to_pass` 的用例，按"测试函数名"匹配。
+#:
+#: 一条会飘的 P2P 不是回归护栏，是噪声：它会随机把一个正确的补丁判成 `UNRESOLVED`，
+#: 而且不报错，只会让解决率莫名其妙偏低 —— AGENTS.md §5.5 说的就是这类问题。
+#: §7.3 的 S8 早写了"剔除 flaky 用例"，这里是它的组装侧落地。
+#:
+#: **为什么按函数名整族剔，不按具体的参数化 ID**：2026-09-10 实测下来，飘的不是
+#: 某一条，是整族 —— 同一道题连跑三遍，第一遍过、第二遍挂 `[test6-cat ]`、第三遍过；
+#: 而一轮 22 题的门禁挂的是 `[test5-less]`。只剔观测到挂过的那两条，剩下 1121 条同族
+#: 照样会飘（详见 `03-benchmark-spec.md` §7.11 第九节）。
+FLAKY_TEST_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        # click：`echo_via_pager()` 把内容写进 `less` / `cat` 的标准输入，而这一族里
+        # 有几条用例喂的是"中途抛异常的生成器"，断言 pager 一个字都没收到。
+        # 异常和 pager 的 flush 谁先谁后是调度决定的 —— 容器里 CPU 一紧就翻车。
+        # 实测失败率约 0.16%，而 22 道题的 P2P 里有 1123 条，一轮门禁期望挂 1.8 条。
+        "test_echo_via_pager",
+    }
+)
+
+
+def function_name_of(test_id: str) -> str:
+    """从用例 ID 里取测试函数名：`tests/a.py::TestX::test_y[p1-p2]` → `test_y`。
+
+    **名字不能叫 `test_function_of`**：测试文件 import 它之后，pytest 会把这个
+    模块级的 `test_*` 名字当成一条测试用例去收集，然后因为"缺 test_id 参数"报错。
+
+    参数化的方括号和类名都去掉 —— 不稳定是**这个函数**的性质，
+    不是某一组参数的性质。
+    """
+    after_path = test_id.rpartition("::")[2] or test_id
+    return after_path.split("[", 1)[0]
+
+
+def is_flaky(test_id: str) -> bool:
+    """这条用例属不属于已知不稳定的那几族。"""
+    return function_name_of(test_id) in FLAKY_TEST_FUNCTIONS
+
+
 def same_module_cases(cases: Iterable[str], gold_patch: str) -> set[str]:
     """和 `gold_patch` 改动文件同模块的用例（§7.7 抽样策略的第一半）。
 
@@ -453,7 +492,8 @@ def select_p2p(
 ) -> P2PSelection:
     """按 §7.2(6) 和 §7.7 选出 `pass_to_pass`。
 
-    候选池 = **基线通过 ∩ 打完 gold 仍然通过**，再减去 F2P。
+    候选池 = **基线通过 ∩ 打完 gold 仍然通过**，再减去 F2P、减去喂不回给 pytest 的
+    （`round_trippable`）、减去已知会飘的（`is_flaky`）。
 
     交集这一步不能省。只用基线那一半的话，凡是 gold 顺带改了行为的用例都会在
     验证流水线的 S8 被记成 `GOLD_REGRESSION` —— **整道好题被丢掉，而且理由是错的**：
@@ -464,8 +504,11 @@ def select_p2p(
     lost = sorted(baseline - gold)
 
     both = baseline & gold
-    unusable = sorted(c for c in both if not round_trippable(c))
-    pool = sorted(c for c in both if round_trippable(c))
+    # 两道过滤，理由不同但处置一样：进不了 P2P，且要记下来滤了几条。
+    #   round_trippable  —— 这条 ID 喂回给 pytest 它不认（§8.11 第五节）
+    #   is_flaky         —— 这条用例本身会飘，当不了回归护栏
+    unusable = sorted(c for c in both if not round_trippable(c) or is_flaky(c))
+    pool = sorted(c for c in both if round_trippable(c) and not is_flaky(c))
 
     if suite_seconds <= FULL_SUITE_BUDGET_S:
         # 套件跑得起全量，就不抽样 —— 护栏越全越好（§7.7 第一条）
@@ -516,6 +559,22 @@ def assemble(
     if not ids:
         raise AssemblyError(f"{candidate.task_id}：一条候选 F2P 都没有，组装不出题目")
 
+    # 不稳定用例在**这里**兜底剔除，而不是只在 `select_p2p()` 里。
+    #
+    # 两条路都会走到 assemble()：探测轮现算 P2P（走 select_p2p），组装轮读探测轮
+    # 缓存下来的那份清单（不走 select_p2p）。只在 select_p2p 里过滤的话，
+    # 缓存那条路会把老规则的结果原样带进题目 —— 2026-09-10 实测踩到：
+    # 加完过滤重跑 assemble，"更新 22"，而 1123 条 pager 用例一条没少。
+    #
+    # "一条会飘的用例不许当回归护栏"是**题目的性质**，不是某一条派生路径的性质，
+    # 所以判据要放在产出 TaskDefinition 的这一步。
+    p2p = [case for case in pass_to_pass if not is_flaky(case)]
+    dropped_flaky = len(pass_to_pass) - len(p2p)
+    if dropped_flaky and p2p_sampling is not None and p2p_sampling.strategy == "full":
+        # `full` 的定义就是"候选池全收"，池子小了这个数要跟着小，
+        # 不然 §7.7 要求记录的 total_pool 和实际清单对不上
+        p2p_sampling = p2p_sampling.model_copy(update={"total_pool": len(p2p)})
+
     tags = {"bugfix", "mined", dataset_id}
     if candidate.base_ref_name:
         # 维护分支上的题单独打一个标：物化和装依赖能不能对得上是分开的风险（§8.9 第六节）
@@ -540,7 +599,7 @@ def assemble(
         test_report_path=environment.test_report_path,
         test_patch=candidate.test_patch,
         fail_to_pass=ids,
-        pass_to_pass=list(pass_to_pass),
+        pass_to_pass=p2p,
         p2p_sampling=p2p_sampling,
         gold_patch=candidate.gold_patch,
         agent_timeout_s=agent_timeout_s,

@@ -25,6 +25,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from app.benchmark.dataset import DatasetError, items_of, resolve_set
 from app.benchmark.schema import TaskDefinition
 from app.domain.enums import JobState, TaskValidationState
 from app.evaluation.orchestrator import create_runs
@@ -197,19 +198,30 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
             print(f"找不到 Agent {args.agent} 的配置，先跑 `make seed`")
             return 1
 
-        dataset = session.execute(
-            sa.select(BenchmarkSet).where(BenchmarkSet.slug == args.set)
-        ).scalar_one_or_none()
-        if dataset is None:
-            print(f"找不到数据集 {args.set}，先跑 `python -m cli.queue seed-golden`")
+        # 题从**数据集快照**里取，不是从整张 benchmark_tasks 表里取。
+        #
+        # 早先这里写的是 `select id from benchmark_tasks`，不看数据集 —— 那时候库里
+        # 只有四道 Golden 题，看不出问题。E8-T2 之后库里有 35 道，其中 9 道是人工
+        # 终审否掉的 INVALID，照旧写法会把它们一起投进队列，而 Oracle 在坏题上
+        # 必然掉出 100%，排查的人会去翻判定引擎（E1-T6 修）。
+        try:
+            dataset, note = resolve_set(session, args.set, args.version)
+        except DatasetError as exc:
+            print(exc)
             return 1
+        if note:
+            print(f"⚠ {note}")
 
-        query = sa.select(BenchmarkTask.id).order_by(BenchmarkTask.id)
+        rows = items_of(session, dataset.id)
         if args.task:
-            query = query.where(BenchmarkTask.task_id.in_(args.task))
-        task_ids = list(session.execute(query).scalars())
+            wanted = set(args.task)
+            rows = [row for row in rows if row.task_id in wanted]
+        task_ids = [row.benchmark_task_id for row in rows]
         if not task_ids:
-            print("没选中任何题目，先跑 `python -m cli.queue seed-golden`（或检查 --task 拼写）")
+            print(
+                f"{dataset.slug}@{dataset.version} 里没选中任何题目"
+                "（检查 --task 拼写，或者先跑 `python -m cli.dataset stage`）"
+            )
             return 1
 
         # 建实验这件事只有一份实现（`app.evaluation.orchestrator`）：
@@ -276,9 +288,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_enqueue = sub.add_parser("enqueue", help="建一次实验并把题投进队列")
     p_enqueue.add_argument("--agent", default="oracle", help="Agent 名字，默认 oracle")
     p_enqueue.add_argument("--set", default=GOLDEN_SET_SLUG, help="数据集 slug，默认 golden")
+    p_enqueue.add_argument("--version", help="数据集版本，默认取最新已发布的那一版")
     p_enqueue.add_argument("--name", default="adhoc", help="实验名")
     p_enqueue.add_argument(
-        "--task", action="append", help="只投这几道题（task_id，可重复给）。不给就投全部"
+        "--task", action="append", help="只投这几道题（task_id，可重复给）。不给就投这一版全部"
     )
     p_enqueue.set_defaults(func=cmd_enqueue)
 

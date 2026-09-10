@@ -33,6 +33,7 @@ from pathlib import Path
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from app.benchmark.dataset import DatasetError, items_of, resolve_set
 from app.evaluation import concurrency as concurrency_mod
 from app.evaluation import progress as progress_mod
 from app.evaluation.orchestrator import (
@@ -44,7 +45,6 @@ from app.evaluation.orchestrator import (
 from app.infrastructure.config import get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models.agent import Agent, AgentConfig
-from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationRun
 from app.infrastructure.models.job import JobQueue
 from app.worker.cancel import RUN_ID_KEY
@@ -66,19 +66,27 @@ def cmd_start(args: argparse.Namespace) -> int:
             print(f"找不到 Agent {args.agent} 的配置，先跑 `make seed`")
             return 1
 
-        dataset = session.execute(
-            sa.select(BenchmarkSet).where(BenchmarkSet.slug == args.set)
-        ).scalar_one_or_none()
-        if dataset is None:
-            print(f"找不到数据集 {args.set}，先跑 `python -m cli.queue seed-golden`")
+        # 题从**数据集快照**（`benchmark_set_items`）里取。理由和 `cli.queue enqueue`
+        # 那一处一样：整张 benchmark_tasks 表里混着 INVALID 和别的数据集的题，
+        # 全投进去的话哨兵解决率必然不对，而且分母也不是这个数据集的题数。
+        try:
+            dataset, note = resolve_set(session, args.set, args.version)
+        except DatasetError as exc:
+            print(exc)
             return 1
+        if note:
+            print(f"⚠ {note}")
 
-        query = sa.select(BenchmarkTask.id).order_by(BenchmarkTask.id)
+        rows = items_of(session, dataset.id)
         if args.task:
-            query = query.where(BenchmarkTask.task_id.in_(args.task))
-        task_ids = list(session.execute(query).scalars())
+            wanted = set(args.task)
+            rows = [row for row in rows if row.task_id in wanted]
+        task_ids = [row.benchmark_task_id for row in rows]
         if not task_ids:
-            print("没选中任何题目，先跑 `python -m cli.queue seed-golden`（或检查 --task 拼写）")
+            print(
+                f"{dataset.slug}@{dataset.version} 里没选中任何题目"
+                "（检查 --task 拼写，或者先跑 `python -m cli.dataset stage`）"
+            )
             return 1
 
         try:
@@ -313,6 +321,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_start = sub.add_parser("start", help="建实验并把题投进队列")
     p_start.add_argument("--agent", default="oracle", help="Agent 名字，默认 oracle")
     p_start.add_argument("--set", default=GOLDEN_SET_SLUG, help="数据集 slug，默认 golden")
+    p_start.add_argument("--version", help="数据集版本，默认取最新已发布的那一版")
     p_start.add_argument("--name", default="adhoc", help="实验名")
     p_start.add_argument(
         "--task", action="append", help="只投这几道题（task_id，可重复给）。不给就投全部"

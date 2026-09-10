@@ -18,6 +18,7 @@ from app.domain.enums import AgentKind, IssueLanguage, TaskDifficulty
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import (
     BenchmarkSet,
+    BenchmarkSetItem,
     BenchmarkTask,
     EnvironmentSpec,
     Repository,
@@ -106,6 +107,9 @@ def wipe(session: Session) -> None:
         PatchArtifact,
         EvaluationTaskRun,
         EvaluationRun,
+        # 必须排在 BenchmarkTask 前面：这张表指向题目的外键是 RESTRICT，
+        # 反过来删会直接报违反外键（E1-T6 加）
+        BenchmarkSetItem,
         BenchmarkTask,
         BenchmarkSet,
         EnvironmentSpec,

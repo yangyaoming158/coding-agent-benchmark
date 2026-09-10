@@ -1,0 +1,118 @@
+{
+  "dataset_sha256": "sha256:8d289238879cd282c6fd1d24596b66492e7f130008db44fd0d1d271ee24b4ad0",
+  "dirty": true,
+  "gate": {
+    "checked_at": "2026-09-10T13:05:37.087556+00:00",
+    "noop": {
+      "evaluation_run_id": 97,
+      "resolve_rate": 0.0,
+      "resolved_count": 0,
+      "total_tasks": 22
+    },
+    "oracle": {
+      "evaluation_run_id": 96,
+      "resolve_rate": 1.0,
+      "resolved_count": 22,
+      "total_tasks": 22
+    },
+    "protocol_clause": "C-50",
+    "snapshot_digest": "sha256:300746559b84b2b9858c14e527a42bf9c2e75cb9ddd7a2aba75e26e3a8b0a11f"
+  },
+  "harness_git_sha": "52818948e4351e2fabfbfea52b6278dc46d76df7",
+  "published_at": "2026-09-10T13:05:37.087551+00:00",
+  "slug": "benchmark-dev",
+  "source_dataset_id": "benchmark-dev",
+  "task_count": 22,
+  "task_hashes_sha256": "sha256:300746559b84b2b9858c14e527a42bf9c2e75cb9ddd7a2aba75e26e3a8b0a11f",
+  "tasks": [
+    {
+      "content_hash": "4a4bf2097523cca8a24514c4a2f517046e86fe14ae97ed8a2cb3e7ca30d6158e",
+      "task_id": "pallets__click-2271"
+    },
+    {
+      "content_hash": "68b40b49b2662bd995f060b8dfe9d833469603cf49e522f33664f540d4054b7f",
+      "task_id": "pallets__click-2365"
+    },
+    {
+      "content_hash": "db1d07021182e9f49e185796fc8d19cbbd05a369c8f2e947aea7f76502bc3b8a",
+      "task_id": "pallets__click-2696"
+    },
+    {
+      "content_hash": "d725104a871180995ebb0f2e5a93c99516a924b6f235500080df0d8fe93da033",
+      "task_id": "pallets__click-2775"
+    },
+    {
+      "content_hash": "0893c0792f0b0f70276482aa09c7e1bf9319dff499d6b2024fab139e8fe10485",
+      "task_id": "pallets__click-2840"
+    },
+    {
+      "content_hash": "79e4d2122d5190dcb50ae2e3eb5acc43791641d15654071ef9f81331c05de9c0",
+      "task_id": "pallets__click-3058"
+    },
+    {
+      "content_hash": "6ee435ec6e550c3626cfb6b7e40d1b32c9a2b9a0cfaab00fa97b1a338fcb4dac",
+      "task_id": "pallets__click-3079"
+    },
+    {
+      "content_hash": "76528a907e4260ad0eb5e0a04707e7008f6a4c8947c00640b9d605f206745f0a",
+      "task_id": "pallets__click-3126"
+    },
+    {
+      "content_hash": "7908ba8ca98091fdbbbc77122794630770d756ed0320de72ed58539b2706f7b3",
+      "task_id": "pallets__click-3152"
+    },
+    {
+      "content_hash": "75223f94b95fee6285c8a9a64c4bd2bd46cd6b3c396acab5442af7d68b21747e",
+      "task_id": "pallets__click-3224"
+    },
+    {
+      "content_hash": "8eed921b97d06269740ade523a9b2580f65c30c13e846b59781d8cb65afe1937",
+      "task_id": "pallets__click-3225"
+    },
+    {
+      "content_hash": "375d49f90d6ba18367a8f93ea2863d08a066548eb2d6128ccbf8f77d04541280",
+      "task_id": "pallets__click-3256"
+    },
+    {
+      "content_hash": "23d4aa957d1bc90b99ae5dcee2c38f2d6dd8b6fe63ee77f90b8e4dbd9e659366",
+      "task_id": "pallets__click-3363"
+    },
+    {
+      "content_hash": "2635147308417c8d973124f541fd67652f178420c848e9d62131d2cda42a2b6d",
+      "task_id": "pallets__click-3466"
+    },
+    {
+      "content_hash": "bcd6ae136b31b22cac022400e24a0decec19bbb205f8da0473b89733a56c2a85",
+      "task_id": "pallets__click-3484"
+    },
+    {
+      "content_hash": "2588483ed84fa912bfac934202432f7cfa2e0ec5875252fe1b52e2927b3b0c07",
+      "task_id": "pallets__click-3533"
+    },
+    {
+      "content_hash": "ba06052d8fdc489292b1697e4caf5896733738e09d46449267a620d3209eb66a",
+      "task_id": "pallets__click-3578"
+    },
+    {
+      "content_hash": "b3657b1a7e49c1b7b02306c5650df28cf1df949f12fd3979728c0b88bb702c80",
+      "task_id": "pallets__click-3642"
+    },
+    {
+      "content_hash": "f15aa069be9e89c8923f7e609ecbea2f58d94050b56fb61500fba1dfc7d14b46",
+      "task_id": "pallets__click-3653"
+    },
+    {
+      "content_hash": "b774ba5255d122c0ccb4f28da54c91eea0f146b83eab05b7678f7b49d7dfa66a",
+      "task_id": "pallets__click-3678"
+    },
+    {
+      "content_hash": "32747b45a2ed1b1dfefb47679248c61a457ce9e6dcd0f4e6a7c0988ecb5dac7c",
+      "task_id": "pallets__click-3769"
+    },
+    {
+      "content_hash": "684624f129db7087ded01aacff1519349baa9f37bb9373119cfcf98e3397bce9",
+      "task_id": "pallets__click-3818"
+    }
+  ],
+  "version": "v1"
+}
