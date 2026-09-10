@@ -155,7 +155,17 @@ class BenchmarkTask(Base):
     #: 而不是靠"我记得当时是这样"。
     content_hash: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
     #: 题目的原始 JSON 定义，结构会演化，且不需要 join 查询，所以放 JSONB。
+    #:
+    #: **只放 `TaskDefinition` 的字段。** 它是 `extra="forbid"` 的，多一个键就再也
+    #: 解析不回来；而且 `content_hash` 算的就是它，往里加东西等于改了题目的身份证。
     raw_definition: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+
+    #: 这道题为什么被隔离：`{at, from_state, reason}`（§7.4 的 QUARANTINED）。
+    #:
+    #: 单独一列而不是塞进 `raw_definition`，理由见上面那条；也不复用
+    #: `invalid_reason_code` —— 那七个 code 说的是"八步验证跑出来不合格"，
+    #: 而隔离的理由是"发布后复验不通过"，硬套一个是在编。
+    quarantine: Mapped[dict[str, object] | None] = mapped_column(JSONB)
 
     created_at: Mapped[datetime] = utc_now_column()
     updated_at: Mapped[datetime] = mapped_column(
@@ -175,12 +185,20 @@ class BenchmarkTask(Base):
 
 
 class BenchmarkSet(Base):
-    """数据集版本。"""
+    """数据集版本。
+
+    一行 `benchmark_sets` **不等于**"已发布"。发布这件事只由 `status` 表示：
+    `DRAFT` 是候选快照，`PUBLISHED` 才是发布。这条区分是 E1-T6 门禁的地基 ——
+    `evaluation_runs.benchmark_set_id` 是非空外键，跑 Oracle / Noop 门禁就得先有
+    一行 set，而门禁的意思又是"不达标不许发布"。两者不打架，正因为建行和发布
+    是两回事（`03-benchmark-spec.md` §7.11）。
+    """
 
     __tablename__ = "benchmark_sets"
 
     id: Mapped[int] = mapped_column(sa.BigInteger, primary_key=True)
     slug: Mapped[str] = mapped_column(sa.String(100), nullable=False)
+    #: 快照代数，`v1` / `v2` / `v3`，同一个 slug 下单调递增。
     version: Mapped[str] = mapped_column(sa.String(50), nullable=False)
     title: Mapped[str] = mapped_column(sa.String(300), nullable=False)
     description: Mapped[str | None] = mapped_column(sa.Text)
@@ -189,6 +207,24 @@ class BenchmarkSet(Base):
     )
     task_count: Mapped[int] = mapped_column(sa.Integer, nullable=False, default=0)
     published_at: Mapped[datetime | None] = mapped_column(sa.DateTime(timezone=True))
+
+    #: 这一版的题按哪个 `raw_definition->>'dataset_id'` 挑出来的。
+    #:
+    #: 题目的归属只写在 `raw_definition` 里（§8.11 第十节说明了为什么
+    #: `benchmark_tasks` 不加 `dataset_id` 列），而 slug 和它不一定同名 ——
+    #: Golden 那批题的 `dataset_id` 是 `golden-v1`，set 的 slug 是 `golden`。
+    source_dataset_id: Mapped[str | None] = mapped_column(sa.String(100))
+    #: `benchmark_set_items` 的聚合哈希（`app.benchmark.dataset.snapshot_digest`）。
+    #:
+    #: 可以从 items 现算，存一份是为了**发现直接改库**：现算的和存的对不上，
+    #: 说明有人绕过发布流程动了快照。
+    snapshot_digest: Mapped[str | None] = mapped_column(sa.CHAR(64))
+    #: 发布门禁的证据：Oracle / Noop 两次实验的 id 和解决率（协议 C-50）。
+    #:
+    #: 不存的话只能拿 set id 去 `evaluation_runs` 反查，而同一个数据集以后还会
+    #: 跑很多次 Oracle，分不清哪两次是当初的门禁。
+    publish_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+
     created_at: Mapped[datetime] = utc_now_column()
 
     __table_args__ = (

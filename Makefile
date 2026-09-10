@@ -5,7 +5,9 @@ SHELL := /bin/bash
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
-        promote-probe promote-assemble promote-review promote-report worker enqueue queue \
+        promote-probe promote-assemble promote-review promote-report \
+        dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
+        worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
         images-base images-envs images-list images-gc
@@ -168,11 +170,32 @@ promote-review:      ## 导出人工终审对照表（CSV）
 promote-report:      ## 漏斗报表：每一层剩多少、掉队的为什么
 	$(UV) python -m cli.promote report --save
 
+# ── E1-T6：数据集版本化与发布 ──────────────────────────────
+# 顺序是 stage → gate → worker（跑门禁）→ publish。DATASET 和 SLUG 可以覆盖：
+#   make dataset-stage DATASET=benchmark-dev
+DATASET ?= benchmark-dev
+SLUG ?= $(DATASET)
+
+dataset-stage:       ## 冻快照：把该 dataset 全部 VALID 的题写进 benchmark_set_items
+	$(UV) python -m cli.dataset stage --dataset-id $(DATASET) --slug $(SLUG)
+
+dataset-gate:        ## 建 Oracle / Noop 两个门禁实验并投队列（跑要 make worker）
+	$(UV) python -m cli.dataset gate --slug $(SLUG)
+
+dataset-publish:     ## 查门禁（C-50：Oracle 100% / Noop 0%），过了才发布
+	$(UV) python -m cli.dataset publish --slug $(SLUG)
+
+dataset-show:        ## 看有哪些数据集版本
+	$(UV) python -m cli.dataset show
+
+dataset-verify:      ## 拿已发布版本的快照比对现在的题库，报漂移（纯查询）
+	$(UV) python -m cli.dataset verify --slug $(SLUG)
+
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker
 
-enqueue:             ## 建一次实验并把库里的题全投进队列（AGENT=oracle NAME=adhoc）
-	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME)
+enqueue:             ## 建一次实验，把某一版数据集的题投进队列（AGENT=oracle NAME=adhoc）
+	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME) --set $(SLUG)
 
 queue:               ## 看作业队列现状
 	$(UV) python -m cli.queue status

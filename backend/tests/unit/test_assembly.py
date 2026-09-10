@@ -26,9 +26,13 @@ from app.benchmark.assembly import (
     FULL_SUITE_BUDGET_S,
     RANDOM_SAMPLE_SIZE,
     AssemblyError,
+    Candidate,
+    assemble,
     derive_difficulty,
     environment_from_recipe,
     expand_candidate,
+    function_name_of,
+    is_flaky,
     load_candidate,
     patch_size,
     round_trippable,
@@ -36,7 +40,8 @@ from app.benchmark.assembly import (
     select_f2p,
     select_p2p,
 )
-from app.domain.enums import TaskDifficulty, TaskValidationState
+from app.benchmark.schema import P2PSampling
+from app.domain.enums import IssueLanguage, TaskDifficulty, TaskValidationState
 from app.sandbox.images import parse_recipe
 from cli.promote import next_state
 
@@ -388,3 +393,102 @@ def test_human_verdict_moves_the_task_along_the_state_machine(
     2026-09-10 真这么错过一次：收下 21 条，库里只有 20 道 VALID。
     """
     assert next_state(current, verdict) is expected
+
+
+# ── 已知不稳定用例不许进 P2P（E1-T6 补）─────────────────────
+
+
+def test_function_name_of_strips_params_and_class() -> None:
+    assert function_name_of("tests/a.py::test_y") == "test_y"
+    assert function_name_of("tests/a.py::TestX::test_y") == "test_y"
+    assert function_name_of("tests/a.py::test_y[p1-p2]") == "test_y"
+    assert function_name_of("tests/a.py::TestX::test_y[less]") == "test_y"
+
+
+def test_is_flaky_matches_the_whole_family() -> None:
+    """飘的是**这个函数**，不是某一组参数 —— 整族剔。"""
+    assert is_flaky("tests/test_utils.py::test_echo_via_pager[test5-less]")
+    assert is_flaky("tests/test_utils.py::test_echo_via_pager[test6-cat ]")
+    assert is_flaky("tests/test_utils.py::test_echo_via_pager")
+
+
+def test_is_flaky_does_not_match_by_substring() -> None:
+    """**同名前缀的别的函数不能被误伤。**
+
+    click 里有 8 个函数名里带 `echo_via_pager`，只有那一个参数化家族飘过。
+    按子串匹配的话会白白丢掉 47 条好护栏。
+    """
+    for case in (
+        "tests/test_termui.py::test_echo_via_pager_streams_each_write",
+        "tests/test_utils.py::test_echo_via_pager_yields_before_exception",
+        "tests/test_testing.py::test_with_echo_via_pager",
+        "tests/test_termui.py::test_tempfile_pager_accepts_text[echo_via_pager]",
+    ):
+        assert not is_flaky(case), case
+
+
+def test_select_p2p_drops_flaky_cases() -> None:
+    cases = [
+        "tests/test_a.py::test_ok",
+        "tests/test_utils.py::test_echo_via_pager[test5-less]",
+        "tests/test_utils.py::test_echo_via_pager[test6-cat]",
+    ]
+    result = select_p2p(
+        baseline_passing=cases,
+        gold_passing=cases,
+        fail_to_pass=[],
+        suite_seconds=1.0,
+        gold_patch="diff --git a/src/x.py b/src/x.py\n",
+    )
+    assert result.ids == ("tests/test_a.py::test_ok",)
+    assert len(result.dropped_unusable) == 2
+    assert result.sampling.total_pool == 1
+
+
+def a_candidate() -> Candidate:
+    """一条能组装成题目的最小候选。"""
+    return Candidate(
+        repo_name="pallets/click",
+        pr_number=4242,
+        base_commit="a" * 40,
+        base_ref_name="main",
+        issue_title="分页器在生成器抛异常时会漏出已写入的内容",
+        issue_body="调用 echo_via_pager 时，如果传进去的生成器中途抛异常，"
+        "已经写进分页器的那一段仍然会显示出来。期望是一个字都不显示。" * 3,
+        issue_language=IssueLanguage.ZH,
+        f2p_candidates=("tests/test_x.py::test_new",),
+        test_patch=(
+            "diff --git a/tests/test_x.py b/tests/test_x.py\n"
+            "--- a/tests/test_x.py\n+++ b/tests/test_x.py\n"
+            "@@ -1,1 +1,2 @@\n def test_old():\n+    pass\n"
+        ),
+        gold_patch=(
+            "diff --git a/src/click/_termui_impl.py b/src/click/_termui_impl.py\n"
+            "--- a/src/click/_termui_impl.py\n+++ b/src/click/_termui_impl.py\n"
+            "@@ -1,1 +1,2 @@\n x = 1\n+y = 2\n"
+        ),
+    )
+
+
+def test_assemble_drops_flaky_even_from_a_cached_list() -> None:
+    """**兜底那一道**：探测轮缓存下来的 P2P 清单是按老规则算的，
+    组装时不再走 `select_p2p()`，所以判据必须也在 `assemble()` 里。
+
+    2026-09-10 实测踩到：只在 `select_p2p()` 里加过滤，重跑 assemble
+    显示"更新 22"，而 1123 条 pager 用例一条没少。
+    """
+    task = assemble(
+        a_candidate(),
+        environment_from_recipe(parse_recipe(RECIPE)),
+        dataset_id="test-dev",
+        fail_to_pass=["tests/test_x.py::test_new"],
+        pass_to_pass=[
+            "tests/test_a.py::test_ok",
+            "tests/test_utils.py::test_echo_via_pager[test5-less]",
+        ],
+        p2p_sampling=P2PSampling(strategy="full", seed=None, total_pool=2),
+    )
+    assert list(task.pass_to_pass) == ["tests/test_a.py::test_ok"]
+    # `full` 的定义是"候选池全收"，池子小了这个数要跟着小
+    assert task.p2p_sampling is not None
+    assert task.p2p_sampling.total_pool == 1

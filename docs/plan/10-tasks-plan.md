@@ -162,9 +162,55 @@
 
 ### E1-T6 数据集版本化与发布
 - **Goal**：`benchmark_sets` + `benchmark_set_items` 快照发布、Oracle/Noop 自检门禁
-- **Req**：NFR-02, MET-05 · **Deps**：E1-T3, E4-T4
-- **AC**：发布前自动跑 Oracle（要求 100%）与 Noop（要求 0%），不达标拒绝发布
+- **Req**：NFR-02, MET-05 · **Deps**：E1-T3, E4-T4 · **Modules**：`benchmark/dataset`
+- **Output**：`python -m cli.dataset {stage,gate,publish,show,verify,quarantine}`；
+  `datasets/manifests/<slug>@<version>.json`（指纹，入库）
+- **AC**（**卡片原本只有第 4 条**，下面九条是 2026-09-10 开工前定的。
+  原卡只写了门禁那一半，快照怎么建、版本号怎么定、发布后复验不过怎么隔离都没写）：
+  1. `stage` 把某个 `dataset_id` 下全部 `VALID` 的题连同 `content_hash` 冻进
+     `benchmark_set_items`，`task_count` 等于实际行数；冻之前重算一遍 `content_hash`，
+     和库里那一列对不上就整批拒绝并点名（口径同 §7.9 对 `test_patch_paths` 的"重算不一致则拒收"）
+  2. `INVALID` / `REVIEW_REQUIRED` / `QUARANTINED` 一道都不进快照
+  3. 版本号 `v1`/`v2`/… 自动递增；当前 VALID 集合和最新已发布版本一样时 `stage` 是空操作
+  4. `publish` 之前必须有针对**这一份快照**的 Oracle 和 Noop 实验，三条同时满足才放行：
+     两次都 `COMPLETED` 且题数等于快照条数；每道题都有一条 `infra_outcome = SUCCESS`
+     的认定结果；Oracle 解决率 100%、Noop 0%（协议 C-50）。不达标拒绝发布并列出具体题号
+  5. 快照在门禁跑完之后被改过（摘要变了），旧门禁结果作废，`publish` 拒绝
+  6. `PUBLISHED` 的 set，它的 items 不再被任何代码路径修改或删除
+  7. 发布产出 `datasets/manifests/<slug>@<version>.json`（指纹，入库）+
+     `datasets/exports/<slug>@<version>.jsonl`（完整题目，**不入库**，含 gold_patch），
+     字段按 `12-engineering-workflow.md` §32.6
+  8. `cli.queue enqueue` 和 `cli.experiment start` 从 `benchmark_set_items` 取题
+  9. `verify` 对一个已发布版本逐题比对现库，报三类漂移：内容变了 / 被隔离了 / 题没了
+  10. `quarantine` 把题置 `QUARANTINED`，下一版自动排除，已发布版本一行不动
+- **不做**（§7.4 那句话的另外两截，理由见 §7.11 第五节）：每周定时复验的调度、
+  复验失败自动隔离。见 E9-T5
 - **P0 · C:M · E:1d · ⚙DB**
+- **实际交付**（2026-09-10）：`app/benchmark/dataset.py` + `python -m cli.dataset`
+  （`make dataset-stage` / `dataset-gate` / `dataset-publish` / `dataset-show` / `dataset-verify`）。
+  迁移 0005 给 `benchmark_sets` 加了三列（`source_dataset_id` / `snapshot_digest` /
+  `publish_evidence`）、给 `benchmark_tasks` 加了一列 `quarantine`，可回滚已实测。
+  **`benchmark-dev@v1` 已发布，22 道题**，指纹在 `datasets/manifests/benchmark-dev@v1.json`。
+  **先有鸡还是先有蛋的破法**：一行 `benchmark_sets` 不等于"已发布"，发布只由 `status`
+  表示；`stage` 冻快照 → `gate` 建两个哨兵实验（快照摘要写进 `run.manifest`）→
+  `publish` 重算摘要、三者一致才查门禁。快照在门禁之后被改过，摘要就变了、旧结果作废。
+  **门禁是三条不是两条**：除了 Oracle 100% / Noop 0%，还要求每道题都有一条
+  `infra_outcome = SUCCESS` 的认定结果 —— 一道题因平台故障没跑成同样不是 `RESOLVED`，
+  Noop 那边的"0%"能被这么凑出来。
+  **门禁第一次跑就把 benchmark-dev 拦下来了，而且拦得对**（Oracle 21/22 = 95.5%）：
+  click 的 `test_echo_via_pager` 整族在容器里有竞态（生成器中途抛异常 vs. 分页器 flush），
+  22 道题的 P2P 里有 **1123 条**，实测失败率约 0.16%，一轮门禁期望挂 1.8 条。
+  E1-T3 的 S8 复跑 2 遍一条都没测出来。按函数名整族剔掉（`assembly.FLAKY_TEST_FUNCTIONS`）、
+  22 道题重新组装之后**门禁一次过**：Oracle 22/22、Noop 0/22、平台故障 0。
+  三处实现决定：剔除判据要放在 `assemble()` 而不是只放 `select_p2p()`（缓存那条路
+  不走 `select_p2p`，第一版改完"更新 22"而数据一点没变）；函数名要精确相等不能用子串
+  （click 有 8 个同前缀函数，误伤 47 条好护栏）；隔离理由不能写进 `raw_definition`
+  （`extra="forbid"`，加一个键这道题就再也解析不回来，而且 `content_hash` 算的就是它）。
+  **顺手修了一个真 bug**：`cli.queue enqueue` 和 `cli.experiment start` 原来是
+  `select id from benchmark_tasks`，根本不看数据集 —— 库里那 9 道人工终审否掉的
+  `INVALID` 会被一起投进队列，而 Oracle 在坏题上必然掉出 100%。两处都改成从
+  `benchmark_set_items` 取题，并加了 `--version`。
+  新增 74 个测试（合计 1565 全绿）。落地方式和十二处实现决策记在 `03-benchmark-spec.md` §7.11。
 
 ### E1-T7 SWE-bench Verified 子集导入
 - **Goal**：官方数据集字段映射 + 官方镜像复用 + 固定种子分层抽样
@@ -978,6 +1024,17 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 ### E9-T2 并发压测与调优（找到本机最优 P_agent/P_sandbox） · **P1 · C:M · E:1d**
 ### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） · **P1 · C:M · E:1d**
 ### E9-T4 性能报告生成 · **P1 · C:M · E:1d**
+
+### E9-T5 题目定期复验与自动隔离 · **P2 · C:M · E:1d · 🐳**
+- **Goal**：`03-benchmark-spec.md` §7.4「发布后定期复验（每周一次）不通过的任务自动隔离」
+- **Req**：NFR-02 · **Deps**：E1-T6 · **Modules**：`benchmark/dataset`
+- **AC**：① 一条命令把某个已发布版本的题重跑一遍八步验证；② 复验结果有历史记录；
+  ③ **连续两次**复验不过才置 `QUARANTINED`（协议 C-20a 禁止一次失败就隔离，
+  判"复验也失败"必须有上一次的记录）；④ 隔离之后 `dataset verify` 报得出来
+- **2026-09-10 从 E1-T6 拆出来**：E1-T6 做了隔离的**写入口**（`dataset quarantine`）、
+  下一版自动排除、以及漂移检查，剩下的两截是这张卡。拆的理由有三条：
+  定时调度是运维件（AGENTS.md §11 明确不做调度中间件）；复验是重跑八步验证，
+  22 道题要起 66 个容器，属于机时活；C-20a 要求的"连续两次"判据需要一张复验历史表
 
 ## E10 — Deployment / Documentation / Demo
 

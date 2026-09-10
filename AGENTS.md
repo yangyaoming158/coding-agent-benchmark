@@ -283,6 +283,12 @@ uv run pytest tests/integration/test_mining_persistence.py   # 这一条就把�
 `tests/integration/conftest.py` 的 `engine` 夹具开头是 `downgrade base` + `upgrade head`。
 表还在、数据没了，看起来很像"数据库自己出了问题"（2026-09-09 因此排查过两次）。
 
+**那道保护只挡 Worker，不挡重灌。** `refuse_if_a_worker_is_working()` 查的是
+`job_queue` 里没过期的租约；而 `make validate-tasks` / `cli.promote assemble` 这些重灌命令
+一条租约都不占，测试照清不误。2026-09-10 又踩了一次：重灌跑到一半（八步验证在跑），
+在另一个终端跑了几条集成测试，31 道题连同刚验完的结论一起没了。
+**重灌期间一条集成测试都别跑**，包括只跑一个文件的。
+
 跑完按第 12 节的**重灌规程**照抄一遍。挖掘和预筛的数据不用重新花钱——
 GitHub 响应和大模型回答都有本地文件缓存（`var/cache/`），重灌走缓存。
 真正费时间的只有起容器那两步（探测 + 验证），加起来二十分钟左右。
@@ -390,9 +396,37 @@ cd backend && uv run python -m cli.prescreen score --model deepseek/deepseek-cha
 make promote-probe && make promote-assemble
 cd backend && uv run python -m cli.images build --env pallets__click__py311
 make validate-tasks                # 八步验证，约 8 分钟
+# 人工终审的结论（E8-T2 定档 22 收 9 否）不在库里，要从提交进仓库的 CSV 导回来。
+# 不导的话 22 道题会停在 REVIEW_REQUIRED，而数据集只收 VALID —— 快照会是空的
+cd backend && uv run python -m cli.promote import-review \
+  ../datasets/benchmark-dev/review-2026-09-10-final.csv
+cd backend && uv run python -m cli.promote import-review \
+  ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv
+# 数据集版本（E1-T6）。**`make enqueue` 和 `cli.experiment start` 从这张快照里取题**，
+# 不冻的话它们一道题都选不出来
+make dataset-stage                 # benchmark-dev → 一版 DRAFT
+make dataset-gate && make worker   # Oracle / Noop 门禁，22 × 2 次评测
+make dataset-publish               # 门禁过了才发布
 ```
 
 逃生口：`BENCH_TEST_FORCE_DB_RESET=1`。
+
+**`promote-assemble` 一定要给 `--limit`。** 不给的话它会把**全部** 51 条探测通过的候选
+都推成题目，而 `benchmark-dev` 定档的是其中 30 条（外加终审后补的 `--pr 3642`）。
+等距抽样是确定性的：同一批候选每次抽出同一批题，所以 `--limit 30` 复现出来的 30 个 PR 号
+和 `datasets/benchmark-dev/review-2026-09-10-final.csv` 里那 30 条**逐个相同**，
+不需要记题号。
+
+**不要只删 `benchmark_tasks` 想重来一遍。** 候选的状态会留在 `PROMOTED`，
+而 `cli.promote assemble` 只挑 `PRESCREENED` 的（`cli/promote.py:125`），
+`cli.mine run` 的 upsert 也只更新 `DISCOVERED` 的行（`cli/mine.py:417`）——
+表现是"一条候选都选不出来"，看起来像缓存坏了。这条流水线是有意单向的。
+要么整库重置（跑一个集成测试就行），要么两张表一起回退：
+
+```bash
+docker exec bench-postgres psql -U bench -d bench -c "delete from benchmark_tasks where raw_definition->>'dataset_id'='benchmark-dev';"
+docker exec bench-postgres psql -U bench -d bench -c "update task_candidates set state = 'PRESCREENED' where state = 'PROMOTED';"
+```
 
 **前端类型不要手写。** 改完后端接口跑一次 `make gen-api`，
 用错字段的地方会直接编译不过。手写的类型漂移了不会报错，只会在运行时拿到 undefined。

@@ -25,8 +25,14 @@ from sqlalchemy.orm import Session
 from app.benchmark.assembly import assemble, environment_from_recipe, load_candidate
 from app.benchmark.schema import P2PSampling
 from app.domain.enums import TaskCandidateState, TaskValidationState
-from app.infrastructure.models.benchmark import BenchmarkTask, EnvironmentSpec, Repository
+from app.infrastructure.models.benchmark import (
+    BenchmarkTask,
+    EnvironmentSpec,
+    Repository,
+    TaskCandidate,
+)
 from app.sandbox.images import parse_recipe
+from cli.promote import _select_candidates
 from cli.queue import upsert_task
 from tests.integration.factories import wipe
 
@@ -217,3 +223,48 @@ def test_promoted_is_a_terminal_state_for_the_candidate() -> None:
     """
     assert TaskCandidateState.PROMOTED.value == "PROMOTED"
     assert TaskCandidateState.PROMOTED is not TaskCandidateState.PRESCREENED
+
+
+# ══════════════════════════════════════════════════════════════
+# 派生规则改了要能重做（E1-T6 补）
+# ══════════════════════════════════════════════════════════════
+
+
+def test_assemble_can_redo_candidates_that_are_already_promoted(session: Session) -> None:
+    """**`--redo` 要能把已经入过库的候选再挑出来。**
+
+    默认只挑 `PRESCREENED` 是对的：候选推成题目之后不该再做一遍。
+    但派生规则改了就必须能重做 —— 2026-09-10 撞到：`assemble()` 加了一道剔除
+    不稳定用例的过滤，22 道题的 `pass_to_pass` 要按新规则重算，而候选早就是
+    `PROMOTED` 了，表现是"一条候选都选不出来"，看起来像缓存坏了。
+    """
+    wipe(session)
+    repo = Repository(full_name=REPO, url="https://github.com/pallets/click", language="python")
+    session.add(repo)
+    session.flush()
+    for pr, state in ((101, TaskCandidateState.PRESCREENED), (102, TaskCandidateState.PROMOTED)):
+        session.add(
+            TaskCandidate(
+                repository_id=repo.id,
+                pr_number=pr,
+                raw_payload={**payload(pr), "probe": {"state": "OK"}},
+                state=state,
+            )
+        )
+    session.flush()
+
+    def picked(*, include_promoted: bool) -> set[int]:
+        rows = _select_candidates(
+            session,
+            repo=None,
+            prs=[],
+            decisions=["PASS"],
+            branch=None,
+            limit=None,
+            redo=True,
+            include_promoted=include_promoted,
+        )
+        return {int(p["pr"]["number"]) for _, p in rows}
+
+    assert picked(include_promoted=False) == {101}
+    assert picked(include_promoted=True) == {101, 102}

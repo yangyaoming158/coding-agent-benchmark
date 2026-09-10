@@ -113,16 +113,29 @@ def _select_candidates(
     branch: str | None,
     limit: int | None,
     redo: bool,
+    include_promoted: bool = False,
 ) -> list[tuple[int, dict[str, Any]]]:
-    """挑出这一轮要探测的候选，返回 `(行 id, raw_payload)`。
+    """挑出这一轮要探测（或组装）的候选，返回 `(行 id, raw_payload)`。
 
     默认跳过已经探测过、而且探测器版本没变的 —— 探测一条要起两个容器，
     重跑一遍全库很贵。`--redo` 强制重来。
+
+    `include_promoted` 是给**组装**用的另一个开关：已经推成题目的候选是 `PROMOTED`，
+    正常不该再做一遍，但派生规则改了就必须能重做。
     """
+    # `redo` 顺带放开状态过滤：已经推成题目的候选是 `PROMOTED`，正常情况下不该再做一遍，
+    # 但**派生规则改了就必须能重做**。2026-09-10 E1-T6 撞到这一条：`select_p2p()` 加了
+    # 一道剔除不稳定用例的过滤，22 道题的 `pass_to_pass` 要按新规则重算，
+    # 而候选早就是 `PROMOTED` 了 —— 表现是"一条候选都选不出来"，看起来像缓存坏了。
+    states = (
+        (TaskCandidateState.PRESCREENED, TaskCandidateState.PROMOTED)
+        if include_promoted
+        else (TaskCandidateState.PRESCREENED,)
+    )
     query = (
         sa.select(TaskCandidate.id, TaskCandidate.raw_payload)
         .join(Repository, Repository.id == TaskCandidate.repository_id)
-        .where(TaskCandidate.state == TaskCandidateState.PRESCREENED)
+        .where(TaskCandidate.state.in_(states))
         .order_by(TaskCandidate.pr_number)
     )
     if repo:
@@ -587,7 +600,10 @@ def cmd_assemble(args: argparse.Namespace) -> int:
             decisions=list(PROMOTABLE_DECISIONS),
             branch=None,
             limit=None,
-            redo=True,  # 这里的筛选靠探测结果，不靠"探过没有"
+            # 这里的筛选靠探测结果，不靠"探过没有"，所以恒为 True；
+            # 要不要连 `PROMOTED` 的一起重做由 `--redo` 决定（见下）
+            redo=True,
+            include_promoted=args.redo,
         )
 
     ready = [
@@ -1089,6 +1105,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     build.add_argument("--dataset-id", default=DEFAULT_DATASET_ID, help="题目的 dataset_id")
     build.add_argument("--dry-run", action="store_true", help="不写库")
+    build.add_argument(
+        "--redo",
+        action="store_true",
+        help="连已经入过库的候选一起重做（派生规则改了要用，会重算 content_hash）",
+    )
     build.set_defaults(func=cmd_assemble)
 
     show = sub.add_parser("show", help="看探测结果")
