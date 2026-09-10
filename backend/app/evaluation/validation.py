@@ -534,6 +534,21 @@ class _Pipeline:
             )
             raise _Stop(review=f"{label}：{outcome.problem}（{outcome.infra_outcome.value}）")
 
+        if not outcome.report.cases:
+            # 一条用例都没收集到 —— 套件根本没跑起来。§7.3 的七个 code 没有对应项：
+            # 硬套 `F2P_NOT_FAILING` 是在编，因为那句话的意思是"这些测试在修复前就通过了"，
+            # 而这里的事实是"这些测试压根没执行"。**两者的处置完全相反**：
+            # 前者该丢题，后者该修环境。
+            #
+            # 2026-09-10 实测（E8-T2 探测 click 2024 年的 base commit）：pytest 9 对
+            # `parametrize` 收到 `itertools.chain` 报弃用警告，而 click 自己的 pyproject
+            # 写了 `filterwarnings = ["error"]`，警告升成收集期错误；pytest **一个文件收集
+            # 出错就中断整轮**，junit 里零条用例。当时十条候选全被判成 F2P_NOT_FAILING，
+            # 看起来像"这十道题都是坏题"，其实一道都没问题。
+            tail = (outcome.container.stdout or "")[-800:] if outcome.container else ""
+            self._record(step, name, False, f"报告里一条用例都没有；输出尾部：{tail}", started)
+            raise _Stop(review=f"{label}：套件一条用例都没收集到，多半是环境跑不起来，不是题目坏了")
+
         integrity = outcome.report.check_integrity((), repo_root=WORKSPACE_TARGET)
         if not integrity.report_complete:
             # 报告残缺（junit 没生成、只能从 stdout 里捞）时判不了题目好坏。
@@ -638,6 +653,11 @@ class _Pipeline:
             "duration_ms": duration_ms,
             "fail_to_pass": _statuses(report, self.plan.fail_to_pass),
             "pass_to_pass": _statuses(report, self.plan.pass_to_pass),
+            # 和 S4 的那份对称。§7.2(6) 把 P2P 定义成"两边都通过"，所以派生 P2P
+            # （E8-T2）要的是这两份的**交集** —— 只用 S4 那一半的话，凡是 gold
+            # 顺带改了行为的用例都会在 S8 被记成 GOLD_REGRESSION，好题被丢掉，
+            # 而且理由是错的：gold 没有回归，是我们把不该当护栏的用例塞进了护栏。
+            "p2p_candidate_pool": sorted(_passing_cases(report)),
         }
 
         not_passing = {

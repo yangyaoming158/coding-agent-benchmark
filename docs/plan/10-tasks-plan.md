@@ -922,7 +922,52 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   是错的 —— 真实原因是名单里全是轻量工具库，这类项目和语言无关地浅（国际的 httpx
   严口径也只有 1 个）。有深度的是大型项目，国产这边不缺（sglang 188、xorbitsai 84）。
   新增 39 个测试（不联网不用 Docker）；九条建镜像会踩的坑记进了 §8.8，给 E2-T3。
-### E8-T2 L1 `benchmark-dev` 20–30 题 · **P1 · C:L · E:3d（跨天，含机时）· 🐳**
+### E8-T2 L1 `benchmark-dev` 20–30 题 ✅ 已于 2026-09-10 完成 · **P1 · C:L · E:3d（跨天，含机时）· 🐳**
+- **Goal**：把 E1-T5 停在 `PRESCREENED` 的候选推成题目 —— 实测派生 F2P / P2P、
+  跑八步验证、人工终审定档
+- **Req**：FR-01 · **Deps**：E1-T5, E1-T3 · **Modules**：`benchmark/assembly`
+- **Output**：`python -m cli.promote {probe,assemble,export-review,import-review,show,report}`；漏斗报表
+- **AC**（**卡片原本只有一行、没有 AC**，下面七条是 2026-09-10 开工前定的）：
+  1. `benchmark-dev` 20–30 道题全部 `VALID`，每道题带验证证据制品
+  2. `pass_to_pass` 是实测派生的，`p2p_sampling` 与证据里的候选池对得上
+  3. 进数据集的每一道题过人工终审，结果落一份可复核的表
+  4. 一条命令从候选跑到 `VALID`，可中断可重跑，重跑不产生重复题
+  5. 漏斗每一层有分类计数
+  6. `REVIEW_REQUIRED` 有人工过审入口
+  7. ~~跑一次 Oracle / Noop 实测~~ —— **没做，理由见交付说明**：
+     `evaluation_runs.benchmark_set_id` 是非空外键，任何一次评测都得先有一行
+     `benchmark_sets`，而那张表是 E1-T6 的 Goal。每道题的 Oracle / Noop 证据
+     已经有了（验证流水线的 S4 = Noop 哨兵、S6/S7 = Oracle 哨兵，§7.10）
+- **实际交付**（2026-09-10）：`app/benchmark/assembly.py` + `python -m cli.promote`
+  （`make promote-probe` / `promote-assemble` / `promote-review` / `promote-report`）。
+  **`benchmark-dev` 定档 22 道**（AC 要 20–30）。漏斗：80 候选 → 67 预筛过 →
+  59 抽得出候选 F2P → **51 探测通过（86%）** → 等距抽 30 道入库 → 八步验证 29/30 →
+  **人工终审收 21 否 9**，之后从备用池补 1 道 easy（#3642）→ **22 道**。
+  难度 medium 17 / hard 4 / easy 1，F2P 合计 85，P2P 合计 29796。
+  备用池还有 20 条探测通过没入库的候选，够 E8-T3 接着用。
+  **P2P 派生**：探测轮起两个容器（空补丁 + gold 补丁）跑全量，P2P 取两轮通过集的**交集**
+  （§7.2(6)）；只用基线那一半的话，gold 顺带改了行为的用例会在 S8 被记成
+  `GOLD_REGRESSION`，好题被丢且诊断是错的。click 套件 4 秒，按 §7.7 全部走 `full` 策略。
+  **四处实测发现，每一处都是"不报错的丢数据"**：① 报告里的用例 ID 在参数带非 ASCII
+  字符时 pytest 自己不认，混一条进 P2P 这道题以后每次评测都颗粒无收（51 道题共滤掉 135 条）；
+  ② §8.10 说的"参数化用例靠 E4 的 ID 归一化去对"没兑现，`resolve()` 没有这一层，
+  基名一律判 MISSING —— 改成从两份报告实测推导 F2P；③ 镜像少装 `less`，24 条用例恒挂，
+  连累 5 条候选的 F2P；④ pytest 9 + click 的 `filterwarnings=["error"]` 让一个文件收集
+  出错就中断整轮，十条候选被误判成坏题。
+  给 §7.2(4) 的测试命令补了 `--continue-on-collection-errors` 和 `--timeout=60`，
+  两者对正式评测同样是改善。顺带修了验证流水线一个**错误诊断**：零用例的报告
+  不再判 `F2P_NOT_FAILING`（那是在怪题目），改判 `REVIEW_REQUIRED` 并附容器输出。
+  **PASS 不免检，这个留给本任务的决定答案是"不能"**：验证流水线对泄题完全无感，
+  人工终审在 30 道里否掉 9 道，其中**预筛判 PASS 的 27 条里否掉 7 条（26%）、
+  两条还是满分 5.0** —— §8.10 抽样量到的 18% 方向一致、数还偏小。
+  终审放在验证**之后**：只看活下来的 30 条，不看全部 59 条。
+  **只读题面不够**：第一轮读题面收 24 否 6，对着实际 F2P 清单和官方补丁再看一遍
+  又否掉 3 条，都是只读题面发现不了的（题面不足以支撑 F2P 的要求、大白话泄题），
+  所以复审表补了 `fail_to_pass` 和 `gold_patch` 两列。
+  **不碰 `benchmark_sets`**：数据集版本化和 Oracle/Noop 门禁是 E1-T6 的 ——
+  也正因为这条边界，AC 第 7 条没做（跑一次评测就得先建一行 `benchmark_sets`）。
+  新增 30 个测试（25 个纯函数、5 个落库）。落地方式和十处实现决策记在
+  `03-benchmark-spec.md` §8.11。
 ### E8-T3 L2 `benchmark-cn-v1` 60–100 题 · **P1 · C:XL · E:4d（跨天，含机时）· 🐳**
 ### E8-T4 校准集 50 题 · **P1 · C:M · E:1d · 🌐🐳**
 ### E8-T5 数据集质量报告（来源构成/语言分布/难度分布/漏斗数据） · **P1 · C:S · E:0.5d**

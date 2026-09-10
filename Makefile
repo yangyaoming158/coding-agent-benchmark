@@ -4,7 +4,8 @@ SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
         db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
-        seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report worker enqueue queue \
+        seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
+        promote-probe promote-assemble promote-review promote-report worker enqueue queue \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
         images-base images-envs images-list images-gc
@@ -150,6 +151,22 @@ prescreen:           ## LLM 预筛打分（**要 API Key，会花钱**）
 
 prescreen-report:    ## 清洗与分数分布（读库，不联网不花钱）
 	$(UV) python -m cli.prescreen report
+
+# ── E8-T2：候选 → 题目 ─────────────────────────────────────
+# 顺序是 probe → assemble → images build（写回 digest）→ validate-tasks → export-review
+PROBE_LIMIT ?=
+
+promote-probe:       ## 探测轮：实测证伪 F2P、派生 P2P（要 Docker，一条起两个容器）
+	$(UV) python -m cli.promote probe $(if $(PROBE_LIMIT),--limit $(PROBE_LIMIT),)
+
+promote-assemble:    ## 把探测通过的候选组装成题目写进 benchmark_tasks
+	$(UV) python -m cli.promote assemble
+
+promote-review:      ## 导出人工终审对照表（CSV）
+	$(UV) python -m cli.promote export-review
+
+promote-report:      ## 漏斗报表：每一层剩多少、掉队的为什么
+	$(UV) python -m cli.promote report --save
 
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker
