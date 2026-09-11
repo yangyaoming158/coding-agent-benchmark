@@ -1133,6 +1133,9 @@ patch 获取都很稳。下调是因为<strong>接上真实模型之后，端到
 <p>E2-T2 的全部验收负例已在开发机上跑通，<strong>沙箱能力无需再做可行性验证，可直接进入实现</strong>：</p>
 <div class="tw"><table><thead><tr><th>负例</th><th>实测结果</th><th>判定</th></tr></thead><tbody><tr><td><code>--memory=256m</code> 下申请 400 MB</td><td><code>ExitCode=137</code>，<code>OOMKilled=true</code></td><td>✅</td></tr><tr><td><code>--pids-limit=32</code> + fork 循环</td><td>第 31 个 fork 抛 <code>BlockingIOError</code></td><td>✅</td></tr><tr><td>进程忽略 SIGTERM + <code>docker stop --time=2</code></td><td>2,622 ms 后 SIGKILL，<code>ExitCode=137</code></td><td>✅ 宽限期精确</td></tr><tr><td>容器清理</td><td><code>docker ps -a</code> 无残留</td><td>✅</td></tr><tr><td><code>--network none</code> 下连 1.1.1.1:443</td><td><code>OSError</code></td><td>✅</td></tr><tr><td>容器 → 宿主代理 <code>&lt;gw&gt;:10808</code></td><td>REACHABLE</td><td>✅ Agent 容器可访问 LLM API</td></tr><tr><td>容器内 <code>pip install</code></td><td>成功</td><td>✅ ADR-008 镜像构建可行</td></tr></tbody></table></div>
 <p><strong>由此确认的一条实现细节</strong>：<code>OOM_KILLED</code> 与 <code>AGENT_TIMEOUT</code> 的退出码都是 137，<strong>必须靠 <code>.State.OOMKilled</code> 字段区分</strong>，不能靠退出码。</p>
+<blockquote><p>⚠ <strong>2026-09-11 补充：上面这张表是串行跑出来的，而 <code>.State.OOMKilled</code> 在并发下会漏报。</strong>
+实测 16 路并发起容器时约 5% 的内存超限拿不到这个字段，串行 105 次一次都没漏。
+表里那一行没错，错的是把它当成"任何情况下都可靠"。详见 §10.10。</p></blockquote>
 <p><strong>明确不做（避免过度设计）</strong>：gVisor/Kata 等强隔离运行时、seccomp 自定义 profile、用户命名空间重映射、cgroup 手工编排。理由：被测对象是 Coding Agent 而非恶意样本，Docker 默认隔离 + 上述加固已足够；这些属于 §29 NOT NOW。</p>
 <h3 id="sec-10-4"><span class="sub-num">10.4</span> 镜像分层与缓存策略（决定 MET-02 成败）</h3>
 <div class="cw"><pre class="code"><code>Layer 1  bench-base:py3.11             OS + build-essential + git + uv/pip + 常用编译头
@@ -1264,7 +1267,35 @@ Layer 3b 运行期容器                      从 Layer 2/3a 起容器，挂载�
 <h4 id="sec--11-实测数字-本机-2026-09-08-">(11) 实测数字（本机，2026-09-08）</h4>
 <div class="tw"><table><thead><tr><th>镜像</th><th style="text-align:right">首次构建</th><th style="text-align:right">命中缓存重建</th><th style="text-align:right">镜像大小</th></tr></thead><tbody><tr><td><code>bench-base:py311</code></td><td style="text-align:right">48.9 s</td><td style="text-align:right">21.3 s（15 步 4 步命中）</td><td style="text-align:right">831 MB</td></tr><tr><td>Golden 四个环境</td><td style="text-align:right">各 9–10 s</td><td style="text-align:right">跳过 / 1.2 s</td><td style="text-align:right">+0.1 MB</td></tr><tr><td><code>pallets/click</code></td><td style="text-align:right">12.7 s</td><td style="text-align:right">—</td><td style="text-align:right">834 MB</td></tr><tr><td><code>sqlfluff/sqlfluff</code></td><td style="text-align:right">53.3 s</td><td style="text-align:right">—</td><td style="text-align:right">1.02 GB</td></tr><tr><td><code>tortoise/tortoise-orm</code></td><td style="text-align:right">43.3 s</td><td style="text-align:right">—</td><td style="text-align:right">1.05 GB</td></tr><tr><td><code>hiyouga/LLaMA-Factory</code></td><td style="text-align:right"><strong>10 分 26 秒</strong></td><td style="text-align:right">17.7 s（13 步 11 步命中）</td><td style="text-align:right">3.42 GB</td></tr></tbody></table></div>
 <p>env 镜像共享 base 层，表里的"大小"是 <code>docker images</code> 报的总量， <strong>不是</strong>每个环境额外占的磁盘。8 个环境 + 1 个 Agent 层实际增量约 4.5 GB， 其中 LLaMA-Factory 一个就占 3.2 GB（torch 那一套）。按这个比例， 剩下三个大型国产项目建完大约再加 10 GB，离 §10.4 说的 80 GB 上限仍然很远。</p>
-<p><strong>大仓库的一次性成本是真的大</strong>：LLaMA-Factory 从零建要 10 分半。但这正是 ADR-008 说的 "可在实验前夜完成"—— 它和评测时的单题耗时无关，改配方之后重建只要 17.7 秒， 装依赖那一层原样复用。</p></section><section class="part" data-group="判定与归因"><h2 class="sec" id="sec-11"><span class="num">11</span><span class="t">Judge Design（判定引擎：怎么判断修好了没有）</span></h2>
+<p><strong>大仓库的一次性成本是真的大</strong>：LLaMA-Factory 从零建要 10 分半。但这正是 ADR-008 说的 "可在实验前夜完成"—— 它和评测时的单题耗时无关，改配方之后重建只要 17.7 秒， 装依赖那一层原样复用。</p>
+<h3 id="sec-10-10"><span class="sub-num">10.10</span> <code>.State.OOMKilled</code> 在并发下会漏报（2026-09-11 实测）</h3>
+<blockquote><p>这一节推翻的不是 §10.3 的结论，是它的<strong>适用范围</strong>。§10.3 的负例是一次起一个容器
+跑出来的；正式评测跑的是 <code>sandbox_concurrency=5</code>、<code>worker_slots=8</code>，并发才是常态。</p></blockquote>
+<h4 id="sec-怎么发现的">怎么发现的</h4>
+<p>E5-T4 的全量测试里 <code>test_oom_and_timeout_look_identical_by_exit_code</code> 挂了一次： 容器 <code>exit_code=137</code>、<code>oom_killed=False</code>、<code>timed_out=False</code>，耗时 0.296 秒 （和正常 OOM 的 0.31 秒一样，死法没变）。单独重跑 5 次全过。</p>
+<h4 id="sec-复现-开关是并发-不是-cpu-负载">复现：开关是并发，不是 CPU 负载</h4>
+<div class="tw"><table><thead><tr><th>条件</th><th style="text-align:right">容器数</th><th style="text-align:right"><code>OOMKilled</code> 漏报</th></tr></thead><tbody><tr><td>串行、空载</td><td style="text-align:right">75</td><td style="text-align:right">0</td></tr><tr><td>串行 + 16 个 CPU 占用</td><td style="text-align:right">30</td><td style="text-align:right">0</td></tr><tr><td>8 路并发</td><td style="text-align:right">104</td><td style="text-align:right">1</td></tr><tr><td>16 路并发 + 12 个 CPU 占用</td><td style="text-align:right">96</td><td style="text-align:right">5</td></tr></tbody></table></div>
+<p>并发下合计 200 个容器漏 6 个，约 <strong>3%</strong>。CPU 忙不忙没有影响。</p>
+<h4 id="sec-根因-dockerd-压根没收到-oom-通知-不是-读早了-">根因：dockerd 压根没收到 OOM 通知，不是"读早了"</h4>
+<p>把 <code>docker events</code> 全程录下来按容器 ID 对账：</p>
+<ul><li><strong>正常的 122 个</strong>：<code>oom</code> 事件比 <code>die</code> 早 <strong>37–67 毫秒</strong>（中位 46.5）。</li><li><strong>漏掉的 5 个</strong>：事件流是 <code>create → start → die → destroy</code>，<strong>中间没有 <code>oom</code></strong>。</li><li><strong>顺序颠倒的：0 个。</strong></li></ul>
+<p>所以不是"事件迟到、我们读早了"，是<strong>这次 OOM 的通知整个丢了</strong> —— 容器的 cgroup 在被拆掉之前，containerd 的监视器没来得及把 <code>memory.events</code> 读出来。</p>
+<p><strong>这一条直接否掉了最顺手的那个修法</strong>：「过一会儿再 inspect 一次」没有任何用， 晚多久查都还是 <code>false</code>。<code>docker inspect</code> 的 <code>State</code> 里也没有第二个信号 （<code>Error</code> 字段实测是空字符串），信息就是丢了。</p>
+<h4 id="sec-后果-两个阶段的下场完全不同">后果：两个阶段的下场完全不同</h4>
+<div class="tw"><table><thead><tr><th>阶段</th><th>漏报之后走到哪</th><th>谁背锅</th></tr></thead><tbody><tr><td><strong>Agent</strong></td><td><code>oom_killed</code> 为假 → 适配器落到 <code>RUNTIME_ERROR</code> → <code>AGENT_RUNTIME_ERROR</code></td><td><strong>被测 AI</strong>，而且按 C-18 不计入平台故障率</td></tr><tr><td>测试</td><td>判 SUCCESS → 测试被杀在半路、报告不完整 → C-13b 分支 (a) → <code>HARNESS_ERROR</code></td><td>平台，重试 1 次</td></tr></tbody></table></div>
+<p>Agent 阶段那一行是真问题：平台自己内存没管好，算成"这个 AI 没修好"， 而且因为不计入平台故障率，C-26 那道 5% 的排行榜准入门槛也拦不住它 —— <strong>排行榜上看不出任何异常</strong>，正是 <code>AGENTS.md</code> §5.4 担心的那种静默偏低。</p>
+<h4 id="sec-处置第一步-已做-先记录告警-判定一个字不改">处置第一步（已做）：先记录告警，判定一个字不改</h4>
+<p><code>ContainerResult.sigkilled_without_oom_flag</code> 认出这个签名 （退出码 137 + 两个标记都是假），<code>run_in_container</code> 打一条固定事件名的告警 <code>container_sigkilled_without_oom_flag</code>，好让它能被数 —— 正式实验跑完 <code>grep</code> 一下就知道这一轮里发生过几次。协议 C-73 要求环境波动 "必须记录并告警"，在此之前它是一声不吭流过去的。</p>
+<p><strong>判定照旧返回 SUCCESS。</strong> 这一点写进了 <code>classify_outcome()</code> 的文档字符串， 并且有一条测试（<code>test_the_gap_is_still_classified_as_success</code>）钉住现状 —— 哪天有人顺手改了判定，它会红，那时候应该先去看协议有没有跟着改。</p>
+<h4 id="sec-顺带查出来的一条-test_gc_finds_and_remov">顺带查出来的一条：<code>test_gc_finds_and_removes_a_dead_environment</code> 不能自愈</h4>
+<p>查这件事的过程里把 dockerd 压出过一次构建失败（<code>exit 137</code>， "removal of container is already in progress"），它留下一个带 <code>bench.environment_id=bench-test__gcme__py311</code> 标签的<strong>悬空镜像</strong>。</p>
+<p>从那以后 <code>test_gc_finds_and_removes_a_dead_environment</code> 就一直红：它断言 "环境在活名单里 ⇒ 不该出现在回收候选里"，而 <code>gc_candidates()</code> 的第 2 条判据 （没有 tag 的旧构建照样回收）本来就会把那个悬空镜像列出来。</p>
+<p><strong>而且它自我延续</strong>：失败发生在 <code>remove_image()</code> 之前，收尾夹具按 tag 删镜像， 于是又留下一个悬空的，下一次照样红。手工清掉那个悬空镜像之后立刻变绿 （实测：清空 → <code>1 passed</code>，跑完剩 0 个悬空）。</p>
+<p>这条和本节的 OOM 问题没有因果关系，只是同一次调查里撞上的。 修法（把断言改成只看有 tag 的镜像，或者夹具连悬空一起清）留给以后 —— 它是 docker 标记的用例，CI 不跑。</p>
+<h4 id="sec-处置第二步-未做-要走-c-51-">处置第二步（未做，要走 C-51）</h4>
+<p>把这个签名判成 OOM（或至少判成平台故障），得改协议 C-06（OOM 只看 <code>.State.OOMKilled</code>）和 C-07（禁止用退出码判内存超限），两条都是冻结件。</p>
+<p>改的时候有个坑要一起考虑：<strong>取消实验时我们自己也会 SIGKILL 容器</strong> （<code>kill_containers_by_run_prefix</code>），那种情况签名一模一样。规则必须先看取消标志， 不然取消会被记成 OOM。</p>
+<p>还有一点值得写进变更 issue：C-07 的字面是"禁止用退出码判断是不是内存超限"， 而它给的<strong>理由</strong>是"OOM 和超时强杀的退出码都是 137，靠退出码区分会把两种相反的 情况判成一样"。我们代码里的 <code>timed_out</code> 不是从退出码来的，是 <code>run_in_container</code> 自己的墙钟记账 —— 所以这条新规则和 C-07 的理由不冲突，只和字面冲突。</p></section><section class="part" data-group="判定与归因"><h2 class="sec" id="sec-11"><span class="num">11</span><span class="t">Judge Design（判定引擎：怎么判断修好了没有）</span></h2>
 <h3 id="sec-11-1"><span class="sub-num">11.1</span> 第一条原则</h3>
 <blockquote><p><strong>判定必须完全确定，不能有随机性。禁止用大模型判断 bug 修没修好。</strong>
 大模型<strong>只能</strong>用在下一章"分析它为什么没修好"，而且它的输出不允许回写判定结果。</p></blockquote>

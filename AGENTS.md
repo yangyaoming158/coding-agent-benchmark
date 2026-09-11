@@ -161,7 +161,17 @@ CI 里有持续校验（`backend/tests/unit/test_protocol_consistency.py`），�
 - 内存超限（OOM）是**平台**的问题，应该重试。
 - 执行超时是**被测 AI** 的问题，应该判定为"没修好"。
 
-判据用 `docker inspect --format '{{.State.OOMKilled}}'`，这个字段实测可靠。
+判据用 `docker inspect --format '{{.State.OOMKilled}}'`。
+
+**但这个字段在并发下会漏报**（2026-09-11 实测，细账在 `05-sandbox.md` §10.10）：
+同时起十几个容器时，dockerd 有约 3–5% 的概率**完全收不到** OOM 通知，
+于是一次真的内存超限长成"退出码 137 + `OOMKilled=false` + 没超时"。
+串行跑 105 次一次都没漏 —— 早先"实测可靠"那句话是串行测出来的，条件不一样。
+
+漏报之后 Agent 阶段会把它记成 `AGENT_RUNTIME_ERROR`，**等于把平台的内存问题
+算到被测 AI 头上**，而且不计入平台故障率，排行榜上看不出异常。
+目前的处置只是**告警**（日志事件 `container_sigkilled_without_oom_flag`），
+判定没改 —— 改判定要动协议 C-06/C-07 这两条冻结件。
 
 ### 5.5 测试用例 ID 必须归一化
 
