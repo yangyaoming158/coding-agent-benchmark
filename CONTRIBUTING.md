@@ -8,6 +8,58 @@
 
 ## 1. 装环境
 
+### 先看操作系统：原生 Windows 跑不了
+
+需要 **Linux**，或者 **Windows + WSL2**（在 WSL 里面开发，不是在 Windows 里）。
+
+这不是偏好问题，是两处硬阻塞：
+
+| 阻塞 | 在哪 | 表现 |
+|:---|:---|:---|
+| `os.getuid()` / `os.getgid()` | `app/sandbox/container.py` 的 `default_container_user()` | Windows 上这两个函数**根本不存在**，起容器第一步就 `AttributeError` |
+| 绑定挂载的路径 | 同文件，`_create_kwargs()` 直接把宿主路径给 docker | Windows 给出来的是 `C:\Users\...`，docker 要的是 `/c/Users/...` |
+
+第一条在每次起容器的必经之路上，绕不过去。修它也只是把问题推到第二条，
+再往后还有 `make`、`scripts/dev_db.sh`、Worker 靠 SIGTERM 的优雅停机 ——
+这些都要 POSIX 环境。**为一个 4 周的项目做 Windows 移植不划算。**
+
+> **换行符不用操心，已经处理过了。** Git for Windows 默认 `core.autocrlf=true`
+> 会改写换行符，对这个项目那是正确性问题（补丁是 unified diff，`content_hash`
+> 算的就是文件内容）。但仓库根目录的 `.gitattributes` 已经钉了 `* text=auto eol=lf`，
+> 而 harness 自己的 git 调用还额外把 `GIT_CONFIG_GLOBAL` 指向 `/dev/null`
+> （`app/sandbox/git_cli.py`，理由见 `docs/plan/05-sandbox.md` §10.7）。
+> **别去改这两处"优化"掉**，它们是有代价买来的。
+
+**好消息是不用换操作系统。** WSL2 是 Windows 自带的功能，不是另一台机器：
+
+```powershell
+wsl --install -d Ubuntu-24.04     # 管理员 PowerShell，装完重启
+```
+
+装好之后**所有开发都在 WSL 里做**：代码放在 WSL 的文件系统里（`~/projects/...`），
+不要放在 `/mnt/c/...`——跨文件系统的 IO 慢一个数量级，而这个项目要频繁物化代码工作区。
+
+VS Code 装 **WSL 扩展**就能直接在里面开发，体验和本地一样。
+
+### Docker：一台机器上只能有一个 daemon
+
+装 Docker 有两条路，**选一条，别两条都装**：
+
+- **在 WSL 里装原生 docker engine**（本项目开发机用的就是这个）。省内存 —— Docker Desktop
+  会额外常驻一个 WSL 发行版和一堆 GUI 进程，白吃 1~2 GB。这个项目内存很紧
+  （沙箱并发 5 × 1.5 GB + 基线 3.2 GB 已经逼近 11 GB 的上限），这 1~2 GB 是有代价的
+- **Docker Desktop + WSL 集成**。装起来最省事，但**如果 WSL 里已经有原生 dockerd，
+  千万别开集成** —— 开了之后它接管 `/var/run/docker.sock`，docker 命令连到另一个
+  守护进程上，表现是镜像和容器"凭空消失"（这个坑已经踩过）
+
+确认自己连的是哪一个：
+
+```bash
+docker info --format '{{.Name}} {{.DockerRootDir}}'
+```
+
+### 其余依赖
+
 需要：Python 3.11+、[uv](https://docs.astral.sh/uv/)、Docker、Node 20+。
 
 ```bash
@@ -24,6 +76,49 @@ make check       # 全套检查，应该全绿
 抢同一个端口会让两边都起不来，而且报错信息完全看不出是端口冲突。
 
 跑 `python3 scripts/check_env.py` 可以自检环境，它把踩过的坑固化成了检查项。
+
+---
+
+## 1.5 接手一份已有的环境
+
+`git clone` 给你的是代码和文档。下面这些**拿不到**，得单独交接：
+
+| 东西 | 大小 | 怎么来 |
+|:---|---:|:---|
+| `.env`（各家大模型 API Key） | — | **走私密渠道找项目负责人要**，绝不能进仓库 |
+| `var/cache/`（GitHub 响应 + 大模型回答的缓存） | ~3 MB | **一定要拿**。没有它，重跑挖掘和预筛要真花钱、真消耗 GitHub 配额；有它就是纯走缓存 |
+| `var/mirrors/`（git 镜像） | ~55 MB | 拿，或者自己重新 clone（过代理很慢） |
+| `var/build-snapshots/` | ~16 MB | 同上 |
+| Docker 镜像（`bench-base` + 每个环境一个） | 每个 ~840 MB | **不传，自己建**：`python -m cli.images build`。小仓库几分钟，大仓库十分钟出头 |
+| 开发库里的数据（题目、数据集版本） | — | **不传，自己重灌**：照 `AGENTS.md` 第 12 节的重灌规程跑一遍，前提是 `var/cache/` 在 |
+
+交接包这样打（实测 69 MB，聊天工具传得动）：
+
+```bash
+tar czf handoff.tar.gz var/cache var/mirrors var/build-snapshots
+```
+
+`.env` **不要**放进去。
+
+拿到之后的顺序：
+
+```bash
+tar xzf handoff.tar.gz            # 解到仓库根目录
+cp .env.example .env              # 再把要来的 Key 填进去
+make install && make db-up && make migrate
+python3 scripts/check_env.py      # 环境自检，把踩过的坑固化成了检查项
+# 然后照 AGENTS.md 第 12 节重灌数据库
+```
+
+### 多个人（或多个 AI 助手）同时开发时
+
+- **动手前先在 GitHub 上把对应 issue 分配给自己。** issue 是
+  `scripts/sync_issues.py` 从 `docs/plan/10-tasks-plan.md` 生成的，一张卡一个。
+  不认领的话，两个 AI 助手同时做同一张卡是完全可能的 —— 它们不会互相打招呼
+- **每人一台自己的机器、自己的数据库。** 开发库是本机的，而且
+  **跑任何一个集成测试都会把它清空**（`AGENTS.md` 第 9 节）。共用一个库等于互相清数据
+- **分支和 PR 一条都不能省。** AI 助手不会像人一样"等一下先同步"，
+  它们会自信地覆盖。分支加 PR 是唯一能把并行改动序列化的机制
 
 ---
 
