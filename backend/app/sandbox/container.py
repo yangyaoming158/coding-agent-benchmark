@@ -81,6 +81,12 @@ STOP_WAIT_SLACK_S = 15
 #: docker API 调用的默认超时（秒）。等容器结束那一下会用 `ContainerSpec.timeout_s` 覆盖。
 DOCKER_API_TIMEOUT_S = 60
 
+#: 被 SIGKILL 杀掉时的退出码（128 + 9）。
+#:
+#: **不能拿它判 OOM**（协议 C-07）：内存超限、我们自己超时强杀、取消实验时杀容器，
+#: 三种情况的退出码都是它。这个常量只用来认出"这个容器是被 SIGKILL 的"这一个事实。
+SIGKILL_EXIT_CODE = 137
+
 #: harness 自己以 root 跑时（比如 Worker 在容器里），容器退到这个用户。
 #: 65534 是 Linux 约定的 nobody。
 NOBODY_UID = 65534
@@ -322,6 +328,25 @@ class ContainerResult:
         """正常退出：退出码 0，没 OOM，没超时。"""
         return self.exit_code == 0 and not self.oom_killed and not self.timed_out
 
+    @property
+    def sigkilled_without_oom_flag(self) -> bool:
+        """被 SIGKILL 了，但 docker 没说是 OOM，也不是我们自己超时杀的。
+
+        **这是一个事实，不是结论。** 它只说"有人 SIGKILL 了这个容器，而我们不知道是谁"。
+
+        为什么要单独认出来（2026-09-11 实测，见 `05-sandbox.md` §10.10）：
+        并发起容器时，dockerd **有几率完全收不到 OOM 通知**，于是一次真的内存超限
+        在这里长这样 —— 退出码 137、`oom_killed` 为假、`timed_out` 为假。
+        实测 16 路并发下约 5%，串行空载 105 次一次都没有。
+
+        注意它不等于"这次是 OOM"：取消实验时我们自己也会 SIGKILL 容器
+        （`kill_containers_by_run_prefix`），那种情况同样长这样。
+        把它判成 OOM 需要改协议 C-06/C-07，那是另一件事。
+
+        算出来是派生的，不额外存一个字段：三个事实已经在了，再存一份就会有对不上的一天。
+        """
+        return self.exit_code == SIGKILL_EXIT_CODE and not self.oom_killed and not self.timed_out
+
 
 # ══════════════════════════════════════════════════════════════
 # 纯函数：环境变量、结果分类、时间戳
@@ -381,6 +406,18 @@ def classify_outcome(result: ContainerResult, *, stage: Stage) -> InfraOutcome:
     测试阶段非零退出是正常的（有用例失败，判定引擎会去读 junit 报告），Agent 阶段
     非零退出才算故障，而"Agent 算不算跑成功"要看它 stdout 最后一行的 JSON
     （Runner 协议，E3-T1），不是退出码。把它塞进这里会让沙箱层去猜上层的语义。
+
+    ## 已知缺口：`sigkilled_without_oom_flag` 为真时，这里会返回 SUCCESS
+
+    2026-09-11 实测确认，并发起容器时 dockerd 有约 5% 的概率**完全收不到 OOM 通知**
+    （不是迟到，是没有），于是一次真的内存超限在这里长成"退出码 137 + 两个标记都是假"，
+    被判成 SUCCESS。在 Agent 阶段它最终会变成 `AGENT_RUNTIME_ERROR`，
+    也就是把平台的内存问题算到被测 AI 头上，而且不计入平台故障率。
+
+    **不要顺手在这里加一条"137 就算 OOM"** —— 协议 C-06 规定 OOM 只看
+    `.State.OOMKilled`，C-07 禁止用退出码判内存超限，两条都是冻结件，
+    要改得走 C-51 的变更流程。现在的处置是**只告警不改判定**
+    （`_warn_if_sigkilled_without_oom_flag`），完整的调查记录在 `05-sandbox.md` §10.10。
     """
     if result.oom_killed:
         return InfraOutcome.OOM_KILLED
@@ -623,7 +660,7 @@ def run_in_container(spec: ContainerSpec, *, client: Any = None) -> ContainerRes
         state = container.attrs.get("State", {})
         stdout, out_cut = _read_stream(container, stdout=True)
         stderr, err_cut = _read_stream(container, stdout=False)
-        return ContainerResult(
+        result = ContainerResult(
             container_id=str(container.id),
             image=spec.image,
             exit_code=exit_code,
@@ -635,8 +672,40 @@ def run_in_container(spec: ContainerSpec, *, client: Any = None) -> ContainerRes
             stderr=stderr,
             logs_truncated=out_cut or err_cut,
         )
+        _warn_if_sigkilled_without_oom_flag(result, spec)
+        return result
     finally:
         _remove_quietly(container)
+
+
+def _warn_if_sigkilled_without_oom_flag(result: ContainerResult, spec: ContainerSpec) -> None:
+    """容器被 SIGKILL 了但没人认领，记一条告警（协议 C-73 要求环境波动必须记录并告警）。
+
+    事件名固定成 `container_sigkilled_without_oom_flag`，好让它能被数：
+    正式实验跑完之后 `grep` 一下就知道这一轮里发生过几次。
+
+    **只告警，不改判定。** 把它判成 OOM 是协议 C-06/C-07 管的事，要走 C-51 的
+    变更流程。在那之前，这条日志是唯一能证明"它发生过"的东西 ——
+    之前它一声不吭地流过去了，而在 Agent 阶段它会被记成
+    `AGENT_RUNTIME_ERROR`，也就是把平台的内存问题算到被测 AI 头上。
+    """
+    if not result.sigkilled_without_oom_flag:
+        return
+    logger.warning(
+        "container_sigkilled_without_oom_flag",
+        container_id=result.container_id[:12],
+        image=result.image,
+        stage=spec.stage.value,
+        exit_code=result.exit_code,
+        duration_s=round(result.duration_s, 3),
+        run_id=spec.run_id,
+        memory_mb=spec.limits.memory_mb,
+        note=(
+            "退出码 137 但 docker 没标 OOM，也不是我们超时杀的。"
+            "可能是 dockerd 漏收了 OOM 通知（并发时实测约 5%），"
+            "也可能是取消实验时我们自己杀的。详见 05-sandbox.md §10.10"
+        ),
+    )
 
 
 def _stop_and_collect(container: Any, grace_s: int) -> int:

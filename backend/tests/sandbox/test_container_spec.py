@@ -10,12 +10,20 @@
 
 from __future__ import annotations
 
+import json
+import logging
+from collections.abc import Iterator
 from datetime import UTC, datetime
+from io import StringIO
 from pathlib import Path
+from typing import Any
 
 import pytest
+import structlog
 
 from app.domain.enums import InfraOutcome
+from app.infrastructure.config import Settings
+from app.infrastructure.logging import configure_logging
 from app.sandbox.container import (
     AGENT_ENV_ALLOWLIST,
     DETERMINISM_ENV,
@@ -29,6 +37,7 @@ from app.sandbox.container import (
     Stage,
     _create_kwargs,
     _read_capped,
+    _warn_if_sigkilled_without_oom_flag,
     build_env,
     classify_outcome,
     default_container_user,
@@ -38,6 +47,25 @@ from app.sandbox.container import (
 #: 假密钥。**分段拼出来**，不写成一整串 —— 整串写会被密钥扫描器扫到，
 #: 于是我们自己的测试文件成了"仓库里有泄漏密钥"的告警源。
 FAKE_KEY = "sk-" + "ant" + "-test-" + "0" * 24
+
+
+@pytest.fixture
+def capture_logs() -> Iterator[StringIO]:
+    """把日志接到内存流上，用 JSON 格式，断言渲染后的真实输出。
+
+    日志配置是全局状态，用完必须还回去，否则会污染别的测试文件
+    （同 `tests/unit/test_logging.py` 的 `isolate_logging`）。
+    """
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+    stream = StringIO()
+    configure_logging(Settings(_env_file=None, log_format="json"), stream=stream)
+    try:
+        yield stream
+    finally:
+        structlog.reset_defaults()
+        root.handlers = saved_handlers
+        root.setLevel(saved_level)
 
 
 def make_result(**overrides: object) -> ContainerResult:
@@ -54,6 +82,60 @@ def make_result(**overrides: object) -> ContainerResult:
     }
     fields.update(overrides)
     return ContainerResult(**fields)  # type: ignore[arg-type]
+
+
+# ── 被 SIGKILL 但没人认领（2026-09-11 的实测缺口，见 05-sandbox.md §10.10）──
+
+
+def test_sigkill_without_oom_flag_is_recognised() -> None:
+    """退出码 137 + 两个标记都是假 = 有人杀了它，而我们不知道是谁。
+
+    并发起容器时 dockerd 有几率完全收不到 OOM 通知，一次真的内存超限就长这样。
+    """
+    assert make_result(exit_code=137).sigkilled_without_oom_flag
+
+
+@pytest.mark.parametrize(
+    ("overrides", "why"),
+    [
+        ({"exit_code": 137, "oom_killed": True}, "docker 认了这是 OOM"),
+        ({"exit_code": 137, "timed_out": True}, "是我们自己超时杀的"),
+        ({"exit_code": 1}, "不是被 SIGKILL 的"),
+        ({"exit_code": 0}, "正常退出"),
+    ],
+)
+def test_sigkill_without_oom_flag_excludes_the_explained_cases(
+    overrides: dict[str, object], why: str
+) -> None:
+    """有解释的那些不算 —— 这个属性只认"没人认领的 SIGKILL"。"""
+    assert not make_result(**overrides).sigkilled_without_oom_flag, why
+
+
+def test_the_gap_is_still_classified_as_success() -> None:
+    """**这条用例记的是一个已知缺口，不是期望的行为。**
+
+    协议 C-06 规定 OOM 只看 `.State.OOMKilled`，C-07 禁止用退出码判内存超限，
+    所以分类函数照旧返回 SUCCESS。改成判 OOM 要走 C-51 的变更流程。
+    在那之前，这条用例保证"缺口还在、而且还是这个样子" ——
+    哪天有人顺手改了判定，它会红，那时候应该先去看协议有没有跟着改。
+    """
+    gap = make_result(exit_code=137)
+    assert gap.sigkilled_without_oom_flag
+    assert classify_outcome(gap, stage=Stage.AGENT) is InfraOutcome.SUCCESS
+    assert classify_outcome(gap, stage=Stage.TEST) is InfraOutcome.SUCCESS
+
+
+def test_the_gap_is_logged_so_it_can_be_counted(capture_logs: Any) -> None:
+    """协议 C-73 要求环境波动必须记录并告警。事件名固定，好让它能被数。"""
+    spec = ContainerSpec(image="python:3.11-slim", command=["true"], timeout_s=10)
+    _warn_if_sigkilled_without_oom_flag(make_result(exit_code=137), spec)
+    _warn_if_sigkilled_without_oom_flag(make_result(exit_code=137, oom_killed=True), spec)
+
+    events = [json.loads(line) for line in capture_logs.getvalue().splitlines() if line.strip()]
+    warned = [e for e in events if e.get("event") == "container_sigkilled_without_oom_flag"]
+    assert len(warned) == 1, "认了 OOM 的那次不该告警"
+    assert warned[0]["level"] == "warning"
+    assert warned[0]["exit_code"] == 137
 
 
 # ── 结果分类（协议 C-06、C-07、C-19b）────────────────────────
