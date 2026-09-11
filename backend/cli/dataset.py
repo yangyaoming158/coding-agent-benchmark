@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -62,9 +61,11 @@ from app.domain.enums import (
     EvaluationRunStatus,
     TaskValidationState,
 )
+from app.evaluation.manifest import ProvenanceError, collect_provenance
 from app.evaluation.orchestrator import OrchestrationError, create_runs
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
+from app.infrastructure.gitmeta import git_state
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationRun
@@ -81,26 +82,6 @@ LIVE_RUN_STATES = (
     EvaluationRunStatus.QUEUED,
     EvaluationRunStatus.RUNNING,
 )
-
-
-# ── git 状态 ────────────────────────────────────────────────
-
-
-def git_state() -> tuple[str, bool]:
-    """当前的 commit sha 和工作区干不干净。
-
-    协议 C-27 要求正式实验前工作区必须干净，否则 `harness_git_sha` 不能唯一代表
-    代码状态，"可复现"就是假的。完整的强制由 E5-T4 做，这里只取这两个事实 ——
-    发布记录里留一个恒为 false 的 `dirty` 比不留更糟。
-    """
-
-    def run(*args: str) -> str:
-        return subprocess.run(
-            ["git", *args], cwd=REPO_ROOT, capture_output=True, text=True, check=False
-        ).stdout.strip()
-
-    sha = run("rev-parse", "HEAD") or "unknown"
-    return sha, bool(run("status", "--porcelain"))
 
 
 # ── stage ───────────────────────────────────────────────────
@@ -196,7 +177,6 @@ def _agent_config(session: Session, name: str) -> AgentConfig:
 def cmd_gate(args: argparse.Namespace) -> int:
     settings = get_settings()
     factory = create_session_factory(create_db_engine(settings.database_url))
-    sha, dirty = git_state()
 
     with session_scope(factory) as session:
         try:
@@ -241,39 +221,47 @@ def cmd_gate(args: argparse.Namespace) -> int:
             return 1
 
         created: list[tuple[str, int]] = []
+        dirty = False
         for agent_name in (ORACLE_AGENT, NOOP_AGENT):
+            # 快照摘要、harness 版本、镜像 digest 表全由 `collect_provenance()` 凑齐，
+            # 再由 `create_runs()` 一次性写进 manifest。E5-T4 之前这里是手写
+            # 三个键再赋给 `run.manifest` —— 那是 manifest 的第二个写入口，
+            # 两个入口迟早会在"该记什么"上分岔。
+            #
+            # 协议 C-27 的强制也在 `collect_provenance()` 里：门禁实验是"凭它发布
+            # 数据集"的记录，脏工作区上跑出来的门禁，`publish` 本来也不收
             try:
-                runs = create_runs(
+                provenance = collect_provenance(
                     session,
-                    name=f"{dataset.slug}@{dataset.version} 发布门禁 · {agent_name}",
                     benchmark_set_id=dataset.id,
+                    snapshot_digest=digest,
                     agent_config_id=configs[agent_name].id,
                     task_ids=task_ids,
                     agent_concurrency=settings.agent_concurrency,
                     sandbox_concurrency=settings.sandbox_concurrency,
                     job_max_attempts=settings.job_max_attempts,
+                    allow_dirty=args.allow_dirty,
+                    gate_for=f"{dataset.slug}@{dataset.version}",
                 )
-            except OrchestrationError as exc:
+                runs = create_runs(
+                    session,
+                    name=f"{dataset.slug}@{dataset.version} 发布门禁 · {agent_name}",
+                    task_ids=task_ids,
+                    provenance=provenance,
+                )
+            except (OrchestrationError, ProvenanceError) as exc:
                 print(f"建不了 {agent_name} 门禁实验：{exc}")
                 return 1
-            run = runs[0]
-            # 摘要写进 manifest，`publish` 靠它认出"这次跑的就是将要发布的那一批题"。
-            # E5-T4 以后会往同一个 JSONB 里补别的键，这里只占三个。
-            run.manifest = {
-                MANIFEST_DIGEST_KEY: digest,
-                "harness_git_sha": sha,
-                "gate_for": f"{dataset.slug}@{dataset.version}",
-            }
-            run.dirty = dirty
-            created.append((agent_name, run.id))
+            dirty = provenance.dirty
+            created.append((agent_name, runs[0].id))
 
         print(f"{dataset.slug}@{dataset.version} 的门禁实验已建（{len(task_ids)} 道题 × 2）：")
         for agent_name, run_id in created:
             print(f"  {agent_name:<7} 实验 #{run_id}")
         print(f"  快照摘要  {digest}")
         if dirty:
-            print("\n⚠ 工作区有未提交改动（协议 C-27）。这两次实验会被标成 dirty，")
-            print("  发布时要么先提交、要么 `publish --allow-dirty` 并在指纹里如实记着。")
+            print("\n⚠ 工作区有未提交改动，两次门禁实验都标了 dirty=true（协议 C-28）。")
+            print("  发布时也得给 `publish --allow-dirty`，指纹里会如实记着。")
         print("\n下一步：make worker    跑完之后 python -m cli.dataset publish --slug " + args.slug)
     return 0
 
@@ -578,6 +566,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_gate.add_argument("--slug", required=True)
     p_gate.add_argument("--version", help="默认取最新的那一版")
     p_gate.add_argument("--force", action="store_true", help="已经有门禁在跑也照投")
+    p_gate.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="工作区不干净也建门禁（协议 C-28：实验标 dirty=true，publish 也要给这个参数）",
+    )
     p_gate.set_defaults(func=cmd_gate)
 
     p_publish = sub.add_parser("publish", help="查门禁，过了才发布")

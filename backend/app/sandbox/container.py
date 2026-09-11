@@ -486,6 +486,18 @@ class ImageInfo:
     digest: str | None = None
 
 
+def digest_reference(tag: str | None, digest: str | None) -> str | None:
+    """把 tag 和 digest 拼成 docker 认的 digest 引用：`bench-env@sha256:...`。
+
+    协议 C-36 要求引用镜像用 digest 不用 tag。但 docker 的 digest 引用**必须带仓库名**，
+    而仓库名只能从 tag 里拆（`bench-env:pallets__click__py311` → `bench-env`）。
+    两个缺一个就拼不出来，这时返回 None，由调用方决定退回 tag 还是报错。
+    """
+    if not tag or not digest:
+        return None
+    return f"{tag.split(':', 1)[0]}@{digest}"
+
+
 def inspect_image(image: str, *, client: Any = None) -> ImageInfo:
     """查一个本地镜像，拿它的 id 和 digest。镜像不在就抛 `ImageNotFoundError`。
 

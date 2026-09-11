@@ -120,6 +120,28 @@ Git 里存的是**指纹**而非内容。任何人拿到仓库 + artifact store�
 
 这条与 §6.2 的 Run Publish Gate 是同一类设计——把"结果可信"变成机器可校验的前置条件，而不是靠人自觉。并入 `scripts/check_env.py` 与 `POST /api/runs` 的校验链。
 
+> **落地实录（2026-09-11，E5-T4）：强制点只有一处，而且不在 `check_env.py`。**
+>
+> 真做的时候发现 `check_env.py` 是**错的落点**：它是开发者手动跑的环境自检，
+> 跑不跑全凭自觉，而 C-27 要拦的正是"没自觉"的那一次。
+>
+> 强制点落在 `app.evaluation.orchestrator.create_runs()` ——
+> 生产代码里只有那一处建 `EvaluationRun`，`cli.experiment start`、`cli.queue enqueue`、
+> `cli.dataset gate` 和以后的 `POST /api/runs` 全走它。
+>
+> 但它**自己不调 git**：集成测试也调 `create_runs()`，而开发时工作区永远是脏的，
+> 在里面查 `git status` 会让每个集成测试都红。拆成两步 ——
+> `app.evaluation.manifest.collect_provenance()` 取事实兼拒绝，
+> `create_runs()` 收一个**必填**的凭证参数然后写库。必填换到的是一条硬性质：
+> **建不出 `manifest = {}` 的运行**。
+>
+> 数据集侧那份指纹（本节上面那个 JSON）和运行侧的 manifest 共用同一个
+> 数据集摘要键名，定义在 `app.domain.manifest`。两边各写一个字符串字面量的话，
+> 改名时漏掉的那一边**不会报错**，只是查不到门禁记录。
+>
+> 运行侧 manifest 装了什么、为什么有些东西没装，见
+> `07-platform-architecture.md` §13.5。
+
 ## 32.7 对 E0-T2 的范围补充
 
 `E0-T2 仓库骨架与工程规范` 的交付物增加：

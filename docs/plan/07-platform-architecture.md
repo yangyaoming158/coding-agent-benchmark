@@ -103,6 +103,154 @@ evaluation_task_runs 1─n test_results / 1─n patch_artifacts / 1─1 failure_
 ## 13.4 不入库的内容
 Agent stdout/stderr（可达数 MB）、测试完整日志、junit XML、轨迹 JSONL、HTML 报告、补丁全文、镜像构建日志 —— 全部走 ArtifactStore，库里只留 `artifacts` 索引行 + 2KB 摘要（用于列表页预览与规则归因的快速匹配）。
 
+## 13.5 运行 Manifest 落地实录（2026-09-11，E5-T4）
+
+> **本节是追加的实现记录。** §13.2 里 `evaluation_runs.manifest` 那一列的说明一个字没动，
+> 这里写的是它到底装了什么、以及为什么有些东西**没**装进去。
+
+工具：`app/evaluation/manifest.py` + `app/domain/manifest.py` +
+`python -m cli.experiment {manifest,replay}`。**没有新迁移** ——
+`manifest` / `dirty` / `protocol_version` 三列在 0001 初始迁移里就有，
+E5-T4 之前只是没人往里写。
+
+### 一、任务卡只写了一句话，AC 是开工前定的
+
+原卡的 AC 是「由 manifest 可重建一次等价运行；两次运行的 manifest diff 只在时间戳上
+不同」。"可重建"到哪一步、记哪些字段、字段对不上时怎么办，一个字没有。
+定下来的 11 条见任务卡，最要紧的三条是：**"可重建"只管输入条件不管结果**、
+**C-27 的强制点只能有一个**、**manifest 里必须分出"允许不同"的那几个键**。
+
+### 二、"可重建"划在输入条件，不划在结果
+
+`replay` 保证的是"这一次和那一次跑的是同一批题、同一个参赛者、同一套镜像、同一版代码"。
+它**不保证**两次的解决率一样。
+
+这条线不是偷懒，是协议定的：**C-73 写着"测试执行的可复现性是目标，不是保证"**。
+把 AC 写成"两次结果必须一样"就和 C-73 打架了 —— §7.11 第九节实测过 click 那一族
+竞态用例，同一份补丁三次跑出过"过 / 挂 / 过"。
+
+所以 AC 的机器化形式是：**两次运行 manifest 里"必须相同"的字段逐字相同**。
+逐实例一致率是 MET-01 的口径，那是 E10-T5 的活。
+
+三张卡的分工（三者输入不同，不重叠）：
+
+| 卡 | 输入 | 产出 |
+|:---|:---|:---|
+| **E5-T4（本节）** | **我们自己**某次运行的 manifest | 一个等价的新 run + manifest diff |
+| E3-T8 ReplayRunner | **别人**发布的预测补丁文件 | 逐实例一致率 |
+| E10-T5 校准实验 | E3-T8 的能力 × 官方子集 | MET-01 偏差报告 |
+
+### 三、C-27 的强制点在 `create_runs()`，但凭证是**必填参数**而不是在里面调 git
+
+协议 C-27 要求工作区不干净时拒绝启动正式实验。强制点放在
+`app.evaluation.orchestrator.create_runs()`：生产代码里只有那一处建 `EvaluationRun`
+（`cli.experiment start`、`cli.queue enqueue`、`cli.dataset gate`、以后的
+`POST /api/runs` 全走它），放各个入口的话，写第四个入口的人一定会漏。
+
+**但 `create_runs()` 自己去调 `git status` 是不行的。** 集成测试也调 `create_runs()`，
+而开发时工作区**永远是脏的** —— 那样每个集成测试都会红，而它们要验的东西
+和工作区干不干净毫无关系。
+
+拆成两步就同时成立：
+
+    collect_provenance(..., allow_dirty=False)   ← git 在这里调，脏工作区在这里拒绝
+            ↓ 返回 RunProvenance
+    create_runs(..., provenance=<必填>)          ← 只负责写库
+
+必填参数换到的是一条硬性质：**建不出 `manifest = {}` 的运行**。
+E5-T4 之前 `cli.experiment start` 建出来的就是空的（本机库里的 #98 就是），
+那种运行事后说不清跑的是哪版代码、哪个镜像。测试则直接构造凭证
+（`tests/integration/factories.provenance_for`），一次 git 都不调。
+
+顺带把 `benchmark_set_id` / `agent_config_id` / 两个并发数从 `create_runs()` 的
+参数表里删了，全从凭证取。分开传的话，行上写的 `agent_concurrency` 和 manifest 里
+记的可以是两个值，而**不一致时没有任何东西会报错**。
+
+### 四、manifest 只装"启动时就知道"的事实，三类东西被挡在外面
+
+1. **跑完才知道的**（解决率、makespan、重试次数、平台故障数）不进。
+   这是 C-67 那条纪律的推广：写进去就不许改。一个既装启动条件又装运行结果的
+   JSONB，必然要被改第二次。这些字段 `evaluation_runs` 上都有专门的列。
+2. **会变的生命周期字段**不进。最典型的是 `benchmark_sets.status`：门禁在 DRAFT 上跑，
+   发布之后变成 PUBLISHED。把它记进去，重放时会凭空多出一条差异，
+   而数据集内容一模一样 —— 认数据集身份靠的是摘要，不是状态。
+3. **密钥**不进。`determinism.agent_env_allowlist` 只记**名字**不记值。
+   记值的话，各家的 API Key 会同时进数据库和 `datasets/manifests/`（那个目录是入库的）。
+
+### 五、"必须相同"和"允许不同"必须分两摞
+
+`app/domain/manifest.py` 的 `VOLATILE_KEYS = {created_at, host, replay_of}`
+就是任务卡那句"只在时间戳上不同"的机器化定义：**集合之外的键必须逐字相同，
+集合之内的如实记录但不参与等价判断**。
+
+为什么非分不可：NFR-02 要的是"**异机**异时复现"。跑在第二台机器上时 `host`
+（docker 版本、内核、CPU 数、内存）一定不同 —— 不划出去，这条 AC 在第二台机器上
+**永远过不了**；而不记 `host` 的话，两次结果对不上时第一个要问的问题
+（"是不是换机器了、docker 换版本了"）没有任何证据可查。
+
+### 六、"种子"落在 `PYTHONHASHSEED` 上，没有另造一个字段
+
+任务卡 Goal 里点名要记"种子"。查下来平台运行时**没有第二个随机源**：
+`random` 只在 `app/benchmark/assembly.py` 的 P2P 抽样里用，那是建题期，
+种子记在题目定义里、由数据集摘要覆盖；重试退避是 `2^n × base`，没有抖动。
+
+所以运行侧的"种子"就是 `determinism.env` 里的 `PYTHONHASHSEED=0`，
+**不新造一个恒为某值的 `seed` 字段**。理由和 §7.11 第八节对 `dirty` 的推理是同一条
+的反面：留一个恒为 false 的 `dirty` 比不留更糟，而留一个没有意义的 `seed`
+同样比不留更糟 —— 它会让人以为平台还有一个可调的随机源。
+
+### 七、光比快照摘要抓不到"题目被改了"
+
+`replay` 的第 2 项校验是现算一遍快照摘要。写完才发现它只够抓一半：
+**`items_of()` 读的是 `benchmark_set_items.task_content_hash` —— 冻住的那一份**，
+题目改了它一动不动。而 Worker 跑题读的是 `benchmark_tasks.raw_definition`，
+**活的那一份**。
+
+于是补了第 3 项：直接用 E1-T6 的 `drift()` 查内容漂移 / 被隔离 / 题不见了。
+两项抓的是两件事：摘要抓"有人动了题目清单"，漂移抓"清单没动但题被改过"。
+
+### 八、Worker 起容器按 manifest 里的 digest，不按 `environment_specs` 现值
+
+`app/worker/handlers/eval_task.py` 原来是 `image=env.image_tag or DEFAULT_GOLDEN_IMAGE`，
+注释里自己写着"协议 C-36 要求引用 digest，那一步在 E5-T4 做"。
+
+关键不只是"改成 digest"，而是 **digest 从哪里取**：从实验自己的 manifest 取，
+不从 `environment_specs` 那一行取。那一列会被下一次 `cli.images build` 覆盖 ——
+实验建于周一、跑于周三，中间重建过镜像的话，按库里现值跑等于 manifest 说跑的是 A、
+实际跑的是 B，**而且不报错**（那一列的 digest 永远是"最新"的，看不出漂移）。
+
+manifest 里同时记 tag 和 digest，因为 docker 的 digest 引用必须带仓库名，
+而仓库名只能从 tag 里拆（`bench-env:pallets__click__py311` → `bench-env@sha256:...`）。
+本机建的镜像**有** RepoDigest，实测能直接起（见第十节）。
+manifest 里没记 digest 时退回按 tag 起，行为和 E5-T4 之前一样 ——
+老运行和还没建过镜像的环境走的就是这条路。
+
+### 九、`images gc` 的保护名单漏了一整类
+
+`cli/images.py` 的 `_gc_inputs()` 原来只护 `environment_specs.image_digest` **整列**，
+而那一列只有一格：**环境一重建就被新 digest 覆盖**，老实验当初钉的那个立刻变成
+"没人引用"，下一次 gc 就删了 —— 而那次实验的可复现性全靠它。
+表现是 `replay` 报"镜像已经不在本地"，且无法挽回。
+
+补法是把**所有运行 manifest 里引用过的 digest** 也加进保护名单
+（`_digests_in_run_manifests()`）。`gc_candidates()` 的注释原文就写着
+"删掉一个还被记着的 digest，等于把那次实验的可复现性抹掉" —— 规矩本来就在，
+少的是"还被谁记着"的那一半。
+
+### 十、实测（本机，2026-09-11）
+
+拿已发布的 `benchmark-dev@v1`（22 道题）真跑：
+
+    ① 脏工作区建实验         → 拒绝，点名协议 C-27
+    ② --allow-dirty 放行     → 实验 #99，dirty=true 同时落进列和 manifest
+    ③ replay --run 99        → 同样先被 C-27 拦，加 --allow-dirty 后建出 #100
+    ④ manifest --run 99 --run 100
+                             → 必须相同的字段全部一致；
+                                差异只有 created_at 和 replay_of，都在 VOLATILE_KEYS 里
+
+`bench-env@sha256:f9c0afc8f30e…` 这个 digest 引用本机实测能直接起容器
+（`docker run --rm --network none 'bench-env@sha256:f9c0…' python -c ...` 正常输出）。
+
 ---
 
 # 14 Backend Architecture

@@ -68,6 +68,7 @@ from app.domain.enums import (
     InfraOutcome,
     TaskValidationState,
 )
+from app.domain.manifest import DATASET_SNAPSHOT_DIGEST_KEY
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import (
     BenchmarkSet,
@@ -395,9 +396,14 @@ def current_digest(session: Session, benchmark_set_id: int) -> str:
 #: 门禁实验的 `manifest` 里记快照摘要用的键。
 #:
 #: `evaluation_runs.manifest` 这一列的注释原文就写着它装"镜像 digest 表、
-#: harness 的 git sha、**数据集哈希**"，所以不用新开表。E5-T4 以后会往同一个
-#: JSONB 里补别的键，这里只占一个。
-MANIFEST_DIGEST_KEY = "dataset_snapshot_digest"
+#: harness 的 git sha、**数据集哈希**"，所以不用新开表。E5-T4 往同一个 JSONB 里
+#: 补了别的键，这一个位置和名字都没动 —— `gate_verdict()` 靠这条 JSONB 路径找
+#: 门禁实验，而已发布版本的门禁记录不许事后修改。
+#:
+#: 名字的定义搬去了 `app.domain.manifest`：`app.evaluation` 建实验时也要写这个键，
+#: 而 import-linter 的契约里 `app.evaluation | app.benchmark` 互不可见，
+#: 两边各写一个字面量的话，改名时漏掉的那一边**不会报错**，只是查不到门禁记录。
+MANIFEST_DIGEST_KEY = DATASET_SNAPSHOT_DIGEST_KEY
 
 
 @dataclass(frozen=True, slots=True)

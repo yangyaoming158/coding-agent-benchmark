@@ -72,6 +72,7 @@ from app.sandbox.container import (
     SandboxError,
     Stage,
     build_env,
+    digest_reference,
     get_docker_client,
     inspect_image,
     run_in_container,
@@ -619,10 +620,7 @@ class BuildOutcome:
     @property
     def image_ref(self) -> str:
         """引用这个镜像时该用的字符串。有 digest 就用 digest（协议 C-36）。"""
-        if self.digest:
-            repository = self.tag.split(":", 1)[0]
-            return f"{repository}@{self.digest}"
-        return self.tag
+        return digest_reference(self.tag, self.digest) or self.tag
 
 
 def _truncate_log(text: str, limit: int = MAX_BUILD_LOG_BYTES) -> tuple[str, bool]:

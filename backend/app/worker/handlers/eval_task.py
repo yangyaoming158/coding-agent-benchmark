@@ -88,6 +88,7 @@ from app.evaluation.jobs import (
     enqueue_eval_task,
     run_key_for,
 )
+from app.evaluation.manifest import pinned_image_ref
 from app.evaluation.orchestrator import mark_running
 from app.evaluation.persistence import persist_task_run
 from app.evaluation.task_run import TaskRunInputs, TaskRunOutcome, deadline_ms, execute_task_run
@@ -231,20 +232,42 @@ def _load(session: Session, payload: EvalTaskPayload) -> _Loaded:
         )
     task = TaskDefinition.model_validate(task_row.raw_definition)
 
-    from app.evaluation.executor import DEFAULT_GOLDEN_IMAGE
-
     return _Loaded(
         task=task,
         adapter_class=agent.adapter_class,
         agent_params=dict(config.params),
         model_name=config.model_name,
-        # E2-T3 之前 image_tag 还是空的，退回 Golden 那个临时镜像。
-        # 协议 C-36 要求正式实验引用 digest 而不是 tag，那一步在 E5-T4 的 manifest 里做。
-        image=env.image_tag or DEFAULT_GOLDEN_IMAGE,
+        image=_image_for(run, env),
         extra_protected_paths=tuple(env.extra_protected_paths or ()),
         agent_timeout_s=task_row.agent_timeout_s,
         repo_name=task.repo_name,
     )
+
+
+def _image_for(run: EvaluationRun, env: EnvironmentSpec) -> str:
+    """这次评测起哪个镜像。**优先用实验 manifest 里钉死的那个 digest**（协议 C-36）。
+
+    为什么不直接读 `environment_specs.image_digest`：那一列会被下一次
+    `cli.images build` 覆盖。实验建于周一、跑于周三，中间重建过镜像的话，
+    按库里现值跑等于 manifest 说跑的是 A、实际跑的是 B —— 而且**不报错**，
+    那一列的 digest 永远是"最新"的，看不出漂移。
+
+    manifest 里没记就退回 tag，行为和 E5-T4 之前一样。两种情况会走到这条路：
+    实验是 E5-T4 之前建的（那时 manifest 一直是空的）；或者这个环境还没建过镜像
+    （`image_digest` 为空，E2-T3 之前的 Golden 题就是这样）。
+    """
+    from app.evaluation.executor import DEFAULT_GOLDEN_IMAGE
+
+    pinned = pinned_image_ref(run.manifest or {}, env.environment_id)
+    if pinned:
+        return pinned
+    logger.info(
+        "image_not_pinned",
+        evaluation_run_id=run.id,
+        environment_id=env.environment_id,
+        reason="manifest 里没有这个环境的 digest，退回按 tag 起",
+    )
+    return env.image_tag or DEFAULT_GOLDEN_IMAGE
 
 
 def _agent_config(ctx: JobContext, loaded: _Loaded) -> AgentRunnerConfig:

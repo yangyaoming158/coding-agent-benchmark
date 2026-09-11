@@ -25,10 +25,11 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.benchmark.dataset import DatasetError, items_of, resolve_set
+from app.benchmark.dataset import DatasetError, items_of, resolve_set, snapshot_digest
 from app.benchmark.schema import TaskDefinition
 from app.domain.enums import JobState, TaskValidationState
-from app.evaluation.orchestrator import create_runs
+from app.evaluation.manifest import ProvenanceError, collect_provenance
+from app.evaluation.orchestrator import OrchestrationError, create_runs
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models.agent import Agent, AgentConfig
@@ -212,10 +213,12 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
         if note:
             print(f"⚠ {note}")
 
-        rows = items_of(session, dataset.id)
+        # 摘要算的是整份快照，选子集这件事由 manifest 的 selected_task_ids 记
+        all_rows = items_of(session, dataset.id)
+        rows = all_rows
         if args.task:
             wanted = set(args.task)
-            rows = [row for row in rows if row.task_id in wanted]
+            rows = [row for row in all_rows if row.task_id in wanted]
         task_ids = [row.benchmark_task_id for row in rows]
         if not task_ids:
             print(
@@ -226,21 +229,31 @@ def cmd_enqueue(args: argparse.Namespace) -> int:
 
         # 建实验这件事只有一份实现（`app.evaluation.orchestrator`）：
         # 这里和 `cli.experiment start` 走同一条路，不然 total_tasks 之类的字段
-        # 迟早会有一边忘了写
+        # 迟早会有一边忘了写。可复现性清单也一样 —— `collect_provenance()` 是
+        # 协议 C-27（脏工作区拒绝启动）的唯一强制点
         settings = get_settings()
-        runs = create_runs(
-            session,
-            name=args.name,
-            benchmark_set_id=dataset.id,
-            agent_config_id=config.id,
-            task_ids=task_ids,
-            agent_concurrency=settings.agent_concurrency,
-            sandbox_concurrency=settings.sandbox_concurrency,
-            job_max_attempts=settings.job_max_attempts,
-        )
+        try:
+            provenance = collect_provenance(
+                session,
+                benchmark_set_id=dataset.id,
+                snapshot_digest=snapshot_digest(all_rows),
+                agent_config_id=config.id,
+                task_ids=task_ids,
+                agent_concurrency=settings.agent_concurrency,
+                sandbox_concurrency=settings.sandbox_concurrency,
+                job_max_attempts=settings.job_max_attempts,
+                allow_dirty=args.allow_dirty,
+            )
+            runs = create_runs(session, name=args.name, task_ids=task_ids, provenance=provenance)
+        except (OrchestrationError, ProvenanceError) as exc:
+            print(f"建不了：{exc}")
+            return 1
         run_id = runs[0].id
+        dirty = provenance.dirty
 
     print(f"实验 #{run_id}（{args.name}）已建，投了 {len(task_ids)} 条 EVAL_TASK 作业")
+    if dirty:
+        print("⚠ 工作区有未提交改动，这次实验已标 dirty=true（协议 C-28：不得进排行榜）")
     print("起 Worker 来跑：python -m app.worker")
     print(f"看进度 / 取消 / 补跑：python -m cli.experiment status --run {run_id}")
     return 0
@@ -292,6 +305,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_enqueue.add_argument("--name", default="adhoc", help="实验名")
     p_enqueue.add_argument(
         "--task", action="append", help="只投这几道题（task_id，可重复给）。不给就投这一版全部"
+    )
+    p_enqueue.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="工作区不干净也建（协议 C-28：结果标 dirty=true，不得进排行榜）",
     )
     p_enqueue.set_defaults(func=cmd_enqueue)
 
