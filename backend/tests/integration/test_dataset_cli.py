@@ -33,6 +33,7 @@ from app.domain.enums import (
     LifecycleStatus,
     TaskValidationState,
 )
+from app.evaluation import manifest as manifest_mod
 from app.infrastructure.db import create_session_factory, session_scope
 from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkSetItem, BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun
@@ -52,7 +53,16 @@ def cli_world(engine: Engine, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setattr(dataset_cli, "MANIFEST_ROOT", tmp_path / "manifests")
     monkeypatch.setattr(dataset_cli, "EXPORT_ROOT", tmp_path / "exports")
     # 工作区干不干净是外部事实，测试里不能靠它。默认给一个干净的。
+    #
+    # 两处都要打：`publish` 自己读 git（写进指纹文件），`gate` 走
+    # `collect_provenance()` 读 git（协议 C-27 的强制点在那里）。
+    # 两个模块都是 `from ... import git_state`，名字在 import 时就绑死了，
+    # 只打源头模块不起作用。
     monkeypatch.setattr(dataset_cli, "git_state", lambda: ("c0ffee" * 6 + "abcd", False))
+    monkeypatch.setattr(manifest_mod, "git_state", lambda: ("c0ffee" * 6 + "abcd", False))
+    # 建实验时会顺手记一句"跑在什么机器上"。那一项允许两次运行不同，
+    # 测试里固定成 None，免得 docker 在不在把用例变成时灵时不灵的
+    monkeypatch.setattr(manifest_mod, "host_facts", lambda: None)
 
     factory = create_session_factory(engine)
     with session_scope(factory) as session:

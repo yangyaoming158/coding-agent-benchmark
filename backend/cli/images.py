@@ -39,7 +39,7 @@ import json
 import shutil
 import sys
 import tempfile
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -48,10 +48,12 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.enums import ArtifactKind, ArtifactOwnerType, ImageBuildStatus
+from app.evaluation.manifest import block
 from app.infrastructure.config import REPO_ROOT, Settings, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models.artifact import Artifact
 from app.infrastructure.models.benchmark import EnvironmentSpec
+from app.infrastructure.models.evaluation import EvaluationRun
 from app.sandbox.container import SandboxError, inspect_image
 from app.sandbox.git_cli import GitError
 from app.sandbox.images import (
@@ -537,9 +539,16 @@ def _gc_inputs(*, use_db: bool) -> tuple[list[str], list[str]]:
     配方是"我们打算要的"，表是"已经有题目在用的"。只看配方，会把一个已经被题目
     引用、但配方文件被误删的环境镜像删掉。
 
-    **不许删的 digest** = `environment_specs.image_digest` 整列。协议 C-36 要求
-    运行记录按 digest 引用镜像，删掉一个还被记着的 digest，等于把那次实验的
-    可复现性抹掉。`--no-db` 时这一列拿不到，所以那种模式下只删"环境已经不存在"的，
+    **不许删的 digest** = `environment_specs.image_digest` 整列 ∪
+    **所有运行 manifest 里引用过的 digest**。协议 C-36 要求运行记录按 digest 引用
+    镜像，删掉一个还被记着的 digest，等于把那次实验的可复现性抹掉。
+
+    第二份是 E5-T4 补的，补的是一个真洞：`environment_specs.image_digest`
+    只有一列，环境**一重建就被新 digest 覆盖**，老实验当初钉的那个立刻变成
+    "没人引用"，下一次 gc 就把它删了 —— 而那次实验的 manifest 还记着它。
+    表现是 `cli.experiment replay` 报"镜像已经不在本地"，且无法挽回。
+
+    `--no-db` 时这两列都拿不到，所以那种模式下只删"环境已经不存在"的，
     不碰任何没有 tag 的旧版本。
     """
     live = {r.environment_id for r in load_recipes(RECIPES_DIR)}
@@ -550,8 +559,23 @@ def _gc_inputs(*, use_db: bool) -> tuple[list[str], list[str]]:
         rows = session.execute(
             sa.select(EnvironmentSpec.environment_id, EnvironmentSpec.image_digest)
         ).all()
+        keep = {row[1] for row in rows if row[1]} | _digests_in_run_manifests(session)
     live |= {row[0] for row in rows}
-    return sorted(live), [row[1] for row in rows if row[1]]
+    return sorted(live), sorted(keep)
+
+
+def _digests_in_run_manifests(session: Session) -> set[str]:
+    """所有实验的 manifest 里引用过的镜像 digest（协议 C-36）。
+
+    实验跑完之后这些 digest 仍然要护着：manifest 是"这次实验在什么环境里跑的"
+    唯一记录，镜像没了，那次实验就再也重建不出等价环境。
+    """
+    digests: set[str] = set()
+    for (manifest,) in session.execute(sa.select(EvaluationRun.manifest)):
+        for entry in block(manifest or {}, "images").values():
+            if isinstance(entry, Mapping) and entry.get("digest"):
+                digests.add(str(entry["digest"]))
+    return digests
 
 
 def cmd_gc(args: argparse.Namespace) -> int:

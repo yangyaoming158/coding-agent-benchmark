@@ -46,6 +46,7 @@ from app.domain.enums import EvaluationRunStatus, JobState, JobType, PatchKind
 from app.domain.protocol import MAX_ATTEMPTS_PER_TASK
 from app.evaluation import progress as progress_mod
 from app.evaluation.jobs import EvalTaskPayload, enqueue_eval_task, normalized_patch_key
+from app.evaluation.manifest import RunProvenance, build_manifest
 from app.infrastructure.logging import get_logger
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun, PatchArtifact
 from app.infrastructure.models.job import JobQueue
@@ -91,13 +92,9 @@ def create_runs(
     session: Session,
     *,
     name: str,
-    benchmark_set_id: int,
-    agent_config_id: int,
     task_ids: Sequence[int],
-    agent_concurrency: int,
-    sandbox_concurrency: int,
+    provenance: RunProvenance,
     rounds: int = 1,
-    job_max_attempts: int = 3,
     created_by: str | None = None,
 ) -> list[EvaluationRun]:
     """建 `rounds` 个实验，每个都把 `task_ids` 展开成 EVAL_TASK 作业。**不 commit**。
@@ -105,23 +102,51 @@ def create_runs(
     `total_tasks` 在这里就写死。它是严格解决率的分母（协议 C-21：
     "RESOLVED 的题数 / 题库里的全部题数"），跑的过程中不重算 ——
     重算的话，一道题因为作业死了没留下记录，分母会跟着缩水，解决率反而变好看。
+
+    ## 为什么 `provenance` 是必填的（E5-T4）
+
+    生产代码里只有这一个地方建 `EvaluationRun`，三个 CLI 入口和以后的
+    `POST /api/runs` 全走它。把"可复现性清单"做成必填参数，等于让
+    **建不出一个 `manifest = {}` 的运行** —— E5-T4 之前 `cli.experiment start`
+    建出来的就是空的，那种运行事后说不清跑的是哪版代码、哪个镜像。
+
+    数据集、Agent、并发限额这几项**不再单独传**，全从 `provenance` 里取：
+    分开传的话，行上写的 `agent_concurrency` 和 manifest 里记的可以不一样，
+    而两者不一致时没有任何东西会报错。
+
+    协议 C-27（工作区不干净拒绝启动）的强制点在
+    `app.evaluation.manifest.collect_provenance()`，不在这里 —— 理由见那个模块的文档。
     """
     if not task_ids:
         raise OrchestrationError("一道题都没选中，不建实验")
     if rounds < 1:
         raise OrchestrationError(f"轮数至少是 1，收到 {rounds}")
+    if provenance.dataset.selected_task_count != len(task_ids):
+        raise OrchestrationError(
+            f"manifest 记的题数（{provenance.dataset.selected_task_count}）和实际要投的"
+            f"（{len(task_ids)}）对不上。凭证和题目清单必须是同一次挑出来的"
+        )
 
+    manifest = build_manifest(provenance)
     runs: list[EvaluationRun] = []
     for index in range(1, rounds + 1):
         run = EvaluationRun(
             name=name if rounds == 1 else f"{name} · 第 {index} 轮",
-            benchmark_set_id=benchmark_set_id,
-            agent_config_id=agent_config_id,
+            benchmark_set_id=provenance.dataset.benchmark_set_id,
+            agent_config_id=provenance.agent.agent_config_id,
             status=EvaluationRunStatus.QUEUED,
-            agent_concurrency=agent_concurrency,
-            sandbox_concurrency=sandbox_concurrency,
+            agent_concurrency=provenance.limits["agent_concurrency"],
+            sandbox_concurrency=provenance.limits["sandbox_concurrency"],
             total_tasks=len(task_ids),
             created_by=created_by,
+            # 协议 C-67：创建时写入，**禁止**事后修改。显式写而不是靠列默认值 ——
+            # 靠默认值的话，manifest 里记的版本号和列里的可以是两个值
+            protocol_version=provenance.protocol_version,
+            # 协议 C-28：脏工作区跑出来的结果不得进排行榜
+            dirty=provenance.dirty,
+            # 每轮一份独立的字典。共用一个的话，SQLAlchemy 的 JSONB 变更跟踪
+            # 会把几行指向同一个对象，改一处动全部
+            manifest=dict(manifest),
         )
         session.add(run)
         session.flush()  # 要 id 去投作业
@@ -130,15 +155,17 @@ def create_runs(
                 session,
                 evaluation_run_id=run.id,
                 benchmark_task_id=task_id,
-                max_attempts=job_max_attempts,
+                max_attempts=provenance.limits["job_max_attempts"],
             )
         logger.info(
             "evaluation_run_created",
             evaluation_run_id=run.id,
             name=run.name,
             tasks=len(task_ids),
-            agent_concurrency=agent_concurrency,
-            sandbox_concurrency=sandbox_concurrency,
+            agent_concurrency=run.agent_concurrency,
+            sandbox_concurrency=run.sandbox_concurrency,
+            harness_git_sha=provenance.harness_git_sha,
+            dirty=provenance.dirty,
         )
         runs.append(run)
     return runs

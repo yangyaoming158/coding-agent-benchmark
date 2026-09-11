@@ -31,7 +31,7 @@ from app.infrastructure.models.job import JobQueue
 from app.worker.concurrency import ConcurrencyLimits
 from app.worker.loop import Worker
 from app.worker.registry import HandlerRegistry, JobContext
-from tests.integration.factories import Seeded, seed_minimal, wipe
+from tests.integration.factories import Seeded, provenance_for, seed_minimal, wipe
 
 pytestmark = pytest.mark.db
 
@@ -280,11 +280,8 @@ def seeded_run(factory: sessionmaker[Session]) -> tuple[Seeded, int]:
         (run,) = create_runs(
             session,
             name="取消测试",
-            benchmark_set_id=seeded.benchmark_set_id,
-            agent_config_id=seeded.agent_config_id,
             task_ids=seeded.task_ids,
-            agent_concurrency=2,
-            sandbox_concurrency=1,
+            provenance=provenance_for(seeded, agent_concurrency=2, sandbox_concurrency=1),
         )
         session.commit()
         return seeded, run.id

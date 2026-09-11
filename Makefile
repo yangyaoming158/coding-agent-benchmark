@@ -40,6 +40,11 @@ LINT_PATHS := . ../scripts ../docs
 AGENT ?= oracle
 NAME ?= adhoc
 
+# 建实验的两个目标（dataset-gate / enqueue）在工作区不干净时会被协议 C-27 拦下。
+# 开发期确实要带着未提交改动跑一把时：make enqueue ALLOW_DIRTY=1
+# 放行的实验会被标 dirty=true，按 C-28 不得进排行榜（E5-T4）。
+DIRTY_FLAG := $(if $(ALLOW_DIRTY),--allow-dirty,)
+
 lint:                ## 代码检查（含 scripts/ 和 docs/ 下的脚本）
 	$(UV) ruff check $(LINT_PATHS)
 	$(UV) ruff format --check $(LINT_PATHS)
@@ -179,11 +184,11 @@ SLUG ?= $(DATASET)
 dataset-stage:       ## 冻快照：把该 dataset 全部 VALID 的题写进 benchmark_set_items
 	$(UV) python -m cli.dataset stage --dataset-id $(DATASET) --slug $(SLUG)
 
-dataset-gate:        ## 建 Oracle / Noop 两个门禁实验并投队列（跑要 make worker）
-	$(UV) python -m cli.dataset gate --slug $(SLUG)
+dataset-gate:        ## 建 Oracle / Noop 两个门禁实验并投队列（脏工作区加 ALLOW_DIRTY=1）
+	$(UV) python -m cli.dataset gate --slug $(SLUG) $(DIRTY_FLAG)
 
 dataset-publish:     ## 查门禁（C-50：Oracle 100% / Noop 0%），过了才发布
-	$(UV) python -m cli.dataset publish --slug $(SLUG)
+	$(UV) python -m cli.dataset publish --slug $(SLUG) $(DIRTY_FLAG)
 
 dataset-show:        ## 看有哪些数据集版本
 	$(UV) python -m cli.dataset show
@@ -195,7 +200,7 @@ worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker
 
 enqueue:             ## 建一次实验，把某一版数据集的题投进队列（AGENT=oracle NAME=adhoc）
-	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME) --set $(SLUG)
+	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME) --set $(SLUG) $(DIRTY_FLAG)
 
 queue:               ## 看作业队列现状
 	$(UV) python -m cli.queue status

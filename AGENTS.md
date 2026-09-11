@@ -409,6 +409,20 @@ make dataset-gate && make worker   # Oracle / Noop 门禁，22 × 2 次评测
 make dataset-publish               # 门禁过了才发布
 ```
 
+**工作区不干净时，建实验的那几步会被拒**（协议 C-27，E5-T4 落的）。
+`make dataset-gate` / `make dataset-publish` / `make enqueue` 和
+`python -m cli.experiment start` 都会先查一次 `git status --porcelain`。
+重灌时如果手上带着未提交的改动：
+
+```bash
+make dataset-gate ALLOW_DIRTY=1     # Makefile 的口子
+python -m cli.experiment start --agent oracle --allow-dirty   # CLI 的口子
+```
+
+放行的实验会被标 `dirty = true`，按 C-28 **不得进排行榜**。这不是一句提醒，
+是记在 `evaluation_runs.dirty` 那一列上的事实（manifest 里也记着一份），
+排行榜按它过滤 —— 前提是排行榜那一侧真去查这一列，那还没写（E7、E10-T3）。
+
 逃生口：`BENCH_TEST_FORCE_DB_RESET=1`。
 
 **`promote-assemble` 一定要给 `--limit`。** 不给的话它会把**全部** 51 条探测通过的候选

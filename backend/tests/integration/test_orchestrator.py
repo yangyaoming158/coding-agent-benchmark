@@ -41,7 +41,7 @@ from app.evaluation.progress import lock_run, refresh
 from app.infrastructure.db import create_session_factory
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun, PatchArtifact
 from app.infrastructure.models.job import JobQueue
-from tests.integration.factories import Seeded, seed_minimal, wipe
+from tests.integration.factories import Seeded, provenance_for, seed_minimal, wipe
 
 pytestmark = pytest.mark.db
 
@@ -71,11 +71,8 @@ def make_runs(factory: sessionmaker[Session], seeded: Seeded, *, rounds: int = 1
         runs = create_runs(
             session,
             name="测试",
-            benchmark_set_id=seeded.benchmark_set_id,
-            agent_config_id=seeded.agent_config_id,
             task_ids=seeded.task_ids,
-            agent_concurrency=4,
-            sandbox_concurrency=2,
+            provenance=provenance_for(seeded),
             rounds=rounds,
         )
         session.commit()
@@ -192,11 +189,8 @@ def test_creating_a_run_without_tasks_is_refused(
         create_runs(
             session,
             name="空的",
-            benchmark_set_id=seeded.benchmark_set_id,
-            agent_config_id=seeded.agent_config_id,
             task_ids=[],
-            agent_concurrency=1,
-            sandbox_concurrency=1,
+            provenance=provenance_for(seeded, task_ids=()),
         )
 
 

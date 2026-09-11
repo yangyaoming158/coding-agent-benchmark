@@ -913,11 +913,63 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **Goal**：按 agent_config 分桶令牌桶；429 自动降并发；`external_wait_ms` 记账
 - **Req**：MET-02 · **Deps**：E5-T2 · **P1 · C:M · E:1d · 🔑**
 
-### E5-T4 运行 Manifest 与可复现性
+### E5-T4 运行 Manifest 与可复现性 ✅ 已于 2026-09-11 完成
 - **Goal**：记录镜像 digest 表、数据集哈希、harness git sha、Agent 版本/模型/参数、种子、环境
-- **Req**：NFR-02 · **Deps**：E5-T2
-- **AC**：由 manifest 可重建一次等价运行；两次运行的 manifest diff 只在时间戳上不同
-- **P0 · C:S · E:0.5d**
+- **Req**：NFR-02 · **Deps**：E5-T2 · **Modules**：`evaluation/manifest`
+- **Output**：`python -m cli.experiment {manifest,replay}`；`evaluation_runs.manifest` 真写满
+- **AC**（**卡片原本只有第 7 条那半句**，其余十条是 2026-09-11 开工前定的。
+  原卡没说"可重建"到哪一步、记哪些字段、对不上时怎么办）：
+  1. `create_runs()` 必须收一个 provenance 凭证才建实验；**没有任何生产路径能建出
+     `manifest = {}` 的运行**（E5-T4 之前 `cli.experiment start` 建的就是空的）
+  2. 工作区不干净时三个 CLI 入口一律拒绝建实验（协议 C-27）；`--allow-dirty` 放行，
+     但 `evaluation_runs.dirty` 和 manifest 里都如实记 `true`（C-28：不得进排行榜）
+  3. manifest 至少记七组事实，**全是启动时就知道的**：harness sha + dirty、
+     数据集哈希（沿用 E1-T6 的 `dataset_snapshot_digest` 键）、数据集身份、
+     Agent 版本/模型/参数/`config_hash`、镜像 digest 表、确定性环境变量 +
+     环境变量白名单的**名字**、并发与重试限额
+  4. "种子"如实说明落在哪：运行侧只有 `PYTHONHASHSEED=0`，**不另造一个恒为某值的
+     `seed` 字段**（题目侧的抽样种子在题目定义里，由数据集哈希覆盖）
+  5. manifest 分两类键：必须逐字相同的，和允许不同的（`created_at` / `host` /
+     `replay_of`）。NFR-02 要的是**异机**异时复现，不分类的话这条 AC 在第二台机器上
+     永远过不了；而不记 `host` 的话两次结果对不上时查不了
+  6. `cli.experiment manifest --run N` 打印清单，给两个 `--run` 就是字段级 diff，
+     分开报"必须相同的差了几处"和"允许不同的差了几处"，返回码能直接当断言用
+  7. **由 manifest 可重建一次等价运行**：`cli.experiment replay --run N` 过六项校验
+     后建等价实验并打印新旧 diff；**两次运行的 diff 只在时间戳上不同**
+  8. 六项校验任一不过都点名说差在哪：协议版本、快照摘要、题目内容漂移、
+     题目清单（原来投子集的话那几道必须还在）、镜像 digest 还在不在、Agent 配置还在不在
+  9. **Worker 起容器按实验 manifest 里钉死的 digest**，不按 `environment_specs` 现值
+     （协议 C-36）。manifest 里没记的（老运行、没建过镜像的环境）退回按 tag 起
+  10. `cli.images gc` 的保护名单加上**所有运行 manifest 引用过的 digest**
+  11. `cli/dataset.py` 里手写 `run.manifest = {...}` 那段删掉，manifest 只有一个写入口
+- **不做**（理由见 `07-platform-architecture.md` §13.5 第二节）：不比对两次运行的
+  **结果**、不算逐实例一致率（协议 C-73 说测试执行的可复现是目标不是保证，
+  逐实例一致率是 MET-01 的口径 → E10-T5）；不重放外部预测补丁（→ E3-T8）
+- **P0 · C:S · E:0.5d（实际 1d）**
+- **实际交付**（2026-09-11）：`app/evaluation/manifest.py`（凭证采集 + 拼 manifest +
+  逐字段 diff）+ `app/domain/manifest.py`（键名词汇表和 `VOLATILE_KEYS`）+
+  `app/infrastructure/gitmeta.py`（git 事实，从 `cli/dataset.py` 搬出来，两处共用一份）+
+  `python -m cli.experiment {manifest,replay}`。**没有新迁移** —— `manifest` /
+  `dirty` / `protocol_version` 三列在 0001 里就有，之前只是没人往里写。
+  **C-27 的强制点只有一处**：生产代码里只有 `create_runs()` 建 `EvaluationRun`，
+  但它**自己不调 git** —— 集成测试也调 `create_runs()`，而开发时工作区永远是脏的，
+  那样每个集成测试都会红。拆成"`collect_provenance()` 取事实兼拒绝" +
+  "`create_runs()` 收必填凭证写库"，生产路径漏不掉、测试不被误伤。
+  顺带把数据集 id、Agent 配置 id、两个并发数从 `create_runs()` 参数表删掉全从凭证取 ——
+  分开传的话行上的 `agent_concurrency` 和 manifest 里记的可以是两个值，而且不一致时
+  没有任何东西会报错。
+  **写代码时撞出来的两个真问题**：① `replay` 光比快照摘要**抓不到"题目被改了"** ——
+  `items_of()` 读的是 `benchmark_set_items` 里**冻住**的哈希，题改了它一动不动，
+  而 Worker 跑题读的是 `benchmark_tasks.raw_definition` 活的那一份；补了一项漂移检查
+  （复用 E1-T6 的 `drift()`）。② `cli.images gc` 只护 `environment_specs.image_digest`
+  **当前那一列**，环境一重建就被新 digest 覆盖，老实验 manifest 里钉的那个立刻变成
+  "没人引用"、下一次 gc 就删 —— 而那次实验的可复现性全靠它。
+  **实测**（`benchmark-dev@v1`，22 道题）：脏工作区建实验被 C-27 拦下；`--allow-dirty`
+  建出 #99；`replay --run 99` 建出 #100；两份 manifest 的必须相同字段**全部一致**，
+  差异只有 `created_at` 和 `replay_of`。两个实验各 22/22 解决、0 平台故障，
+  44 次执行**没有一次退回按 tag 起容器**（日志里 `image_not_pinned` 出现 0 次）。
+  新增 35 个测试（单元 19 + 集成 16），全量 1683 passed / 4 skipped。
+  十节实现记录在 `07-platform-architecture.md` §13.5。
 
 ### E5-T5 token→成本估算（协议纪律 3 的 `estimated`）
 - **Goal**：给 `agent_configs` 配一张单价表（输入 / 输出 / 缓存读**分开计价**），把 `cost_source=unavailable` 的 attempt 按 `token_usage × 单价` 估出 `cost_usd` 并标成 `estimated`
