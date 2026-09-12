@@ -3,7 +3,7 @@
 SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
-        db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
+        db-up db-down db-reset db-psql db-test migrate migrate-down migrate-check seed \
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
         promote-probe promote-assemble promote-review promote-report \
         dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
@@ -23,6 +23,16 @@ AIDER_IMAGE := bench-agent:py311-aider
 CLAUDE_CODE_IMAGE := bench-agent:py311-claude-code
 UV := cd $(BACKEND) && uv run
 
+# ── 测试跑在独立的库上（#88）────────────────────────────────
+# 跑**任何一个**集成测试都会 `downgrade base` + `upgrade head`，整库连表带数据抹掉重建。
+# 指向开发库的话，`make check` 乃至单跑一个集成测试文件都会把挖好的候选、验完的题
+# 一起清掉（2026-09-09 排查过两次，2026-09-10 又清掉过 31 道题）。
+# 换个库名就隔开了：开发库 bench 不动，测试跑 bench_test。CI 想换库名：
+#   make test TEST_DATABASE_URL=postgresql+psycopg://...
+# 库名里要带 test —— 不带的话 tests/integration/conftest.py 会打一条醒目的警告。
+TEST_DATABASE_URL := postgresql+psycopg://bench:bench@localhost:5433/bench_test
+UV_TEST := cd $(BACKEND) && BENCH_DATABASE_URL=$(TEST_DATABASE_URL) uv run
+
 help:                ## 显示这份帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
@@ -37,8 +47,15 @@ install:             ## 安装前后端依赖并装好提交钩子
 LINT_PATHS := . ../scripts ../docs
 
 # `make enqueue` 的默认参数，命令行可以覆盖：make enqueue AGENT=noop NAME=noop-smoke
-AGENT ?= oracle
-NAME ?= adhoc
+#
+# 这些默认值一律用 `:=` 不用 `?=`。`?=` 的语义是"没定义才赋值"，而 make 把**环境变量
+# 也算已定义** —— WSL 里恰好有个叫 NAME 的环境变量（Windows 侧透过来的计算机名），
+# 于是 `make enqueue` 建出来的实验名成了 DESKTOP-D3QQNH3，实验列表里一排主机名
+# 谁也分不清（#89，2026-09-11 在 `make -n enqueue` 的回显里看见的）。
+# `:=` 不看环境变量，而命令行赋值仍然优先（命令行 > := > 环境变量），
+# 所以 `make enqueue NAME=noop-smoke` 照常工作。
+AGENT := oracle
+NAME := adhoc
 
 # 建实验的两个目标（dataset-gate / enqueue）在工作区不干净时会被协议 C-27 拦下。
 # 开发期确实要带着未提交改动跑一把时：make enqueue ALLOW_DIRTY=1
@@ -59,19 +76,25 @@ type:                ## 类型检查
 imports:             ## 模块边界检查（§14.2 的依赖方向）
 	$(UV) lint-imports
 
-test:                ## 快速测试（不含需要 Docker 和真实大模型的）
-	$(UV) pytest -m "not docker and not agent"
+# 测试库不存在就建、建好升到最新。数据库没起来时只打一条提示：
+# 单元测试不需要库，需要库的用例连不上会自己跳过，不该在这里就把 make 干掉。
+db-test:             ## 准备测试库 bench_test（建库 + 升到最新，测试目标会自动调）
+	@./scripts/dev_db.sh test-db && $(UV_TEST) alembic upgrade head >/dev/null \
+	  || echo "⚠ 测试库没准备好：需要数据库的用例会跳过（起库：make db-up）"
+
+test: db-test        ## 快速测试（不含需要 Docker 和真实大模型的）
+	$(UV_TEST) pytest -m "not docker and not agent"
 
 # 要排掉 agent：那些用例会真的调大模型，是要花钱的。
 # 夜间跑一次 test-docker 就把额度烧掉一截，而且没人会注意到
-test-docker:         ## 只跑需要 Docker 的沙箱测试（不含花钱的）
-	$(UV) pytest -m "docker and not agent"
+test-docker: db-test ## 只跑需要 Docker 的沙箱测试（不含花钱的）
+	$(UV_TEST) pytest -m "docker and not agent"
 
-test-agent:          ## 跑会真的调用大模型的用例（要 API Key，会花钱，手动触发）
-	$(UV) pytest -m agent
+test-agent: db-test  ## 跑会真的调用大模型的用例（要 API Key，会花钱，手动触发）
+	$(UV_TEST) pytest -m agent
 
-test-all:            ## 全部测试
-	$(UV) pytest
+test-all: db-test    ## 全部测试
+	$(UV_TEST) pytest
 
 check: lint type imports test   ## 提交前跑一遍：检查 + 类型 + 边界 + 测试
 
@@ -139,7 +162,7 @@ survey-measure:      ## 仓库选型第二段：容器里实测安装与测试�
 
 # 默认挖一个已经有 env 镜像的仓库：挖出候选之后能直接接上验证流水线跑通闭环。
 # 换仓库：make mine MINE_REPO=sqlfluff/sqlfluff
-MINE_REPO ?= pallets/click
+MINE_REPO := pallets/click
 
 mine:                ## GitHub 挖掘：merged PR + 关联 issue → task_candidates（要网络）
 	$(UV) python -m cli.mine run --repo $(MINE_REPO)
@@ -151,7 +174,7 @@ prescreen-clean:     ## 候选清洗：脱敏 + 拆补丁 + 抽候选 F2P（要�
 	$(UV) python -m cli.prescreen clean
 
 # 会真的调大模型、会花钱。先用 SCORE_LIMIT 小批量试，确认分数分布合理再全量。
-SCORE_LIMIT ?=
+SCORE_LIMIT :=
 
 prescreen:           ## LLM 预筛打分（**要 API Key，会花钱**）
 	$(UV) python -m cli.prescreen score $(if $(SCORE_LIMIT),--limit $(SCORE_LIMIT),)
@@ -161,7 +184,7 @@ prescreen-report:    ## 清洗与分数分布（读库，不联网不花钱）
 
 # ── E8-T2：候选 → 题目 ─────────────────────────────────────
 # 顺序是 probe → assemble → images build（写回 digest）→ validate-tasks → export-review
-PROBE_LIMIT ?=
+PROBE_LIMIT :=
 
 promote-probe:       ## 探测轮：实测证伪 F2P、派生 P2P（要 Docker，一条起两个容器）
 	$(UV) python -m cli.promote probe $(if $(PROBE_LIMIT),--limit $(PROBE_LIMIT),)
@@ -178,8 +201,8 @@ promote-report:      ## 漏斗报表：每一层剩多少、掉队的为什么
 # ── E1-T6：数据集版本化与发布 ──────────────────────────────
 # 顺序是 stage → gate → worker（跑门禁）→ publish。DATASET 和 SLUG 可以覆盖：
 #   make dataset-stage DATASET=benchmark-dev
-DATASET ?= benchmark-dev
-SLUG ?= $(DATASET)
+DATASET := benchmark-dev
+SLUG := $(DATASET)
 
 dataset-stage:       ## 冻快照：把该 dataset 全部 VALID 的题写进 benchmark_set_items
 	$(UV) python -m cli.dataset stage --dataset-id $(DATASET) --slug $(SLUG)

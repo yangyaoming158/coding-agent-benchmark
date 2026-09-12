@@ -116,7 +116,7 @@ python3 scripts/check_env.py      # 环境自检，把踩过的坑固化成了�
   `scripts/sync_issues.py` 从 `docs/plan/10-tasks-plan.md` 生成的，一张卡一个。
   不认领的话，两个 AI 助手同时做同一张卡是完全可能的 —— 它们不会互相打招呼
 - **每人一台自己的机器、自己的数据库。** 开发库是本机的，而且
-  **跑任何一个集成测试都会把它清空**（`AGENTS.md` 第 9 节）。共用一个库等于互相清数据
+  **跑任何一个集成测试都会把它连上的库清空**（`AGENTS.md` 第 9 节）。共用一个库等于互相清数据
 - **分支和 PR 一条都不能省。** AI 助手不会像人一样"等一下先同步"，
   它们会自信地覆盖。分支加 PR 是唯一能把并行改动序列化的机制
 
@@ -234,6 +234,25 @@ api → evaluation / benchmark / report
 写测试时注意一件事：**证明约束会拦，比证明正常路径能过更重要**。
 正常路径出问题很快就会被发现，约束失效则会一直静默，直到出报告时才暴露。
 
+### 测试跑在独立的库上，别绕开 Makefile
+
+集成测试的第一件事是 `downgrade base` + `upgrade head`——把它连上的库整个抹掉重建。
+所以 `make test` / `make check` / `make test-docker` / `make test-all` 都指向
+独立的测试库 `bench_test`（库不存在会自动建），开发库 `bench` 不受影响。
+
+**绕开 Makefile 直接 `uv run pytest` 就会连回开发库，一条集成测试就能把它清空。**
+真要手动跑，自己把库指过去：
+
+```bash
+cd backend
+BENCH_DATABASE_URL=postgresql+psycopg://bench:bench@localhost:5433/bench_test \
+  uv run pytest tests/integration/test_mining_persistence.py
+```
+
+库名里不含 `test` 时会打一条醒目的警告（不拒绝——CI 的库名可能不一样）。
+看见那条警告，就说明这一跑正在清开发库；重灌一遍要二十分钟。
+CI 换库名：`make test TEST_DATABASE_URL=postgresql+psycopg://...`。
+
 ---
 
 ## 8. 常用命令
@@ -246,6 +265,7 @@ make test            # 只跑测试
 make dev             # 同时起后端 API 和前端
 
 make db-up           # 起 Postgres
+make db-test         # 建测试库 bench_test（make test 会自动调）
 make db-reset        # 删掉容器和数据重来
 make db-psql         # 连进去看
 make migrate         # 升到最新

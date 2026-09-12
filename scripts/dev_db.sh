@@ -7,6 +7,7 @@
 #   ./scripts/dev_db.sh down    停容器，数据保留
 #   ./scripts/dev_db.sh reset   删掉容器和数据，重新起一个空库
 #   ./scripts/dev_db.sh psql    连进去看
+#   ./scripts/dev_db.sh test-db 建独立的测试库（集成测试跑在它上面，见 Makefile）
 set -euo pipefail
 
 CONTAINER=bench-postgres
@@ -15,6 +16,9 @@ PORT=5433
 DB=bench
 USER=bench
 PASSWORD=bench
+# 集成测试专用的库。跑任何一个集成测试都会 downgrade base + upgrade head 把它清空，
+# 所以它必须和开发库 $DB 分开（#88）。
+TEST_DB=bench_test
 
 start_container() {
   if docker ps -a --format '{{.Names}}' | grep -qx "$CONTAINER"; then
@@ -36,10 +40,32 @@ start_container() {
   return 1
 }
 
+# 建测试库。已经有了就什么都不做；容器没在跑就直接放行 ——
+# 调用方是 `make test`，那里连不上数据库的用例会自己跳过，不该因此整个 make 失败。
+ensure_test_db() {
+  if ! command -v docker >/dev/null 2>&1; then
+    echo "没有 docker 命令，跳过建测试库" >&2
+    return 1
+  fi
+  if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+    echo "$CONTAINER 没在跑，跳过建测试库（起库：make db-up）" >&2
+    return 1
+  fi
+  local exists
+  exists=$(docker exec "$CONTAINER" psql -U "$USER" -d postgres -tAc \
+    "select 1 from pg_database where datname = '$TEST_DB'" 2>/dev/null || true)
+  if [[ "$exists" != "1" ]]; then
+    docker exec "$CONTAINER" psql -U "$USER" -d postgres \
+      -c "CREATE DATABASE $TEST_DB OWNER $USER" >/dev/null
+    echo "已建测试库 $TEST_DB"
+  fi
+}
+
 case "${1:-up}" in
   up)    start_container ;;
   down)  docker stop "$CONTAINER" >/dev/null && echo "已停止 $CONTAINER（数据保留）" ;;
   reset) docker rm -f "$CONTAINER" >/dev/null 2>&1 || true; start_container ;;
   psql)  docker exec -it "$CONTAINER" psql -U "$USER" -d "$DB" ;;
-  *)     echo "用法：$0 {up|down|reset|psql}" >&2; exit 1 ;;
+  test-db) ensure_test_db ;;
+  *)     echo "用法：$0 {up|down|reset|psql|test-db}" >&2; exit 1 ;;
 esac
