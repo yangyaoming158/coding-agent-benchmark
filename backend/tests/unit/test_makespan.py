@@ -334,3 +334,153 @@ def test_rejects_nonsense_inputs(field: str, value: float) -> None:
     base[field] = value
     with pytest.raises(ValueError, match=field):
         MakespanInputs(**base)  # type: ignore[arg-type]
+
+
+# ── 第三项：一道题拆不开并行 ────────────────────────────────
+
+
+def test_single_task_floor_is_a_lower_bound() -> None:
+    """最慢那道题的耗时本身就是 makespan 的下限。
+
+    探测跑实测出来的那件事：4 次运行、8 个槽位，其中一次单独跑了 8.25 分钟。
+    前两项摊平算只有 2.1 分钟，而真实 makespan 不可能小于那 8.25 分钟 ——
+    一道题不能拆开让两个槽位一起跑。
+    """
+    inputs = MakespanInputs(
+        runs=4,
+        agent_minutes=4.2,
+        other_minutes=0.08,
+        agent_limit=10,
+        sandbox_limit=4,
+        worker_slots=8,
+        overhead_ratio=0.0,
+        longest_task_minutes=8.25,
+    )
+    projection = project(inputs)
+
+    assert projection.agent_side_minutes == pytest.approx(2.1)
+    assert projection.theoretical_minutes == pytest.approx(8.25)
+    assert projection.bottleneck == "single_task"
+
+
+def test_single_task_floor_never_binds_at_300_runs() -> None:
+    """投影 300 次时这一项永远不是瓶颈，所以 §18.2 的结论不受影响。
+
+    最慢一道题顶多是 `agent_timeout_s=720` 的 12 分钟，而 Agent 侧是一百多分钟。
+    """
+    inputs = MakespanInputs(
+        runs=TARGET_RUNS,
+        agent_minutes=4.2,
+        other_minutes=0.08,
+        agent_limit=10,
+        sandbox_limit=4,
+        worker_slots=8,
+        longest_task_minutes=12.0,
+    )
+    projection = project(inputs)
+
+    assert projection.bottleneck == "agent"
+    assert projection.theoretical_minutes == pytest.approx(projection.agent_side_minutes)
+
+
+def test_documented_table_is_unaffected_by_the_new_term() -> None:
+    """不给 `longest_task_minutes` 时这一项是 0，§18.2 原表照旧能复现。"""
+    projection = project(_doc_row(agent_limit=8, sandbox_limit=4))
+    assert projection.single_task_floor_minutes == 0.0
+    assert projection.theoretical_minutes == pytest.approx(225.0)
+
+
+def test_overhead_from_a_small_batch_is_nonsense_without_the_floor() -> None:
+    """这条钉的是探测跑那个 296%：不算第三项，反算出来的损耗系数是垃圾。
+
+    两个数摆在一起才说明问题 —— 所以这条测试同时算两遍。
+    """
+    common = {
+        "runs": 4,
+        "agent_minutes": 4.2,
+        "other_minutes": 0.08,
+        "agent_limit": 10,
+        "sandbox_limit": 4,
+        "worker_slots": 8,
+        "overhead_ratio": 0.0,
+    }
+    without = project(MakespanInputs(**common))  # type: ignore[arg-type]
+    with_floor = project(MakespanInputs(**common, longest_task_minutes=8.25))  # type: ignore[arg-type]
+
+    bogus = measured_overhead(actual_minutes=8.3, theoretical_minutes=without.theoretical_minutes)
+    sane = measured_overhead(actual_minutes=8.3, theoretical_minutes=with_floor.theoretical_minutes)
+
+    assert bogus > 2.5, "不算第三项应该算出一个离谱的大数（实测 296%）"
+    assert sane < 0.05, "算上第三项应该接近 0 —— 那批活根本没排过队"
+
+
+# ── 批次够不够大 ────────────────────────────────────────────
+
+
+def test_small_batch_does_not_saturate_slots() -> None:
+    """探测跑那 4 次填不满 8 个槽位，所以它反算不出调度损耗。"""
+    inputs = MakespanInputs(
+        runs=4,
+        agent_minutes=4.2,
+        other_minutes=0.08,
+        agent_limit=10,
+        sandbox_limit=4,
+        worker_slots=8,
+    )
+    assert not inputs.saturates_slots
+
+
+def test_full_pilot_batch_saturates_slots() -> None:
+    """22 题 × 2 Agent × 3 轮 = 132 次，远超"两波"的判据，反算有效。"""
+    inputs = MakespanInputs(
+        runs=132,
+        agent_minutes=4.2,
+        other_minutes=0.08,
+        agent_limit=10,
+        sandbox_limit=4,
+        worker_slots=8,
+    )
+    assert inputs.saturates_slots
+
+
+def test_saturation_threshold_is_two_waves() -> None:
+    """边界：`N = 2 × P_agent` 算填满，再少一次就不算。"""
+
+    def _at(runs: int) -> bool:
+        return MakespanInputs(
+            runs=runs,
+            agent_minutes=1.0,
+            other_minutes=1.0,
+            agent_limit=10,
+            sandbox_limit=4,
+            worker_slots=8,
+        ).saturates_slots
+
+    assert _at(16)
+    assert not _at(15)
+
+
+def test_max_agent_minutes_is_zero_when_one_task_alone_busts_the_budget() -> None:
+    """一道题自己就跑了七小时的话，`A` 调到 0 也压不进 6 小时。"""
+    inputs = MakespanInputs(
+        runs=TARGET_RUNS,
+        agent_minutes=1.0,
+        other_minutes=0.1,
+        agent_limit=10,
+        sandbox_limit=4,
+        worker_slots=8,
+        longest_task_minutes=7 * 60,
+    )
+    assert max_agent_minutes(inputs) == 0.0
+
+
+def test_longest_task_minutes_rejects_negative() -> None:
+    with pytest.raises(ValueError, match="longest_task_minutes"):
+        MakespanInputs(
+            runs=4,
+            agent_minutes=1.0,
+            other_minutes=1.0,
+            agent_limit=10,
+            sandbox_limit=4,
+            longest_task_minutes=-1.0,
+        )

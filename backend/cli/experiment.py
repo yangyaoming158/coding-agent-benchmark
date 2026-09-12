@@ -463,6 +463,11 @@ def _print_projection(
     slowest = max(real, key=lambda t: t.agent_minutes)
     agent_minutes = slowest.agent_minutes
     other_minutes = max(t.other_minutes for t in real)
+    # 最慢的那一道题：反算损耗系数时要用（一道题拆不开并行，见 makespan 模块开头）
+    longest_task_minutes = max(
+        (stats.max_s / 60 for t in real if (stats := t.stats.get("total")) is not None),
+        default=0.0,
+    )
 
     agent_limit = args.agent_limit or settings.agent_concurrency
     sandbox_limit = args.sandbox_limit or settings.sandbox_concurrency
@@ -477,6 +482,7 @@ def _print_projection(
         sandbox_limit=sandbox_limit,
         worker_slots=worker_slots,
         overhead_ratio=0.0,
+        longest_task_minutes=longest_task_minutes,
     )
     batch_theoretical = project(batch).theoretical_minutes
     if args.overhead is not None:
@@ -485,6 +491,14 @@ def _print_projection(
     elif actual_minutes is None:
         overhead = DEFAULT_OVERHEAD_RATIO
         overhead_note = "算不出实测值，退回 §18.2 的假设"
+    elif not batch.saturates_slots:
+        # 槽位没填满的批次根本没排过队，反算出来的数量不出调度损耗（见 makespan 模块开头）
+        overhead = DEFAULT_OVERHEAD_RATIO
+        overhead_note = (
+            f"这批只有 {attempts} 次运行、{batch.effective_agent_limit} 个槽位，"
+            f"填不满（要 ≥{2 * batch.effective_agent_limit} 次），"
+            "反算不出调度损耗，退回 §18.2 的假设"
+        )
     else:
         overhead = measured_overhead(
             actual_minutes=actual_minutes, theoretical_minutes=batch_theoretical
@@ -499,12 +513,14 @@ def _print_projection(
         sandbox_limit=sandbox_limit,
         worker_slots=worker_slots,
         overhead_ratio=overhead,
+        longest_task_minutes=longest_task_minutes,
     )
     projection = project(inputs)
 
     print("══ 回代 §18.2 的 makespan 模型 " + "═" * 28)
     print(f"   A  {agent_minutes:.2f} 分钟   取最慢的 Agent（{slowest.agent_name}），不取总平均")
     print(f"   S  {other_minutes:.2f} 分钟   单题总计减掉 Agent 阶段")
+    print(f"   最慢一道题  {longest_task_minutes:.2f} 分钟   一道题拆不开并行，它本身是下限")
     print(f"   损耗系数  {overhead * 100:.1f}%   {overhead_note}")
     print(
         f"   并发  agent={agent_limit} sandbox={sandbox_limit} slots={worker_slots}"
@@ -520,6 +536,7 @@ def _print_projection(
     print(f"   投影 N={inputs.runs}（MET-02 的口径是 100 题 × 3 Agent）")
     print(f"     Agent 侧    {projection.agent_side_minutes:>7.1f} 分钟")
     print(f"     Sandbox 侧  {projection.sandbox_side_minutes:>7.1f} 分钟")
+    print(f"     单题下限    {projection.single_task_floor_minutes:>7.1f} 分钟")
     print(f"     瓶颈        {projection.bottleneck}")
     print(
         f"     投影 makespan {projection.projected_minutes:.1f} 分钟 = "

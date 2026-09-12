@@ -9,15 +9,30 @@ E9-T1 实测之后 §18.2 里有三个数是错的（S、`P_agent` 的有效值�
 
 makespan 指**从第一道题开始跑到最后一道题结束的总墙钟时间**，不是所有题耗时之和。
 
-    makespan ≥ max( N·A / P_agent , N·S / P_sandbox ) × (1 + 损耗)
+    makespan ≥ max( N·A / P_agent , N·S / P_sandbox , 最慢的那一道题 ) × (1 + 损耗)
 
 - `N`：总运行次数（MET-02 的口径是 100 题 × 3 Agent = 300）
 - `A`：Agent 阶段平均耗时。**最敏感的变量，而且由外部大模型决定，不由我们决定**
 - `S`：其余阶段（准备 + 抓补丁 + 跑测试 + 判定）平均耗时之和
 - 损耗：调度、排队、起停 Worker 带来的额外时间，**要用实测反算，不要沿用假设值**
 
-两侧取 `max` 而不是相加，是因为两层并发是并行的：一道题在跑测试的时候，
+前两项取 `max` 而不是相加，是因为两层并发是并行的：一道题在跑测试的时候，
 别的题可以同时在调 AI。
+
+## 第三项"最慢的那一道题"是 E9-T1 探测跑时补的
+
+§18.2 原来的公式只有前两项。那两项是**摊平**的下限，`N` 远大于并发数时才成立：
+一道题本身不能被拆开并行，所以 makespan 再小也不会小于最慢那道题的耗时。
+
+探测跑（4 次运行、8 个槽位）撞上了这件事：实测 8.3 分钟，而前两项算出来
+只有 2.1 分钟，反算出来的"调度损耗"是 **296%** —— 看起来像这台机器烂得不能用，
+其实是那 4 次运行里有一次单独跑了 8.25 分钟，而 8 个槽位大半空着。
+
+对 `N=300` 这一项永远不会成为瓶颈（最慢一道题 ≤ 12 分钟的硬超时，而 Agent 侧是
+一百多分钟），所以 §18.2 的结论不受影响。但**拿小批次反算损耗系数时它是必须的**。
+
+另有一条配套判据：`saturates_slots` —— 批次填不满槽位时，反算出来的损耗系数
+根本不该用，因为那批运行压根没排过队。
 
 ## `P_agent` 的有效值会被槽位封顶
 
@@ -80,11 +95,16 @@ class MakespanInputs:
     worker_slots: int | None = None
     #: 调度损耗系数。
     overhead_ratio: float = DEFAULT_OVERHEAD_RATIO
+    #: 这批运行里最慢的那一道题花了多少分钟。见模块开头第三项。
+    #:
+    #: 0 表示不考虑这一项（复现 §18.2 原表时就该是 0）。投影 300 次时给不给都一样，
+    #: 它只在批次小、槽位没填满的时候起作用。
+    longest_task_minutes: float = 0.0
 
     def __post_init__(self) -> None:
         if self.runs < 1:
             raise ValueError(f"runs 至少是 1，收到 {self.runs}")
-        for name in ("agent_minutes", "other_minutes"):
+        for name in ("agent_minutes", "other_minutes", "longest_task_minutes"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} 不能是负数，收到 {getattr(self, name)}")
         for name in ("agent_limit", "sandbox_limit"):
@@ -108,6 +128,16 @@ class MakespanInputs:
         if self.worker_slots is None:
             return self.sandbox_limit
         return min(self.sandbox_limit, self.worker_slots)
+
+    @property
+    def saturates_slots(self) -> bool:
+        """这批运行够不够多，能不能把并发填满。
+
+        判据是"至少两波"：`N ≥ 2 × P_agent`。不够的话槽位大半空着，
+        **这批实测反算不出调度损耗** —— 排队根本没发生过。
+        探测跑 4 次运行、8 个槽位，反算出来 296%，就是这么来的。
+        """
+        return self.runs >= 2 * self.effective_agent_limit
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,9 +203,18 @@ class Projection:
         return self.inputs.runs * self.inputs.other_minutes / self.inputs.effective_sandbox_limit
 
     @property
+    def single_task_floor_minutes(self) -> float:
+        """一道题不能拆开并行，所以最慢那道题的耗时本身就是下限。"""
+        return self.inputs.longest_task_minutes
+
+    @property
     def theoretical_minutes(self) -> float:
-        """两侧取大。两层并发是并行的，所以取 `max` 不是相加。"""
-        return max(self.agent_side_minutes, self.sandbox_side_minutes)
+        """三项取大。前两项是摊平的下限，第三项是"一道题拆不开"的下限。"""
+        return max(
+            self.agent_side_minutes,
+            self.sandbox_side_minutes,
+            self.single_task_floor_minutes,
+        )
 
     @property
     def projected_minutes(self) -> float:
@@ -188,8 +227,18 @@ class Projection:
 
     @property
     def bottleneck(self) -> str:
-        """哪一侧是瓶颈。两侧一样时算 Agent 侧 —— 那边才是我们管不了的那一侧。"""
-        return "agent" if self.agent_side_minutes >= self.sandbox_side_minutes else "sandbox"
+        """哪一项是瓶颈。
+
+        并列时优先报 Agent 侧 —— 那边才是我们管不了的那一侧，也是要提醒人的那一侧。
+        报 `single_task` 意味着这批活太少，根本没用上并发。
+        """
+        if self.agent_side_minutes >= max(
+            self.sandbox_side_minutes, self.single_task_floor_minutes
+        ):
+            return "agent"
+        if self.sandbox_side_minutes >= self.single_task_floor_minutes:
+            return "sandbox"
+        return "single_task"
 
     def fits(self, target_hours: float = TARGET_HOURS) -> bool:
         return self.projected_hours <= target_hours
@@ -218,14 +267,16 @@ def max_agent_minutes(
 ) -> float:
     """在其他条件不变的前提下，`A` 最大能到多少还压得进验收线。
 
-    返回 0 表示**光 Sandbox 侧就已经超线了**，这时候调 `A` 没有意义 ——
-    该调的是并发数或者题量。
+    返回 0 表示**不靠 `A` 的那几项就已经超线了**（Sandbox 侧，或者最慢那一道题），
+    这时候调 `A` 没有意义 —— 该调的是并发数、题量或者硬超时。
 
     这个数比投影值更有用：它是"外部大模型慢到什么程度我们还扛得住"的答案，
     而 `A` 恰恰是我们管不了的那个变量。
     """
     budget_minutes = target_hours * 60 / (1 + inputs.overhead_ratio)
-    if Projection(inputs).sandbox_side_minutes > budget_minutes:
+    projection = Projection(inputs)
+    # 另外两项不受 A 影响：它们超线的话，A 调到 0 也救不回来
+    if max(projection.sandbox_side_minutes, projection.single_task_floor_minutes) > budget_minutes:
         return 0.0
     return budget_minutes * inputs.effective_agent_limit / inputs.runs
 
