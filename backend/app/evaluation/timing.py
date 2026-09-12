@@ -183,6 +183,21 @@ def summarize(attempts: Sequence[Attempt]) -> list[AgentTiming]:
     return result
 
 
+def total_stage_minutes(attempts: Sequence[Attempt], stage: str) -> float:
+    """这批运行在某个阶段上**一共**花了多少分钟（机器工时，不是墙钟）。
+
+    反算调度损耗要用这个，不能用"均值 × 次数"。理由：pilot 这一批是**混合负载**
+    （aider 的 Agent 阶段均值 50 秒、claude-code 79 秒、Oracle 0 秒），
+    而投影用的 `A` 取的是最慢那个 Agent。拿最慢的均值去乘总次数，算出来的
+    "理论下限"比这批真实干的活还多，于是反算出来的损耗是**负数**，被钳到 0 ——
+    看起来像这台机器零调度开销，其实是分子分母口径不一致。
+
+    2026-09-12 实测：按均值 × 次数算是 18.0 分钟（比实测的 14.2 还大），
+    按真实工时求和算是 11.8 分钟，反算出来 19.9% —— 后者才是这台机器的真实损耗。
+    """
+    return sum(value for row in attempts if (value := row.stages.get(stage)) is not None) / 60
+
+
 def actual_makespan_minutes(attempts: Sequence[Attempt]) -> float | None:
     """这批运行实际用了多少分钟墙钟：最后一个结束的时刻减最早开始的时刻。
 
@@ -314,4 +329,5 @@ __all__ = [
     "summarize",
     "summarize_stage",
     "to_csv",
+    "total_stage_minutes",
 ]

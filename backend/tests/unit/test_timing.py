@@ -24,6 +24,7 @@ from app.evaluation.timing import (
     summarize,
     summarize_stage,
     to_csv,
+    total_stage_minutes,
 )
 from app.evaluation.timing import _stages_of as stages_of
 from app.infrastructure.models.evaluation import EvaluationTaskRun
@@ -321,3 +322,51 @@ def test_csv_leaves_missing_stages_empty() -> None:
     agent_column = 6 + STAGES.index("agent")
 
     assert body[agent_column] == ""
+
+
+# ── 真实工时求和（反算损耗系数用）────────────────────────────
+
+
+def test_total_stage_minutes_sums_actual_work() -> None:
+    """这批活一共占了机器多少分钟，按真实耗时求和。"""
+    attempts = [
+        _attempt(agent_s=60.0, total_s=70.0, task_run_id=1),
+        _attempt(agent_s=120.0, total_s=132.0, task_run_id=2),
+    ]
+    assert total_stage_minutes(attempts, "agent") == pytest.approx(3.0)
+    assert total_stage_minutes(attempts, "other") == pytest.approx(22 / 60)
+
+
+def test_work_sum_differs_from_mean_times_count_on_mixed_loads() -> None:
+    """混合负载下"真实工时求和"和"最慢均值 × 次数"不是一个数。
+
+    这条钉的就是 2026-09-12 实测那件事：pilot 一批里 Oracle 的 Agent 阶段是 0、
+    aider 50 秒、claude-code 79 秒，而投影用的 `A` 取最慢那个。
+    拿最慢的均值乘总次数，分子比这批真干的活还多，反算出来的损耗是负数、
+    被钳到 0，看着像这台机器零调度开销。
+    """
+    attempts = [
+        _attempt(agent_name="oracle", agent_s=0.0, total_s=5.0, task_run_id=1),
+        _attempt(agent_name="aider", agent_s=50.0, total_s=58.0, task_run_id=2),
+        _attempt(agent_name="claude-code", agent_s=79.0, total_s=83.0, task_run_id=3),
+    ]
+    real_work = total_stage_minutes(attempts, "agent")
+    slowest_mean = max(t.agent_minutes for t in summarize(attempts))
+    inflated = slowest_mean * len(attempts)
+
+    assert real_work == pytest.approx(129 / 60)
+    assert inflated == pytest.approx(79 * 3 / 60)
+    assert inflated > real_work, "最慢均值×次数应该比真实工时大 —— 这就是钳到 0 的来历"
+
+
+def test_total_stage_minutes_skips_missing_values() -> None:
+    """取不到的阶段不算进工时，也不当 0 —— 那次执行确实没留下可核对的耗时。"""
+    attempts = [
+        _attempt(agent_s=60.0, total_s=70.0, task_run_id=1),
+        _attempt(agent_s=None, total_s=None, task_run_id=2),
+    ]
+    assert total_stage_minutes(attempts, "agent") == pytest.approx(1.0)
+
+
+def test_total_stage_minutes_of_nothing_is_zero() -> None:
+    assert total_stage_minutes([], "agent") == 0.0

@@ -409,7 +409,7 @@ def cmd_timing(args: argparse.Namespace) -> int:
 
     _print_projection(
         timings,
-        attempts=len(attempts),
+        all_attempts=attempts,
         actual_minutes=actual_minutes,
         args=args,
         settings=settings,
@@ -444,7 +444,7 @@ def _print_agent_timing(item: timing_mod.AgentTiming) -> None:
 def _print_projection(
     timings: Sequence[timing_mod.AgentTiming],
     *,
-    attempts: int,
+    all_attempts: Sequence[timing_mod.Attempt],
     actual_minutes: float | None,
     args: argparse.Namespace,
     settings: Settings,
@@ -474,8 +474,13 @@ def _print_projection(
     worker_slots = args.worker_slots or settings.worker_slots
 
     # 先拿这批运行自己反算损耗系数，再用它去推 N 次。不给 --overhead 就用实测值。
+    #
+    # 本批的理论下限按**真实工时求和**算，不按"均值 × 次数"：这一批是混合负载
+    # （Oracle 的 Agent 阶段是 0，两个真实 Agent 又不一样快），而 `agent_minutes`
+    # 取的是最慢那个。拿最慢的均值乘总次数，分子比这批真干的活还多，
+    # 反算出来是负数、被钳到 0，看着像零开销（`total_stage_minutes` 的注释里有实测数）。
     batch = MakespanInputs(
-        runs=attempts,
+        runs=len(all_attempts),
         agent_minutes=agent_minutes,
         other_minutes=other_minutes,
         agent_limit=agent_limit,
@@ -484,7 +489,11 @@ def _print_projection(
         overhead_ratio=0.0,
         longest_task_minutes=longest_task_minutes,
     )
-    batch_theoretical = project(batch).theoretical_minutes
+    batch_theoretical = max(
+        timing_mod.total_stage_minutes(all_attempts, "agent") / batch.effective_agent_limit,
+        timing_mod.total_stage_minutes(all_attempts, "other") / batch.effective_sandbox_limit,
+        longest_task_minutes,
+    )
     if args.overhead is not None:
         overhead = args.overhead
         overhead_note = "命令行给的"
@@ -495,7 +504,7 @@ def _print_projection(
         # 槽位没填满的批次根本没排过队，反算出来的数量不出调度损耗（见 makespan 模块开头）
         overhead = DEFAULT_OVERHEAD_RATIO
         overhead_note = (
-            f"这批只有 {attempts} 次运行、{batch.effective_agent_limit} 个槽位，"
+            f"这批只有 {len(all_attempts)} 次运行、{batch.effective_agent_limit} 个槽位，"
             f"填不满（要 ≥{2 * batch.effective_agent_limit} 次），"
             "反算不出调度损耗，退回 §18.2 的假设"
         )
