@@ -11,6 +11,7 @@ aider 是外部工具，它的 stdout 是**自由文本**，不是我们能规�
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
@@ -241,6 +242,78 @@ def test_a_token_count_containing_401_is_not_an_auth_failure() -> None:
     然后按 C-18 白重试三次。
     """
     assert not looks_like_auth_failure("Tokens: 1401 sent, 1401 received.")
+
+
+# ── 余额不足：E9-T1 真跑撞出来的两个方向 ────────────────────
+
+#: 2026-09-12 pilot 跑出来的原文（`tests/fixtures/cli_text/`），一个字没改。
+_FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "cli_text"
+
+
+def _fixture(name: str) -> str:
+    return (_FIXTURES / name).read_text(encoding="utf-8")
+
+
+def test_insufficient_balance_is_not_the_agents_fault() -> None:
+    """余额不足必须判成 `AGENT_AUTH_ERROR`，不能判成 `AGENT_RUNTIME_ERROR`。
+
+    2026-09-12 实测：DeepSeek 余额耗尽，88 次运行全部被记成
+    `AGENT_RUNTIME_ERROR` → 按 C-18 算**被测 AI 的错**、**不计入平台故障率**。
+    后果是四个实验都以 `status=COMPLETED, infra_failures=0, resolved=0/22` 收场 ——
+    一个 0% 的解决率，而 C-26 的 5% 准入门槛查不出任何异常，照样能进排行榜。
+
+    这正是 AGENTS.md §4.1 说的那件事：把"AI 失败"和"平台故障"混进同一个字段，
+    解决率就不可信了。
+    """
+    text = _fixture("aider_insufficient_balance.txt")
+    assert "Insufficient" in text, "夹具内容不对，应该是那段余额不足的原文"
+    assert looks_like_auth_failure(text)
+    assert has_model_side_failure(text)
+
+
+def test_claude_code_402_is_recognised_too() -> None:
+    """两个端点的说法不一样，但都要认出来。
+
+    aider 走 OpenAI 兼容端点，报的是 litellm 的异常；Claude Code 走 Anthropic
+    兼容端点，报的是 `API Error: 402 Insufficient Balance`。漏掉任一边，
+    那个 Agent 的那一批评测就会被记在它自己头上。
+    """
+    assert looks_like_auth_failure(_fixture("claude_code_402.txt"))
+
+
+def test_aider_progress_bar_throughput_is_not_an_auth_failure() -> None:
+    """aider 进度条里的 `401.79it/s` 不是 HTTP 401。
+
+    反方向那个坑，同一天撞上的：`\b401\b` 把小数点当词边界，于是
+    `142/142 [00:00<00:00, 401.79it/s]` 里的 `401` 被当成 HTTP 401。
+    实测 #120 里有一道题因此被判成鉴权失败 —— 而它真实的原因是余额不足。
+
+    后果是白重试 3 次（C-18 给鉴权失败的预算），而且扫一眼日志会以为 Key 配错了，
+    往完全错的方向查。吞吐量天生带小数，所以前后都得挡住数字和小数点。
+    """
+    text = _fixture("aider_progress_bar_401.txt")
+    assert "401.79it/s" in text, "夹具内容不对，应该带那个进度条数字"
+    assert not looks_like_auth_failure(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("API Error: 402 Insufficient Balance", True),
+        ("Error code: 401 - {'error': ...}", True),
+        ("status=402", True),
+        # 下面这些都**不是**状态码，只是恰好含 401 / 402 这三个数字
+        ("Scanning repo: 100%|##| 142/142 [00:00<00:00, 401.79it/s]", False),
+        ("Tokens: 1401 sent", False),
+        ("Tokens: 4021 sent", False),
+        ("elapsed 3.402s", False),
+    ],
+)
+def test_status_code_matching_rejects_numbers_that_merely_contain_401_or_402(
+    text: str, expected: bool
+) -> None:
+    """状态码两侧不能是数字也不能是小数点。"""
+    assert looks_like_auth_failure(text) is expected
 
 
 # ── 轨迹 ────────────────────────────────────────────────────
