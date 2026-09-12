@@ -1,0 +1,33 @@
+error=runtime_error: aider 失败（退出码 0）：stdout: Aider v0.86.2
+Model: deepseek/deepseek-chat with diff edit format, prompt cache, infinite
+output
+Git repo: .git with 147 files
+Repo-map: using 4096 tokens, auto refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+
+pyproject.toml
+
+tox.ini
+Initial repo scan can be slow in larger repos, but only happens once.
+litellm.BadRequestError: DeepseekException - {"error":{"message":"Insufficient
+Balance","type":"unknown_error","param":null,"code":"invalid_request_error"}}
+stderr: Warning: Input is not a terminal (fd=0).
+
+Scanning repo:   0%|          | 0/147 [00:00<?, ?it/s]
+Scanning repo:  69%|██████▉   | 102/147 [00:00<00:00, 963.17it/s]
+Scanning repo: 100%|██████████| 147/147 [00:00<00:00, 418.58it/s]
+
+Aider v0.86.2
+Model: deepseek/deepseek-chat with diff edit format, prompt cache, infinite
+output
+Git repo: .git with 147 files
+Repo-map: using 4096 tokens, auto refresh
+
+
+https://aider.chat/HISTORY.html#release-notes
+
+
+pyproject.toml
