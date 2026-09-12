@@ -62,3 +62,24 @@ def test_a_database_without_test_in_its_name_gets_a_warning() -> None:
         warnings.simplefilter("ignore")
         assert warn_if_this_is_not_a_test_database("postgresql://u:p@h:5433/bench_test") is None
         assert warn_if_this_is_not_a_test_database("postgresql://u:p@h:5433/bench") is not None
+
+
+def test_a_bare_pytest_run_gets_redirected_to_the_test_database() -> None:
+    """没给 `BENCH_DATABASE_URL` 时，根 conftest 把库名换成带 `_test` 的那个。
+
+    #88 只让 Makefile 指向测试库，绕开 Makefile 直接 `uv run pytest` 还是连开发库，
+    靠的是一条警告。**警告不够**：2026-09-12 一天之内被这条路清了两次库
+    （E9-T2 开工时一次、收尾时一次），两次都是手快敲了 `uv run pytest`。
+    所以改成安全默认。
+    """
+    from tests.conftest import _switch_to_test_db
+
+    assert (
+        _switch_to_test_db("postgresql+psycopg://bench:bench@localhost:5433/bench")
+        == "postgresql+psycopg://bench:bench@localhost:5433/bench_test"
+    )
+    # 带查询参数的连接串不能把参数吞掉
+    assert (
+        _switch_to_test_db("postgresql+psycopg://u:p@h:5432/app?sslmode=require")
+        == "postgresql+psycopg://u:p@h:5432/app_test?sslmode=require"
+    )
