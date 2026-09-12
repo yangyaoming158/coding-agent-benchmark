@@ -85,6 +85,7 @@ from app.sandbox.container import (
     ContainerSpec,
     NetworkMode,
     Stage,
+    agent_limits,
     get_docker_client,
 )
 from app.sandbox.container import run_in_container as _run_in_container
@@ -382,6 +383,9 @@ class AiderRunner:
             network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
             mounts=(BindMount.workspace(Path(workspace.path)),),
             workdir=WORKSPACE_TARGET,
+            # 限额显式给（E9-T2）。不给的话吃的是 ResourceLimits() 按测试容器定的
+            # 1536 MB —— 那个数没人选过，而 8 个槽位全占上就是 12 GB
+            limits=agent_limits(cpus=config.cpus, memory_mb=config.memory_mb),
             env=config.env,
             stop_grace_s=AIDER_STOP_GRACE_S,
             run_id=task.task_id,

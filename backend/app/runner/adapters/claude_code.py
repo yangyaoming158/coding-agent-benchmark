@@ -88,6 +88,7 @@ from app.sandbox.container import (
     ContainerSpec,
     NetworkMode,
     Stage,
+    agent_limits,
     get_docker_client,
 )
 from app.sandbox.container import run_in_container as _run_in_container
@@ -653,6 +654,8 @@ class ClaudeCodeRunner:
             network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
             mounts=(BindMount.workspace(Path(workspace.path)),),
             workdir=WORKSPACE_TARGET,
+            # 限额显式给（E9-T2），理由同 aider.py
+            limits=agent_limits(cpus=config.cpus, memory_mb=config.memory_mb),
             env=credential_env(config.env, base_url=self._base_url),
             stop_grace_s=CLAUDE_STOP_GRACE_S,
             run_id=task.task_id,

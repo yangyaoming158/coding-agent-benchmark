@@ -29,6 +29,7 @@ from typing import Any, Literal
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.domain.capacity import DEFAULT_AGENT_CPUS, DEFAULT_AGENT_MEMORY_MB
 from app.domain.enums import ArtifactBackend
 
 #: 仓库根目录。用它把相对路径配置钉死，不受当前工作目录影响 —— 见 `artifact_local_root`。
@@ -130,7 +131,16 @@ class Settings(BaseSettings):
     #: 同时有几个被测 AI 在干活，受服务商限流约束。
     agent_concurrency: int = Field(default=10, ge=1)
     #: 同时跑几个测试容器，受 CPU 和内存约束。
-    sandbox_concurrency: int = Field(default=5, ge=1)
+    #:
+    #: **E9-T2 定档 4**（2026-09-12，原来是 5）。判据是"满载时宿主水位不过 80%"：
+    #: 4 个容器各吃满 1400 MB 时宿主峰值 68.8%，5 个就是 80.7%、6 个 91.5%
+    #: （`python -m cli.stress hold` 实测，细账见 `07-platform-architecture.md` §18.5）。
+    #:
+    #: 吞吐代价只落在**哨兵那种"全是测试阶段"的跑法**上（22 题 × 5 轮：4 路 125 秒、
+    #: 6 路 98 秒）。接真实 Agent 之后一道题七分多钟里只有一分多钟在跑测试，
+    #: 同时在测试阶段的题**期望值不到 2 个**，这一层基本不会成为瓶颈 ——
+    #: 它是道安全阀，不是吞吐旋钮。
+    sandbox_concurrency: int = Field(default=4, ge=1)
     #: 一个 Worker 进程同时在途几道题（E5-T2）。
     #:
     #: 这是对外声明的"并行度"（§4.6：同时处于已开始但还没结束状态的评测任务数），
@@ -140,6 +150,33 @@ class Settings(BaseSettings):
     #: 设得比 `agent_concurrency + sandbox_concurrency` 大没有意义：多出来的作业
     #: 只会占着租约卡在信号量上等名额，既不干活，又让在途任务数这个指标虚高。
     worker_slots: int = Field(default=8, ge=1)
+
+    # ── Agent 阶段的容器限额（E9-T2）──
+    #:
+    #: 在 E9-T2 之前这两个数是**捡来的**：`aider.py` / `claude_code.py` 的 `_spec()`
+    #: 不传 `limits`，于是吃 `ResourceLimits()` 的默认值 —— 也就是按测试容器定的
+    #: 1536 MB。没人选过它，而它在内存账里是大头：`worker_slots=8` 意味着最坏情况
+    #: 有 8 个容器同时在，其中几个是 Agent 容器（`01-requirements.md` §4.6 那笔
+    #: `5 × 1.5 GB + 3.2 GB` 只数了测试容器，漏了这一半）。
+    #:
+    #: Agent 阶段绝大部分时间在等大模型返回，不吃内存，所以给得比测试容器小。
+    agent_memory_mb: int = Field(default=DEFAULT_AGENT_MEMORY_MB, ge=64)
+    #: Agent 容器的 CPU 配额。等网络为主，给一个核够了。
+    agent_cpus: float = Field(default=DEFAULT_AGENT_CPUS, gt=0)
+
+    # ── 内存刹车（E9-T2）──
+    #: 宿主可用内存低于这个数（MiB）就先别开新的测试容器，等到有为止。
+    #:
+    #: 判据只看宿主的 `MemAvailable`，不看"我起了几个容器"：这台机器上还有数据库、
+    #: 编辑器、别的项目的容器，Worker 只知道自己那一部分。
+    #:
+    #: 默认 2048 ≈ 一个 1536 MB 的测试容器 + 512 MB 余量。**设成 0 等于关掉刹车。**
+    sandbox_min_available_mb: int = Field(default=2048, ge=0)
+    #: 刹车最多等多久（秒）。等过了就放行，同时打一条告警。
+    #:
+    #: 为什么不死等：内存不一定是我们占的。真有个别的进程吃满了内存，死等会让
+    #: 整个 Worker 停摆，而它本来还能把手上这道题跑完。宁可挤一挤也不要死锁。
+    sandbox_memory_wait_timeout_s: float = Field(default=120.0, gt=0)
 
     # ── 队列与 Worker（E5-T1，含义见 07-platform-architecture.md §15.2）──
     #: 这个 Worker 进程的标识，写进 `job_queue.lease_owner` 和

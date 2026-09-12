@@ -440,6 +440,13 @@ class AgentConfig:
     artifact_dir: Path | None = None
     #: 追加给底层 CLI 的参数。
     extra_args: tuple[str, ...] = ()
+    #: Agent 容器的内存上限（MiB）。None = 用沙箱层 `agent_limits()` 的默认值。
+    #:
+    #: 这里只放两个数而不是一个 `ResourceLimits`，是为了让协议本身不依赖沙箱
+    #: （同 `run()` 的 `workspace` 标成 `Any` 的理由）。翻译成容器限额由适配器做。
+    memory_mb: int | None = None
+    #: Agent 容器的 CPU 配额。None 同上。
+    cpus: float | None = None
 
 
 @runtime_checkable

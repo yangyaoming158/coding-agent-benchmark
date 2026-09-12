@@ -65,11 +65,13 @@ from typing import Any
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.domain.capacity import DEFAULT_SANDBOX_MEMORY_MB, ConcurrencyPlan, assess
 from app.domain.enums import JobState
 from app.evaluation.orchestrator import finalize_stale_runs
 from app.infrastructure import queue
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
+from app.infrastructure.hostmem import read_host_memory
 from app.infrastructure.logging import get_logger
 from app.infrastructure.models.job import JobQueue
 from app.worker.cancel import CancelWatcher
@@ -239,6 +241,7 @@ class Worker:
             lease_s=self.settings.job_lease_s,
             heartbeat_s=self.settings.job_heartbeat_s,
         )
+        self._log_capacity()
         if self.settings.worker_reap_on_start:
             reaped = self.reap_orphan_containers()
             if reaped:
@@ -256,6 +259,46 @@ class Worker:
             self._drain()
             reaped = self.reap_orphan_containers()
             logger.info("worker_stopped", worker_id=self.worker_id, reaped_containers=reaped)
+
+    def _log_capacity(self) -> None:
+        """启动时算一次最坏情况内存，超线就告警（E9-T2）。
+
+        **只告警不拒绝启动**：口径换台机器就不一样（云主机 32 GB、CI 上又是另一回事），
+        按它拒绝启动会把别人的环境挡死。要挡的是"没人知道这台机器超了多少"——
+        在此之前这笔账只存在于 `01-requirements.md` §4.6 的一段文字里，
+        而且那段文字漏算了 Agent 容器。
+
+        基线取**实测**（`MemTotal - MemAvailable`），不写死：这台机器上开不开编辑器、
+        跑不跑前端，基线差一个多 GB。
+        """
+        memory = read_host_memory()
+        if memory is None:
+            return
+        plan = ConcurrencyPlan(
+            agent_limit=self.limits.agent_limit,
+            sandbox_limit=self.limits.sandbox_limit,
+            worker_slots=self.slots,
+            agent_memory_mb=self.settings.agent_memory_mb,
+            sandbox_memory_mb=DEFAULT_SANDBOX_MEMORY_MB,
+        )
+        verdict = assess(plan, total_mb=memory.total_mb, baseline_mb=memory.used_mb)
+        fields = {
+            "total_mb": memory.total_mb,
+            "baseline_mb": memory.used_mb,
+            "worst_case_mb": verdict.worst_case_mb,
+            "worst_case_pct": round(verdict.worst_case_pct, 1),
+            "budget_mb": verdict.budget_mb,
+            "detail": verdict.explain(),
+        }
+        if verdict.fits:
+            logger.info("capacity_check", **fields)
+        else:
+            logger.warning(
+                "capacity_over_budget",
+                over_mb=verdict.over_mb,
+                min_available_mb=self.settings.sandbox_min_available_mb,
+                **fields,
+            )
 
     def run_once(self) -> bool:
         """回收一遍僵尸、领一条作业**当场跑完**。领不到返回 False。
