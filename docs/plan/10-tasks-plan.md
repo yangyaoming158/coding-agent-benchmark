@@ -872,6 +872,8 @@ C-72 规定它不算一次 attempt，够单开一个任务）；双层并发信�
   内存那个数字**受题目大小主导**：Golden 题的测试只占几十 MB，而按
   `sandbox_memory_mb` 的硬上限算，5 × 1.5 GB + 3.2 GB 基线 = 91%，是超线的。
   正式实验前要么把上限降到 1280、要么把沙箱并发降到 4，定档留给 E9-T2。
+  （**E9-T2 已定档**：沙箱并发降到 4，题目的 `sandbox_memory_mb` 不动 ——
+  改它会改 `content_hash`，等于让 `benchmark-dev@v1` 作废重发。见 §18.5）
 
 **两个只有并发跑起来才撞得上的坑（都是实测撞出来的，不是想出来的）：**
 
@@ -996,6 +998,43 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ## E7 — Frontend & Leaderboard
 
+### E7-T0 后端 REST 端点（§14.4 的 P0 子集） · **P0 · C:M · E:1.5d**
+- **Goal**：把 `07-platform-architecture.md` §14.4 里**前端 P0 页面用得到的**那些端点实现出来。
+  现在后端只有 `/api/health` 一个端点，而 E7 的八个页面全部要数据 ——
+  这段活原来不在任何一张卡里（2026-09-12 发现，E7-T1 写的是"前端骨架 + API 类型生成"，
+  它假定端点已经存在）
+- **Req**：FR-05 · FR-06 · **Deps**：E1-T6 · E4-T4 · E5-T2 · **Modules**：`api`
+- **Output**：`app/api/` 下按资源分文件的路由 + 响应模型；`make gen-api` 能生成前端类型
+- **AC**：
+  1. 这些端点可用（§14.4 的子集，**按前端 P0 页面倒推**）：
+     `GET /api/benchmark-sets{,/{slug}}`、`GET /api/tasks{,/{task_id}}`、
+     `GET /api/agents`、`GET /api/agent-configs`、
+     `POST /api/runs`、`GET /api/runs{,/{id}}`、`POST /api/runs/{id}/cancel`、
+     `POST /api/runs/{id}/retry-failed`、`GET /api/runs/{id}/task-runs`、
+     `GET /api/task-runs/{id}{,/tests,/artifacts/{kind}}`、`GET /api/leaderboard`
+  2. **写操作一律不在 API 层重写业务逻辑**：建实验走 `create_runs()`（协议 C-27 的唯一强制点
+     在那里，绕开它就能建出没有凭证的实验）、取消走 `cancel_run()`、重试走
+     `retry_failed()`。API 只做参数校验和响应拼装
+  3. 写操作要 `X-Bench-Token`（§14.4 的认证约定），读接口开放；token 没配时**拒绝启动**，
+     不要默认放行 —— 默认放行的部署没人会发现
+  4. 列表端点一律**分页 + 稳定排序**（按 id 或 created_at 加 id 兜底）。
+     不稳定排序会让前端翻页时重复或漏行，而且很难查
+  5. 响应模型是 Pydantic，OpenAPI 里有完整 schema；`make gen-api` 生成的类型能过
+     `npm run typecheck`
+  6. **制品端点不把文件内容塞进 JSON**：302 到签名 URL 或者流式返回。
+     一次评测的日志几百 MB，塞进 JSON 会把前端和内存一起打挂
+  7. 列表端点**不许有 N+1 查询**：SQL 条数不随返回行数增长，有测试钉住
+     （运行列表带 22 道题的进度，一不留神就是 23 条查询）
+  8. 错误响应形状统一（`code` + `message`）；404 / 403 / 409 各有一条测试
+  9. 每个端点至少一条集成测试（`TestClient` + 真库），断言状态码和关键字段
+  10. 枚举值**原样透出**，不在 API 层做中文映射或合并（协议 C-04/C-05/C-06 的三个字段
+      互相独立，前端要按原值分面；映射是展示层的事）
+- **不做**：`/api/attribution`、`/api/review`、`/api/reports` 跟着 E6 和 E10-T3 走，
+  这张卡只做前端 P0 页面要的那些；不做 WebSocket/SSE（§16.1 定的 P0 是轮询）；
+  不做用户体系（P2，§29）
+- **为什么单开一张卡而不是塞进 E7-T1**：E7-T1 是前端骨架（1 天），把 12 个端点
+  连测试塞进去会让它变成 2.5 天的卡，而且"前端做不动"和"后端没写完"混在一起看不出来
+
 ### E7-T1 前端骨架 + API 类型生成 + 布局导航 · **P0 · C:M · E:1d**
 ### E7-T2 Runs / Run Detail（进度、分组网格、取消重试） · **P0 · C:M · E:1.5d**
 ### E7-T3 Task Run Detail（Patch Viewer + 测试结果表 + 日志 + 轨迹） · **P0 · C:L · E:2d**
@@ -1073,7 +1112,57 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 ## E9 — Performance & Reliability
 
 ### E9-T1 Pilot 实验（30 题 × 3 Agent）与容量模型回代 · **P0 · C:M · E:1d**
-### E9-T2 并发压测与调优（找到本机最优 P_agent/P_sandbox） · **P1 · C:M · E:1d**
+### E9-T2 并发压测与调优（找到本机最优 P_agent/P_sandbox） ✅ 已于 2026-09-12 完成
+- **Goal**：给出本机 `P_agent` / `P_sandbox` / `worker_slots` 的定档值，
+  并让"这组数怎么来的"变成可复算、能自检的东西
+- **Req**：MET-02 · MET-03 · **Deps**：E5-T2 · **Modules**：`domain/capacity`、`worker/concurrency`
+- **Output**：`python -m cli.stress {sweep,hold,oom}`；`make stress-{sweep,hold,oom}`
+- **AC**（**卡片原本只有标题那一行**，12 条是 2026-09-12 开工前定的。
+  原卡没说"最优"按什么判、拿什么题压、结论落在哪）：
+  1. **判据写成公式**：可行集（MET-03 在途 ≥8 且实测内存 P95 ≤80%）里选 makespan
+     最短；差距在噪声底以内算平手，平手取内存余量大的
+  2. **内存用两个口径且不混用**：硬墙（各容器声明上限之和）只用来告警和写报告，
+     定档用实测水位 —— docker 的 `--memory` 是上限不是预留
+  3. Agent 阶段的容器限额变成**显式配置**（`AGENT_MEMORY_MB` / `AGENT_CPUS`），
+     两个真实适配器的 `_spec()` 显式传
+  4. 一个纯函数算最坏情况内存（`app/domain/capacity.py`，无 IO），Worker 启动时
+     算一遍，超线打告警但**不拒绝启动**（别的机器口径不一样）
+  5. 一条单元测试钉住仓库默认值算出来的那个数，改默认值会红
+  6. **A 轨证据**：真实负载扫 4 组以上并发，每组导出并发三曲线、makespan、内存时序
+  7. **B 轨证据（吃满上限）**：容器真的吃到声明上限，找出宿主的实际上限
+  8. **B 轨证据（OOM 漏报）**：定档并发下 ≥200 次真实 OOM，给出漏报次数和比例
+     （issue #85 的决策门）
+  9. 每轮跑完检查残留容器和悬空镜像
+  10. 定档结论落到 `config.py` 默认值 + `.env.example`，`01-requirements.md` §4.6 和
+      `07-platform-architecture.md` §18 按实测回填
+  11. 压测脚本进仓库、能重跑；CSV 产物进 `var/`（不提交）
+  12. MET-03 不被调到线下：定档后在途峰值和 P50 仍 ≥8，用 `cli.experiment concurrency` 证明
+- **不做**：不改协议（#85 的改动等这次数据，另开一张卡）；不做云主机压测；
+  不引入采样表或时序库（扫描线够用，§15.2.2）；不用真实 Agent 压 `P_agent`（要花钱，
+  属于 E9-T1 pilot，本卡只定 Agent 容器的上限和空载占用）
+- **P1 · C:M · E:1d**
+- **实际交付**（2026-09-12）：定档 `agent=10 / sandbox=4（原 5）/ slots=8`，
+  新增 `AGENT_MEMORY_MB=1024`、`AGENT_CPUS=1.0`、内存刹车
+  `SANDBOX_MIN_AVAILABLE_MB=2048` + `SANDBOX_MEMORY_WAIT_TIMEOUT_S=120`。
+  代码：`app/domain/capacity.py`（容量模型，纯函数）+ `app/infrastructure/hostmem.py`
+  （`/proc/meminfo`，manifest 的 `_memory_mb()` 也改成用它）+ `cli/stress.py`
+  （sweep / hold / oom 三条子命令）+ `app/worker/loop.py` 的启动自检 +
+  `app/worker/concurrency.py` 的内存刹车。**没有新迁移。**
+  **测出来的三件事**：① §4.6 那笔 `5 × 1.5 GB` 的内存账**漏了 Agent 容器** ——
+  `worker_slots=8` 的最坏情况是 8 个容器，而 Agent 容器的上限当时是**捡来的**
+  （`_spec()` 不传 `limits`，吃 `ResourceLimits()` 按测试容器定的 1536）；
+  ② `benchmark-dev` 那 22 道题测试阶段平均 4.4 秒、一百多 MB，**压不出内存**，
+  所以内存单独用合成容器压，不往数据集里加压测题；③ `.State.OOMKilled` 的漏报
+  **和"容器死得多快"相关**，不只是并发 —— 生产口径（1536 MB 上限）下 4 路和 8 路
+  共 400 个容器 0 次漏报，而 256 MB 的快死容器 4 路 200 个漏 6 次（3.0%）。
+  **实测**：A 轨 Oracle × 22 题 × 5 轮，3/4/5/6/8 路的 makespan 是
+  151 / 125 / 112 / 98 / 91 秒（重跑噪声 ±4%），五组的在途并行度峰值和 P50 都是 8；
+  B 轨满载容器 4 个 → 宿主 68.8%、5 个 → 80.7%、6 个 → 91.5%，**4 是过线前的最大值**；
+  跑完残留容器 0、悬空镜像不增加。新增 33 个单元测试（容量模型 18 + 刹车 6 + Agent 限额 5 +
+  Makefile 默认值 4 沿用 E0）。实现记录见 `07-platform-architecture.md` §18.5。
+- **顺带修掉的**：重灌规程少一步 —— `promote-assemble` 会把全部 51 道探测通过的候选
+  组装成题，而人工终审只覆盖 31 道，不把没审过的退回 `REVIEW_REQUIRED` 的话，
+  `dataset stage` 会把 20 道没人审过的题一起冻进快照（AGENTS.md §12 已补）
 ### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） · **P1 · C:M · E:1d**
 ### E9-T4 性能报告生成 · **P1 · C:M · E:1d**
 
@@ -1166,9 +1255,13 @@ flowchart TD
     E6T3 --> E6T4["E6-T4 准确率+κ"]
 
     E0T3 --> E7T1["E7-T1 前端骨架"]
-    E5T2 --> E7T2["E7-T2 Runs/Run Detail"]
-    E4T4 --> E7T3["E7-T3 Task Run Detail"]
-    E5T2 --> E7T4["E7-T4 Leaderboard"]
+    E5T2 --> E7T0["E7-T0 后端 REST 端点"]
+    E4T4 --> E7T0
+    E1T6 --> E7T0
+    E7T0 --> E7T2["E7-T2 Runs/Run Detail"]
+    E7T0 --> E7T3["E7-T3 Task Run Detail"]
+    E7T0 --> E7T4["E7-T4 Leaderboard"]
+    E7T1 --> E7T2
 
     E5T2 --> E9T1["E9-T1 Pilot 实验"]
     E8T3 --> E10T4["E10-T4 最终实验 100×3"]

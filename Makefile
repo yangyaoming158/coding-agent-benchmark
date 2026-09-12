@@ -7,7 +7,7 @@ SHELL := /bin/bash
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
         promote-probe promote-assemble promote-review promote-report \
         dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
-        worker enqueue queue \
+        worker enqueue queue stress-sweep stress-hold stress-oom \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
         images-base images-envs images-list images-gc
@@ -218,6 +218,22 @@ dataset-show:        ## 看有哪些数据集版本
 
 dataset-verify:      ## 拿已发布版本的快照比对现在的题库，报漂移（纯查询）
 	$(UV) python -m cli.dataset verify --slug $(SLUG)
+
+# ── E9-T2：并发压测 ────────────────────────────────────────
+# 三条子命令：sweep 跑真实负载扫并发、hold 看满载容器把宿主压到哪、
+# oom 数 .State.OOMKilled 漏报几次（issue #85 等这个数）。
+# 产物（CSV + Worker 日志）落 var/stress/，不提交。
+STRESS_SANDBOX := 5
+STRESS_ROUNDS := 5
+
+stress-sweep:        ## 按 STRESS_SANDBOX 跑一组真实负载压测（要 Docker + 数据库）
+	$(UV) python -m cli.stress sweep --sandbox $(STRESS_SANDBOX) --rounds $(STRESS_ROUNDS)
+
+stress-hold:         ## N 个容器同时吃满内存，看宿主水位（要 Docker）
+	$(UV) python -m cli.stress hold --parallel $(STRESS_SANDBOX)
+
+stress-oom:          ## 故意制造 OOM，数 OOMKilled 漏报率（要 Docker）
+	$(UV) python -m cli.stress oom --parallel $(STRESS_SANDBOX)
 
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker

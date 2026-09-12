@@ -48,6 +48,7 @@ import docker
 import requests
 from docker.errors import DockerException, ImageNotFound, NotFound
 
+from app.domain.capacity import DEFAULT_AGENT_CPUS, DEFAULT_AGENT_MEMORY_MB
 from app.domain.enums import InfraOutcome
 from app.infrastructure.logging import get_logger
 
@@ -239,6 +240,30 @@ class ResourceLimits:
     def nano_cpus(self) -> int:
         """docker API 收的是纳核数，`--cpus=1.5` 等于 1_500_000_000。"""
         return int(self.cpus * 1_000_000_000)
+
+
+#: Agent 阶段容器的默认限额（E9-T2）。
+#:
+#: 和测试容器分开是因为两件事吃的资源不一样：Agent 绝大部分时间在等大模型返回，
+#: 测试是实打实跑代码。E9-T2 之前 Agent 容器没人显式设限额，捡的是上面
+#: `ResourceLimits` 按测试容器定的 1536 MB —— 内存账里它是大头，
+#: 却是个没人选过的数（细账见 `07-platform-architecture.md` §18.5）。
+#:
+#: 真正生效的值来自配置（`AGENT_MEMORY_MB` / `AGENT_CPUS`），这里是配置没给时的兜底：
+#: 单元测试、`cli.runner` 冒烟这些不走 Worker 的路径。默认值本身写在
+#: `app.domain.capacity` —— 容量模型和起容器必须拿同一个数，各存一份迟早会漂。
+
+
+def agent_limits(cpus: float | None = None, memory_mb: int | None = None) -> ResourceLimits:
+    """Agent 阶段的容器限额。两个参数给 None 就用 domain 里的默认值。
+
+    两个真实适配器（aider / claude-code）都调它，默认值只有一份 ——
+    各写各的话，改一个忘一个，而"忘了"的表现是内存账悄悄对不上。
+    """
+    return ResourceLimits(
+        cpus=DEFAULT_AGENT_CPUS if cpus is None else cpus,
+        memory_mb=DEFAULT_AGENT_MEMORY_MB if memory_mb is None else memory_mb,
+    )
 
 
 @dataclass(frozen=True, slots=True)

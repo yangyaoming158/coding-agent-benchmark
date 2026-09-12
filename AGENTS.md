@@ -376,6 +376,11 @@ make check           # 提交前跑一遍：lint + 类型 + 模块边界 + 测�
 make test            # 只跑测试（跳过需要 Docker 和真实大模型的）
 make db-test         # 建测试库 bench_test（上面两条会自动调，一般不用手动跑）
 
+# 并发压测（E9-T2，要 Docker；产物落 var/stress/）
+make stress-sweep STRESS_SANDBOX=4   # 真实负载：makespan + 并发曲线 + 内存时序
+make stress-hold  STRESS_SANDBOX=4   # 容器真吃满上限，看宿主水位
+make stress-oom   STRESS_SANDBOX=4   # 故意 OOM，数 .State.OOMKilled 漏报几次
+
 # 数据库（端口 5433，不是 5432 —— 避开这台机器上别的项目）
 make db-up           # 起本地 Postgres 容器
 make migrate         # 升到最新
@@ -422,6 +427,13 @@ make validate-tasks                # 八步验证，约 8 分钟
 cd backend && uv run python -m cli.promote import-review \
   ../datasets/benchmark-dev/review-2026-09-10-final.csv
 cd backend && uv run python -m cli.promote import-review \
+  ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv
+# ⚠ 还要把**没人审过**的题退回 REVIEW_REQUIRED（2026-09-12 E9-T2 补的一步）。
+# promote-assemble 会把全部 51 道探测通过的候选都组装成题，而人工终审只覆盖 31 道；
+# 不退的话 dataset stage 会把 20 道没审过的题一起冻进快照，快照摘要和已发布的
+# benchmark-dev@v1 对不上（正确的是 sha256:300746559b84…），而且不会报错
+cd backend && uv run python -m cli.promote park-unreviewed \
+  ../datasets/benchmark-dev/review-2026-09-10-final.csv \
   ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv
 # 数据集版本（E1-T6）。**`make enqueue` 和 `cli.experiment start` 从这张快照里取题**，
 # 不冻的话它们一道题都选不出来

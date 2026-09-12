@@ -287,6 +287,10 @@ def _agent_config(ctx: JobContext, loaded: _Loaded) -> AgentRunnerConfig:
         image=str(image) if image else None,
         env=build_env(ctx.settings.agent_env_for(loaded.model_name)),
         extra_args=tuple(str(arg) for arg in extra_args),
+        # Agent 容器的限额从配置来（E9-T2）。不传的话适配器会用沙箱层的默认值，
+        # 那样这台机器的内存账就有一半不受配置控制
+        memory_mb=ctx.settings.agent_memory_mb,
+        cpus=ctx.settings.agent_cpus,
     )
 
 

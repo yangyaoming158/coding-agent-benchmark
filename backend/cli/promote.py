@@ -955,6 +955,72 @@ def cmd_import_review(args: argparse.Namespace) -> int:
     return 0
 
 
+def reviewed_task_ids(paths: Sequence[Path]) -> set[str]:
+    """从若干份终审对照表里收集"有结论"的 task_id。
+
+    只认填了 verdict 的行 —— 导出的表里没填的那些不算审过。
+    """
+    seen: set[str] = set()
+    for path in paths:
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            for row in csv.DictReader(handle):
+                if (row.get("verdict") or "").strip() and (row.get("task_id") or "").strip():
+                    seen.add(row["task_id"].strip())
+    return seen
+
+
+def cmd_park_unreviewed(args: argparse.Namespace) -> int:
+    """把**没有终审结论**的题退回 `REVIEW_REQUIRED`（清库重灌的最后一步）。
+
+    为什么需要这一步（2026-09-12，E9-T2 撞出来的）：`assemble` 会把**全部**探测
+    通过的候选组装成题（51 道），而 E8-T2 的人工终审只覆盖了其中 31 道。
+    八步验证会把跑得通的题一律置 VALID，于是那 20 道**没人看过**的题也成了 VALID，
+    `dataset stage` 会把它们一起冻进快照 —— 快照摘要和已发布的
+    `benchmark-dev@v1` 对不上，而且谁都不会收到报错。
+
+    §7.4 的状态机里 `REVIEW_REQUIRED` 的意思正是"等人看"，所以退回它是如实记录，
+    不是打补丁。
+
+    只动 VALID 的行：已经 INVALID / QUARANTINED 的题各有各的结论，不该被这一步覆盖。
+    """
+    paths = [Path(f) for f in args.files]
+    missing = [str(path) for path in paths if not path.exists()]
+    if missing:
+        print(f"文件不在：{missing}", file=sys.stderr)
+        return 1
+
+    keep = reviewed_task_ids(paths)
+    if not keep:
+        print("这几份表里一条 verdict 都没填，不敢动库", file=sys.stderr)
+        return 1
+
+    factory = create_session_factory(create_db_engine())
+    with session_scope(factory) as session:
+        rows = list(
+            session.execute(
+                sa.select(BenchmarkTask).where(
+                    BenchmarkTask.validation_state == TaskValidationState.VALID
+                )
+            ).scalars()
+        )
+        parked = [task for task in rows if task.task_id not in keep and _is_mined(task.task_id)]
+        for task in parked:
+            task.validation_state = TaskValidationState.REVIEW_REQUIRED
+
+    print(f"终审名单 {len(keep)} 道，库里 VALID {len(rows)} 道")
+    print(f"退回 REVIEW_REQUIRED：{len(parked)} 道")
+    for task in parked[:5]:
+        print(f"  - {task.task_id}")
+    if len(parked) > 5:
+        print(f"  …… 还有 {len(parked) - 5} 道")
+    return 0
+
+
+def _is_mined(task_id: str) -> bool:
+    """是不是挖掘来的题。Golden 题不走人工终审，别把它们退回去。"""
+    return not task_id.startswith("bench-golden__")
+
+
 # ══════════════════════════════════════════════════════════════
 # report：漏斗
 # ══════════════════════════════════════════════════════════════
@@ -1120,6 +1186,12 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--dataset-id", default=DEFAULT_DATASET_ID)
     export.add_argument("--out", help="写到哪，默认 datasets/benchmark-dev/review-<日期>.csv")
     export.set_defaults(func=cmd_export_review)
+
+    park = sub.add_parser(
+        "park-unreviewed", help="把没有终审结论的题退回 REVIEW_REQUIRED（重灌最后一步）"
+    )
+    park.add_argument("files", nargs="+", help="终审对照表 CSV，可给多份")
+    park.set_defaults(func=cmd_park_unreviewed)
 
     imp = sub.add_parser("import-review", help="把填好的对照表导回库")
     imp.add_argument("file", help="填好 verdict 列的 CSV")

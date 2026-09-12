@@ -139,14 +139,32 @@ def workspace(tmp_path: Path) -> Path:
 
 @pytest.fixture
 def cleanup_images() -> Iterator[list[str]]:
-    """用完把建出来的镜像删掉，别在开发机上越攒越多。"""
+    """用完把建出来的镜像删掉，别在开发机上越攒越多。
+
+    **按 tag 删还不够，悬空的那些也要删**（2026-09-12 补，`05-sandbox.md` §10.10）：
+    同一个 tag 建第二次时，上一版就成了没有 tag、但**还带着
+    `bench.environment_id` 标签**的悬空镜像。而 `gc_candidates()` 的第 2 条判据
+    （没 tag 又没被库里引用的旧构建照样回收）会把它列出来，于是
+    `test_gc_finds_and_removes_a_dead_environment` 的最后一条断言永远差一个。
+
+    更糟的是它**自我延续**：那条用例一红就停在删镜像之前，又留下一个悬空的，
+    下一次照样红。清悬空的这一步就是为了断掉这个循环。
+    """
     tags: list[str] = []
     yield tags
     client = get_docker_client()
+    # tag 形如 `bench-env:bench-test__gcme__py311`，冒号后面那截就是 environment_id
+    mine = {tag.split(":", 1)[-1] for tag in tags}
     for tag in tags:
         # 清理失败不该让用例变红：镜像可能已经被用例自己删掉了
         with contextlib.suppress(Exception):
             client.images.remove(tag, force=True)
+    with contextlib.suppress(Exception):
+        for image in client.images.list(filters={"dangling": True}):
+            labels = (image.attrs.get("Config") or {}).get("Labels") or {}
+            if labels.get("bench.environment_id") in mine:
+                with contextlib.suppress(Exception):
+                    client.images.remove(image.id, force=True)
 
 
 # ══════════════════════════════════════════════════════════════

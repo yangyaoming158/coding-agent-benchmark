@@ -67,7 +67,7 @@ def test_defaults() -> None:
     assert settings.database_url == DEFAULT_DATABASE_URL
     assert settings.artifact_backend is ArtifactBackend.LOCAL
     assert settings.agent_concurrency == 10
-    assert settings.sandbox_concurrency == 5
+    assert settings.sandbox_concurrency == 4  # E9-T2 定档，原来是 5
     assert settings.log_format == "console"
 
 

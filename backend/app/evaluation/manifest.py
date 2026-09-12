@@ -44,6 +44,7 @@ from sqlalchemy.orm import Session
 from app.domain.manifest import DATASET_SNAPSHOT_DIGEST_KEY, MANIFEST_VERSION, VOLATILE_KEYS
 from app.domain.protocol import PROTOCOL_VERSION
 from app.infrastructure.gitmeta import git_state
+from app.infrastructure.hostmem import read_host_memory
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkTask, EnvironmentSpec
 from app.sandbox.container import (
@@ -279,15 +280,12 @@ def _memory_mb() -> int | None:
 
     这台机器是 WSL2，内存额度由 `.wslconfig` 控制，`wsl --shutdown` 之后可能变 ——
     记下来才能解释"上次跑得下、这次 OOM"。
+
+    读 `/proc/meminfo` 的活交给 `app.infrastructure.hostmem`（E9-T2 起内存刹车和
+    容量自检也读同一份，解析写两遍迟早会漂）。
     """
-    try:
-        with open("/proc/meminfo", encoding="utf-8") as handle:
-            for line in handle:
-                if line.startswith("MemTotal:"):
-                    return int(line.split()[1]) // 1024
-    except OSError:
-        return None
-    return None
+    memory = read_host_memory()
+    return None if memory is None else memory.total_mb
 
 
 # ── 拼 manifest ─────────────────────────────────────────────
