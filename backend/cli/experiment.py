@@ -6,6 +6,7 @@
     python -m cli.experiment cancel --run 12                   # 取消
     python -m cli.experiment retry-failed --run 12             # 把没结论的题补跑
     python -m cli.experiment concurrency --run 12 --run 13     # 有效并发时序
+    python -m cli.experiment timing --run 12 --run 13          # 阶段耗时 + makespan 投影
     python -m cli.experiment manifest --run 12                 # 看可复现性清单
     python -m cli.experiment manifest --run 12 --run 13        # 比两次运行
     python -m cli.experiment replay --run 12                   # 按 manifest 重建一次等价运行
@@ -40,6 +41,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Sequence
 from decimal import Decimal
 from pathlib import Path
 
@@ -54,10 +56,20 @@ from app.benchmark.dataset import (
     resolve_set,
     snapshot_digest,
 )
+from app.domain.makespan import (
+    DEFAULT_OVERHEAD_RATIO,
+    TARGET_HOURS,
+    TARGET_RUNS,
+    MakespanInputs,
+    max_agent_minutes,
+    measured_overhead,
+    project,
+)
 from app.domain.manifest import VOLATILE_KEYS
 from app.domain.protocol import PROTOCOL_VERSION
 from app.evaluation import concurrency as concurrency_mod
 from app.evaluation import progress as progress_mod
+from app.evaluation import timing as timing_mod
 from app.evaluation.manifest import (
     ManifestDiff,
     ProvenanceError,
@@ -73,7 +85,7 @@ from app.evaluation.orchestrator import (
     create_runs,
     retry_failed,
 )
-from app.infrastructure.config import get_settings
+from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import BenchmarkSet
@@ -364,6 +376,166 @@ def cmd_concurrency(args: argparse.Namespace) -> int:
         path.write_text(concurrency_mod.to_csv(points), encoding="utf-8")
         print(f"CSV 已写到 {path}")
     return 0
+
+
+# ── timing ──────────────────────────────────────────────────
+
+
+def cmd_timing(args: argparse.Namespace) -> int:
+    """阶段耗时 + 把实测的 A / S 回代进 §18.2 的 makespan 模型（E9-T1）。
+
+    两件事一起做是有意的：量到的 `A` 只有放进模型里才回答得了"300 次压不压得进
+    6 小时"，而分开两条命令的话，中间那一步手算，就又回到 §18.2 那张手算表的老路上。
+    """
+    settings = get_settings()
+    factory = create_session_factory(create_db_engine(settings.database_url))
+    with session_scope(factory) as session:
+        attempts = timing_mod.load_attempts(session, args.run)
+
+    if not attempts:
+        print("这些实验里一次执行都没有")
+        return 1
+
+    timings = timing_mod.summarize(attempts)
+    actual_minutes = timing_mod.actual_makespan_minutes(attempts)
+
+    print(f"实验 {', '.join('#' + str(r) for r in args.run)}  共 {len(attempts)} 次执行")
+    if actual_minutes is not None:
+        print(f"实测 makespan  {actual_minutes:.1f} 分钟（最早开始 → 最后结束，跨全部实验）")
+    print()
+
+    for item in timings:
+        _print_agent_timing(item)
+
+    _print_projection(
+        timings,
+        attempts=len(attempts),
+        actual_minutes=actual_minutes,
+        args=args,
+        settings=settings,
+    )
+
+    if args.csv:
+        path = Path(args.csv)
+        path.write_text(timing_mod.to_csv(attempts), encoding="utf-8")
+        print(f"\n逐次执行的 CSV 已写到 {path}")
+    return 0
+
+
+def _print_agent_timing(item: timing_mod.AgentTiming) -> None:
+    print(f"── {item.agent_name}  {item.attempts} 次执行 " + "─" * 30)
+    print(
+        f"   超时 {item.timeouts} 次（{item.timeout_rate * 100:.1f}%）"
+        "  ← 一次超时往 A 里塞满一个 agent_timeout_s"
+    )
+    print(f"   {'阶段':<9} {'样本':>4} {'均值':>8} {'P50':>8} {'P95':>8} {'最大':>8}   含义")
+    for stage in timing_mod.STAGES:
+        stats = item.stats.get(stage)
+        if stats is None:
+            continue
+        print(
+            f"   {stage:<9} {stats.samples:>4} {_secs(stats.mean_s):>8} {_secs(stats.p50_s):>8} "
+            f"{_secs(stats.p95_s):>8} {_secs(stats.max_s):>8}   "
+            f"{timing_mod.STAGE_MEANINGS[stage]}"
+        )
+    print()
+
+
+def _print_projection(
+    timings: Sequence[timing_mod.AgentTiming],
+    *,
+    attempts: int,
+    actual_minutes: float | None,
+    args: argparse.Namespace,
+    settings: Settings,
+) -> None:
+    """把实测值回代进 §18.2 的模型，然后查一次降级表。
+
+    `A` 取**各 Agent 里最大的那个**，不取总平均。理由：MET-02 要的是 100 题 ×
+    3 Agent 全部跑完，最慢的那个 Agent 决定什么时候能收工；而且这张 pilot 只有
+    2 个真实 Agent，第三个的 A 还不知道，拿已知里最慢的当上界才是该用的方向。
+    """
+    real = [t for t in timings if t.agent_minutes > 0]
+    if not real:
+        print("没有一个 Agent 的阶段耗时大于 0 —— 这批全是 Oracle / Noop，投影不了 A")
+        return
+
+    slowest = max(real, key=lambda t: t.agent_minutes)
+    agent_minutes = slowest.agent_minutes
+    other_minutes = max(t.other_minutes for t in real)
+
+    agent_limit = args.agent_limit or settings.agent_concurrency
+    sandbox_limit = args.sandbox_limit or settings.sandbox_concurrency
+    worker_slots = args.worker_slots or settings.worker_slots
+
+    # 先拿这批运行自己反算损耗系数，再用它去推 N 次。不给 --overhead 就用实测值。
+    batch = MakespanInputs(
+        runs=attempts,
+        agent_minutes=agent_minutes,
+        other_minutes=other_minutes,
+        agent_limit=agent_limit,
+        sandbox_limit=sandbox_limit,
+        worker_slots=worker_slots,
+        overhead_ratio=0.0,
+    )
+    batch_theoretical = project(batch).theoretical_minutes
+    if args.overhead is not None:
+        overhead = args.overhead
+        overhead_note = "命令行给的"
+    elif actual_minutes is None:
+        overhead = DEFAULT_OVERHEAD_RATIO
+        overhead_note = "算不出实测值，退回 §18.2 的假设"
+    else:
+        overhead = measured_overhead(
+            actual_minutes=actual_minutes, theoretical_minutes=batch_theoretical
+        )
+        overhead_note = f"本批实测反算（{actual_minutes:.1f} / {batch_theoretical:.1f} 分钟）"
+
+    inputs = MakespanInputs(
+        runs=args.project_n,
+        agent_minutes=agent_minutes,
+        other_minutes=other_minutes,
+        agent_limit=agent_limit,
+        sandbox_limit=sandbox_limit,
+        worker_slots=worker_slots,
+        overhead_ratio=overhead,
+    )
+    projection = project(inputs)
+
+    print("══ 回代 §18.2 的 makespan 模型 " + "═" * 28)
+    print(f"   A  {agent_minutes:.2f} 分钟   取最慢的 Agent（{slowest.agent_name}），不取总平均")
+    print(f"   S  {other_minutes:.2f} 分钟   单题总计减掉 Agent 阶段")
+    print(f"   损耗系数  {overhead * 100:.1f}%   {overhead_note}")
+    print(
+        f"   并发  agent={agent_limit} sandbox={sandbox_limit} slots={worker_slots}"
+        f"  →  有效 P_agent={inputs.effective_agent_limit}"
+        f" P_sandbox={inputs.effective_sandbox_limit}"
+    )
+    if inputs.effective_agent_limit < agent_limit:
+        print(
+            f"         ↑ agent_concurrency={agent_limit} 被槽位封到"
+            f" {inputs.effective_agent_limit} —— 一道题同一时刻只占一个槽位"
+        )
+    print()
+    print(f"   投影 N={inputs.runs}（MET-02 的口径是 100 题 × 3 Agent）")
+    print(f"     Agent 侧    {projection.agent_side_minutes:>7.1f} 分钟")
+    print(f"     Sandbox 侧  {projection.sandbox_side_minutes:>7.1f} 分钟")
+    print(f"     瓶颈        {projection.bottleneck}")
+    print(
+        f"     投影 makespan {projection.projected_minutes:.1f} 分钟 = "
+        f"{projection.projected_hours:.2f} 小时"
+    )
+    verdict = "达标" if projection.fits() else "超线"
+    headroom = projection.headroom_minutes()
+    print(f"     MET-02（≤{TARGET_HOURS:g} 小时）{verdict}，余量 {headroom:+.0f} 分钟")
+    ceiling = max_agent_minutes(inputs)
+    print(f"     A 还能涨到 {ceiling:.2f} 分钟 —— 再多就压不进 {TARGET_HOURS:g} 小时了")
+    band = projection.band()
+    print(f"\n   降级表（跑之前定的）命中 [{band.key}]：{band.action}")
+
+
+def _secs(value: float) -> str:
+    return f"{value:.1f}s" if value < 120 else f"{value / 60:.1f}m"
 
 
 # ── manifest ────────────────────────────────────────────────
@@ -739,6 +911,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="harness 代码版本和当初不同也建（新运行的 manifest 如实记现在这版）",
     )
     p_replay.set_defaults(func=cmd_replay)
+
+    p_timing = sub.add_parser("timing", help="阶段耗时 P50/P95/最大值 + makespan 投影")
+    p_timing.add_argument(
+        "--run", type=int, action="append", required=True, help="实验号，可重复给"
+    )
+    p_timing.add_argument("--csv", help="把逐次执行的阶段耗时写到这个文件")
+    p_timing.add_argument(
+        "--project-n", type=int, default=TARGET_RUNS, help=f"投影多少次运行，默认 {TARGET_RUNS}"
+    )
+    p_timing.add_argument(
+        "--overhead", type=float, help="调度损耗系数（0.25 = 25%%）。不给就用本批实测反算"
+    )
+    p_timing.add_argument("--agent-limit", type=int, help="投影用的 AGENT_CONCURRENCY，默认取配置")
+    p_timing.add_argument(
+        "--sandbox-limit", type=int, help="投影用的 SANDBOX_CONCURRENCY，默认取配置"
+    )
+    p_timing.add_argument("--worker-slots", type=int, help="投影用的 WORKER_SLOTS，默认取配置")
+    p_timing.set_defaults(func=cmd_timing)
 
     p_conc = sub.add_parser("concurrency", help="导出有效并发时间序列")
     p_conc.add_argument("--run", type=int, action="append", required=True, help="实验号，可重复给")
