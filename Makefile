@@ -3,7 +3,7 @@
 SHELL := /bin/bash
 
 .PHONY: help install lint format type imports test test-docker test-all check env clean \
-        db-up db-down db-reset db-psql migrate migrate-down migrate-check seed \
+        db-up db-down db-reset db-psql db-test migrate migrate-down migrate-check seed \
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
         promote-probe promote-assemble promote-review promote-report \
         dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
@@ -22,6 +22,16 @@ AIDER_IMAGE := bench-agent:py311-aider
 # Claude Code 的 Agent 镜像。同样在 app/runner/adapters/claude_code.py 里有默认值
 CLAUDE_CODE_IMAGE := bench-agent:py311-claude-code
 UV := cd $(BACKEND) && uv run
+
+# ── 测试跑在独立的库上（#88）────────────────────────────────
+# 跑**任何一个**集成测试都会 `downgrade base` + `upgrade head`，整库连表带数据抹掉重建。
+# 指向开发库的话，`make check` 乃至单跑一个集成测试文件都会把挖好的候选、验完的题
+# 一起清掉（2026-09-09 排查过两次，2026-09-10 又清掉过 31 道题）。
+# 换个库名就隔开了：开发库 bench 不动，测试跑 bench_test。CI 想换库名：
+#   make test TEST_DATABASE_URL=postgresql+psycopg://...
+# 库名里要带 test —— 不带的话 tests/integration/conftest.py 会打一条醒目的警告。
+TEST_DATABASE_URL := postgresql+psycopg://bench:bench@localhost:5433/bench_test
+UV_TEST := cd $(BACKEND) && BENCH_DATABASE_URL=$(TEST_DATABASE_URL) uv run
 
 help:                ## 显示这份帮助
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -66,19 +76,25 @@ type:                ## 类型检查
 imports:             ## 模块边界检查（§14.2 的依赖方向）
 	$(UV) lint-imports
 
-test:                ## 快速测试（不含需要 Docker 和真实大模型的）
-	$(UV) pytest -m "not docker and not agent"
+# 测试库不存在就建、建好升到最新。数据库没起来时只打一条提示：
+# 单元测试不需要库，需要库的用例连不上会自己跳过，不该在这里就把 make 干掉。
+db-test:             ## 准备测试库 bench_test（建库 + 升到最新，测试目标会自动调）
+	@./scripts/dev_db.sh test-db && $(UV_TEST) alembic upgrade head >/dev/null \
+	  || echo "⚠ 测试库没准备好：需要数据库的用例会跳过（起库：make db-up）"
+
+test: db-test        ## 快速测试（不含需要 Docker 和真实大模型的）
+	$(UV_TEST) pytest -m "not docker and not agent"
 
 # 要排掉 agent：那些用例会真的调大模型，是要花钱的。
 # 夜间跑一次 test-docker 就把额度烧掉一截，而且没人会注意到
-test-docker:         ## 只跑需要 Docker 的沙箱测试（不含花钱的）
-	$(UV) pytest -m "docker and not agent"
+test-docker: db-test ## 只跑需要 Docker 的沙箱测试（不含花钱的）
+	$(UV_TEST) pytest -m "docker and not agent"
 
-test-agent:          ## 跑会真的调用大模型的用例（要 API Key，会花钱，手动触发）
-	$(UV) pytest -m agent
+test-agent: db-test  ## 跑会真的调用大模型的用例（要 API Key，会花钱，手动触发）
+	$(UV_TEST) pytest -m agent
 
-test-all:            ## 全部测试
-	$(UV) pytest
+test-all: db-test    ## 全部测试
+	$(UV_TEST) pytest
 
 check: lint type imports test   ## 提交前跑一遍：检查 + 类型 + 边界 + 测试
 

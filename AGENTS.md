@@ -282,16 +282,26 @@ api → evaluation / benchmark / report
 
 单元测试和集成测试每次提交都跑（3 分钟内）。带 `@pytest.mark.docker` 标记的每日跑。消耗大模型额度的适配器测试手动触发。
 
-### ⚠️ 跑集成测试会清空开发库
+### ⚠️ 跑集成测试会清空它连上的那个库
 
-不只是 `make check`——**单跑一个集成测试文件也会**：
+`tests/integration/conftest.py` 的 `engine` 夹具开头是 `downgrade base` + `upgrade head`，
+整库连表带数据抹掉重建。不只是 `make check`，**单跑一个集成测试文件也会**。
+表还在、数据没了，看起来很像"数据库自己出了问题"（2026-09-09 因此排查过两次）。
+
+**所以测试默认跑在独立的 `bench_test` 库上**（#88，2026-09-12）。`make test` /
+`make check` / `make test-docker` / `make test-all` 都会把 `BENCH_DATABASE_URL`
+指到 `bench_test`，库不存在就自动建（`make db-test`）。开发库 `bench` 碰都不碰，
+测试里调 CLI 的那些用例也一样落在测试库里。
+
+**但这只覆盖"从 Makefile 跑测试"这一条路。** 绕开 Makefile 就又连回开发库了：
 
 ```bash
-uv run pytest tests/integration/test_mining_persistence.py   # 这一条就把库清了
+cd backend && uv run pytest tests/integration/test_mining_persistence.py   # 这一条就把开发库清了
 ```
 
-`tests/integration/conftest.py` 的 `engine` 夹具开头是 `downgrade base` + `upgrade head`。
-表还在、数据没了，看起来很像"数据库自己出了问题"（2026-09-09 因此排查过两次）。
+`conftest.py` 里有一道 `warn_if_this_is_not_a_test_database()`：库名里不含 `test`
+就打一条醒目的警告（不拒绝——CI 的库名未必叫这个）。看见那条警告就说明你正在清开发库。
+手工 `alembic downgrade base` 同理，那条路上没有任何保护。
 
 **那道保护只挡 Worker，不挡重灌。** `refuse_if_a_worker_is_working()` 查的是
 `job_queue` 里没过期的租约；而 `make validate-tasks` / `cli.promote assemble` 这些重灌命令
@@ -364,6 +374,7 @@ docker info --format '{{.Name}} {{.DockerRootDir}}'
 make install         # 装依赖 + 装提交钩子
 make check           # 提交前跑一遍：lint + 类型 + 模块边界 + 测试
 make test            # 只跑测试（跳过需要 Docker 和真实大模型的）
+make db-test         # 建测试库 bench_test（上面两条会自动调，一般不用手动跑）
 
 # 数据库（端口 5433，不是 5432 —— 避开这台机器上别的项目）
 make db-up           # 起本地 Postgres 容器

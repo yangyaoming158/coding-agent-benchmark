@@ -301,8 +301,8 @@ def _reuse_probe_file(candidate: Candidate) -> tuple[ProbeOutcome, dict[str, Any
     """磁盘上已经有这一条的探测结果就直接用，不再起容器。
 
     **这是为清库准备的。** 探测结果同时存在两个地方：`raw_payload.probe`（库里）
-    和 `var/promote/<repo>/<pr>.probe.json`（磁盘）。跑任何一个集成测试都会清库
-    （AGENTS.md §9），而重探一遍 51 条候选是十几分钟的容器时间，
+    和 `var/promote/<repo>/<pr>.probe.json`（磁盘）。清库这件事免不了（AGENTS.md §9），
+    而重探一遍 51 条候选是十几分钟的容器时间，
     换回来的是**一模一样的结果** —— 同一个 base_commit、同一个镜像、同一份补丁。
 
     版本对不上就不复用：探测逻辑改过之后旧结果不能要（`PROBER_VERSION`）。

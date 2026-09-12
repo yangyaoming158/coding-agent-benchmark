@@ -3,7 +3,7 @@
 需要一个真的 PostgreSQL。本地起法：`./scripts/dev_db.sh up`。
 连不上就整体跳过，不让没起数据库的人被一堆红叉挡住。
 
-## ⚠️ 跑**任何一个**集成测试都会清空开发库
+## ⚠️ 跑**任何一个**集成测试都会清空它连上的那个库
 
 下面那个 `engine` 夹具开头就是 `downgrade base` + `upgrade head`，整库连表带数据
 抹掉重建。这不只发生在 `make check`：
@@ -12,14 +12,22 @@
 
 2026-09-09 被咬了两次：挖好的 80 条候选和预筛结果各没了一回，
 而且当时完全没往"我刚跑了个集成测试"上想 —— 表还在、只是数据空了，
-看起来像是数据库自己出了问题。
+看起来像是数据库自己出了问题。2026-09-10 又一次，31 道题连同刚验完的结论。
 
-所以：**开发数据（`make seed`、挖出来的候选、Golden 题）和集成测试不能同时活着。**
-跑完记得按 `AGENTS.md` 的规程重灌。E1-T4/T5 的三层文件缓存正是为此设计的 ——
-重灌一遍不花配额也不花钱。
+**所以现在测试默认跑在独立的 `bench_test` 库上**（#88）：`make test` / `make check`
+会把 `BENCH_DATABASE_URL` 指过去，开发库 `bench` 碰都不碰。测试里调 CLI 的那些用例
+也一样落在测试库里 —— `cli.dataset` / `cli.experiment` 自己开 engine，读的是同一个
+环境变量。
+
+但这道隔离只覆盖"从 Makefile 跑测试"这一条路。**清库这件事本身没有变**：
+手工 `alembic downgrade base`、或者绕开 Makefile 直接 `uv run pytest`（那就连回开发库了），
+照样会把库抹掉。所以下面还有一道 `warn_if_this_is_not_a_test_database()`：
+库名里不含 `test` 就打一条醒目的警告，让"这条命令会清库"这件事还说得出来。
 """
 
 import os
+import sys
+import warnings
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -46,6 +54,34 @@ def alembic_config(url: str) -> Config:
 @pytest.fixture(scope="session")
 def database_url() -> str:
     return get_database_url()
+
+
+def database_name(url: str) -> str:
+    """从连接串里取库名。`...:5433/bench_test?sslmode=require` → `bench_test`。"""
+    return url.rsplit("/", 1)[-1].split("?", 1)[0]
+
+
+def warn_if_this_is_not_a_test_database(url: str) -> str | None:
+    """库名里不含 `test` 就警告一声。返回警告内容，没警告就是 `None`。
+
+    警告不拒绝：CI 的库名未必叫 `bench_test`，一刀切会把别人的流水线挡死。
+    真正要防的是"不知道这条命令会清库"，一条看得见的警告就够了。
+
+    走 `warnings.warn` 之外还直接写 stderr：pytest 的警告汇总在 `-q`、
+    `-p no:warnings` 或者别人的 `filterwarnings` 配置下可能根本不显示，
+    而这条信息漏掉的代价是一次二十分钟的重灌。
+    """
+    if "test" in database_name(url).lower():
+        return None
+    message = (
+        f"集成测试要把 {url} 整个清空（downgrade base + upgrade head），"
+        f"而这个库名里没有 test —— 它是开发库吗？\n"
+        "默认的测试库是 bench_test，走 `make test` / `make check` 会自动指过去；"
+        "直接跑 pytest 则会连回开发库。"
+    )
+    print(f"\n⚠️  {message}\n", file=sys.stderr)
+    warnings.warn(message, stacklevel=2)
+    return message
 
 
 #: 设成 1 就跳过下面那道保护。留给"Worker 崩了、租约还挂着"的情况 ——
@@ -107,6 +143,7 @@ def engine(database_url: str) -> Iterator[Engine]:
             f"连不上数据库 {database_url}，先跑 ./scripts/dev_db.sh up（{exc.__class__.__name__}）"
         )
 
+    warn_if_this_is_not_a_test_database(database_url)
     refuse_if_a_worker_is_working(eng)
 
     config = alembic_config(database_url)
