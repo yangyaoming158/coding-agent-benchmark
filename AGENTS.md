@@ -331,6 +331,20 @@ GitHub 响应和大模型回答都有本地文件缓存（`var/cache/`），重�
 
 代理地址是 WSL 的网关 IP，**`wsl --shutdown` 之后可能会变**。变了之后上面三处都要同步更新。用 `ip route show default` 取，不要写死。
 
+**一台机器同时只跑一个 Worker。** 第二个 Worker 一起来，它启动时的孤儿回收
+（`startup_reaped_containers`）就会把**第一个 Worker 正在用的容器**当孤儿杀掉。
+被杀的那一方看到的是"退出码 137、`OOMKilled=false`、没超时"——
+**和一次真的内存超限长得一模一样**（2026-09-12 E9-T1 实测，8 个容器被这样杀掉，
+细账在 `07-platform-architecture.md` §18.7）。
+
+怎么认出来：日志里 `container_sigkilled_without_oom_flag` 这条告警响了，
+而同一时间另一份 Worker 日志里有 `startup_reaped_containers`。
+`make worker` 之前先确认没有别的在跑：
+
+```bash
+ps -eo args | grep '[a]pp\.worker'
+```
+
 **不要在 Docker Desktop 里为这个 WSL 发行版开启集成。** 开了之后它会接管 `/var/run/docker.sock`，导致 docker 命令连到另一个守护进程上，表现是镜像和容器"凭空消失"。
 
 **跑最终实验前退出 Docker Desktop。** 所有 WSL 发行版共用 `.wslconfig` 里的内存额度，Docker Desktop 开着会占掉留给测试容器的内存。
