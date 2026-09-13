@@ -1,0 +1,177 @@
+{
+  "generated_at": "2026-09-13T12:14:20.246243+00:00",
+  "repo": "sgl-project/sglang",
+  "cache": {
+    "hits": 0,
+    "misses": 31,
+    "hit_rate": 0.0
+  },
+  "served_from_cache": false,
+  "group": "国产/中文社区·大型",
+  "is_domestic": true,
+  "default_branch": "main",
+  "stars": 35884,
+  "license": "Apache-2.0",
+  "survey_estimate": 188,
+  "state": {
+    "repo": "sgl-project/sglang",
+    "since": "2024-09-14",
+    "until": "2026-09-13",
+    "page_size": 25,
+    "created_at": "2026-09-13T12:07:22.120900+00:00",
+    "updated_at": "2026-09-13T12:14:20.245872+00:00",
+    "stopped_reason": "完成",
+    "windows": [
+      {
+        "start": "2024-09-14",
+        "stop": "2024-11-13",
+        "cursor": null,
+        "issue_count": 10,
+        "pages": 1,
+        "prs_seen": 10,
+        "candidates": 3,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2024-11-14",
+        "stop": "2025-01-13",
+        "cursor": null,
+        "issue_count": 11,
+        "pages": 1,
+        "prs_seen": 11,
+        "candidates": 4,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-01-14",
+        "stop": "2025-03-14",
+        "cursor": null,
+        "issue_count": 18,
+        "pages": 1,
+        "prs_seen": 18,
+        "candidates": 4,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-03-15",
+        "stop": "2025-05-14",
+        "cursor": null,
+        "issue_count": 43,
+        "pages": 2,
+        "prs_seen": 43,
+        "candidates": 10,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-05-15",
+        "stop": "2025-07-14",
+        "cursor": null,
+        "issue_count": 32,
+        "pages": 2,
+        "prs_seen": 32,
+        "candidates": 12,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-07-15",
+        "stop": "2025-09-13",
+        "cursor": null,
+        "issue_count": 49,
+        "pages": 2,
+        "prs_seen": 49,
+        "candidates": 14,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-09-14",
+        "stop": "2025-11-13",
+        "cursor": null,
+        "issue_count": 48,
+        "pages": 2,
+        "prs_seen": 48,
+        "candidates": 10,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-11-14",
+        "stop": "2026-01-13",
+        "cursor": null,
+        "issue_count": 67,
+        "pages": 3,
+        "prs_seen": 67,
+        "candidates": 16,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-01-14",
+        "stop": "2026-03-15",
+        "cursor": null,
+        "issue_count": 80,
+        "pages": 4,
+        "prs_seen": 80,
+        "candidates": 18,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-03-16",
+        "stop": "2026-05-14",
+        "cursor": null,
+        "issue_count": 96,
+        "pages": 4,
+        "prs_seen": 96,
+        "candidates": 34,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-05-15",
+        "stop": "2026-07-14",
+        "cursor": null,
+        "issue_count": 80,
+        "pages": 4,
+        "prs_seen": 80,
+        "candidates": 37,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-07-15",
+        "stop": "2026-09-13",
+        "cursor": null,
+        "issue_count": 84,
+        "pages": 4,
+        "prs_seen": 84,
+        "candidates": 52,
+        "done": true,
+        "degraded_attempts": 0
+      }
+    ],
+    "rejects": {
+      "NO_TEST_FILES": 388,
+      "NO_SOURCE_FILES": 16
+    },
+    "suspect_base_commit": 0,
+    "non_default_base_ref": 0,
+    "files_truncated_ok": 0,
+    "points_spent": 60,
+    "quota_remaining": 4994,
+    "quota_reset_at": "2026-09-13T13:14:08Z",
+    "problems": [],
+    "prs_seen": 618,
+    "candidates": 214,
+    "pages": 30,
+    "windows_done": 12,
+    "windows_total": 12,
+    "yield_rate": 0.34627831715210355,
+    "finished": true
+  }
+}

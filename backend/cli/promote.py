@@ -36,7 +36,7 @@ import shutil
 import sys
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -78,6 +78,17 @@ PROBER_VERSION = "1.2"
 
 #: 默认造 `benchmark-dev`（§8.1 的 L1）。
 DEFAULT_DATASET_ID = "benchmark-dev"
+
+#: 探测轮跑全量套件的超时（秒）。**和题目运行期的 `test_timeout_s`（480）是两回事。**
+#:
+#: 探测是一次性的离线测量：它必须跑一遍**全量**套件，因为 P2P 候选池就是从那份
+#: 全量报告里推出来的（§7.2(6)）。运行期不跑全量 —— §7.7 规定套件超过 3 分钟时
+#: P2P 取子集，正式评测只跑 `F2P ∪ P2P 子集`，那才是 MET-02 的 6 小时预算要管的东西。
+#:
+#: 用 480 卡探测，等于把"套件超过 8 分钟的仓库"整个挡在门外，而 §7.7 本来就是
+#: 为这种仓库写的。2026-09-13（E8-T3）实测：`sqlfluff` 全量 8152 条用例跑 663 秒，
+#: 按 480 卡时三条候选全报 `TEST_TOO_SLOW`，而它们都是好候选。
+PROBE_SUITE_TIMEOUT_S = 1800
 
 #: 只有这两档往下走：`REJECT` 按 §8.10 第二节实测误杀率 0%，可以放心丢。
 PROMOTABLE_DECISIONS = ("PASS", "REVIEW")
@@ -343,6 +354,7 @@ def _probe_one(
     scratch: Path,
     *,
     reuse: bool = True,
+    suite_timeout_s: int = PROBE_SUITE_TIMEOUT_S,
 ) -> tuple[ProbeOutcome, dict[str, Any] | None]:
     """探一条：起两个容器，一个空补丁一个 gold 补丁。"""
     if reuse:
@@ -368,6 +380,8 @@ def _probe_one(
         )
 
     plan = task.execution_plan(extra_protected_paths=environment.extra_protected_paths)
+    # 探测跑全量，用探测自己的超时；题目上那个 480 是给运行期子集用的，不动它。
+    plan = replace(plan, test_timeout_s=suite_timeout_s)
     image = environment.image_tag
     mirror_root = Path(settings.mirror_root)
     repo_name = task.repo_name
@@ -483,7 +497,12 @@ def cmd_probe(args: argparse.Namespace) -> int:
         scratch = Path(settings.workspace_root) / f"probe-{stamp}" / candidate.task_id
         try:
             outcome, record = _probe_one(
-                candidate, environment, settings, scratch, reuse=not args.redo
+                candidate,
+                environment,
+                settings,
+                scratch,
+                reuse=not args.redo,
+                suite_timeout_s=args.suite_timeout,
             )
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -1158,6 +1177,12 @@ def build_parser() -> argparse.ArgumentParser:
     probe.add_argument("--branch", help="只探合进这个分支的 PR，例如 stable")
     probe.add_argument("--limit", type=int, help="最多探几条")
     probe.add_argument("--redo", action="store_true", help="已经探过的也重探")
+    probe.add_argument(
+        "--suite-timeout",
+        type=int,
+        default=PROBE_SUITE_TIMEOUT_S,
+        help=f"探测跑全量套件的超时秒数，默认 {PROBE_SUITE_TIMEOUT_S}（和题目运行期的 480 无关）",
+    )
     probe.add_argument("--dry-run", action="store_true", help="不写库")
     probe.set_defaults(func=cmd_probe)
 

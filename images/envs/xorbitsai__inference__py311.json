@@ -1,0 +1,23 @@
+{
+  "environment_id": "xorbitsai__inference__py311",
+  "repo_name": "xorbitsai/inference",
+  "repo_url": "https://github.com/xorbitsai/inference.git",
+  "snapshot_commit": "7ae397c1474828c01e2d8a25f33bf77f78c0039b",
+  "python_version": "3.11",
+  "apt_packages": [],
+  "install_steps": [
+    "NO_WEB_UI=1 XINFERENCE_SKIP_MODEL_SPEC_VALIDATION=1 python -m pip install -q --no-cache-dir -e '.[dev]'"
+  ],
+  "workspace_source_roots": [
+    "",
+    "src"
+  ],
+  "import_check": [
+    "xinference"
+  ],
+  "collect_check": true,
+  "test_args": [
+    "--ignore=xinference/model/image/tests/test_got_ocr2.py"
+  ],
+  "note": "E8-T3 第二段接进来的中文题主力：75 条候选里 51 条「两关都过」，其中 39 条中文（占比 74%，E8-T1 当时估的是 23%，实际高三倍）。平铺布局，包在仓库根的 xinference/。 install_steps 前面那两个环境变量少一个都装不上：NO_WEB_UI=1 让自定义构建后端 build_backend.py 跳过 build_web.py 的前端构建（否则要 npm，容器里没有）；XINFERENCE_SKIP_MODEL_SPEC_VALIDATION=1 跳过内置模型元数据校验（那份校验针对完整源码树，编辑安装时不该跑）。两个开关都是 build_backend.py 的模块文档里明写支持的。 装 [dev] 而不是裸装：pyproject 的 [tool.pytest.ini_options] 写了 asyncio_mode=\"auto\"，没有 pytest-asyncio 整个测试套件收集就会报错，而 pytest-asyncio 在 [dev] 里。 依赖重（torch / peft / timm / transformers），镜像预计几个 GB —— 同批的 hiyouga__LLaMA-Factory 是 11.3GB，有先例。 2026-09-13 建镜像自查发现唯一一处收集错误：xinference/model/image/tests/test_got_ocr2.py 在模块顶层 import diffusers，而 diffusers 是图像模型的可选重依赖，[dev] 里没有。2952 条用例里只有这一个文件挂，其余文件都把重依赖挡在了函数里。用 --ignore 排掉它，不装 diffusers —— 装它要再拖一批几百 MB 的包，而那些测试本身还要联网下模型，在 --network none 下也跑不了。代价是：F2P 落在 got_ocr2 上的候选用不了。"
+}

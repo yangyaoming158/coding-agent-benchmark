@@ -1,0 +1,177 @@
+{
+  "generated_at": "2026-09-13T12:17:13.452938+00:00",
+  "repo": "tortoise/tortoise-orm",
+  "cache": {
+    "hits": 0,
+    "misses": 13,
+    "hit_rate": 0.0
+  },
+  "served_from_cache": false,
+  "group": "中文开发者主导",
+  "is_domestic": false,
+  "default_branch": "develop",
+  "stars": 5628,
+  "license": "Apache-2.0",
+  "survey_estimate": 51,
+  "state": {
+    "repo": "tortoise/tortoise-orm",
+    "since": "2024-09-14",
+    "until": "2026-09-13",
+    "page_size": 25,
+    "created_at": "2026-09-13T12:16:45.005377+00:00",
+    "updated_at": "2026-09-13T12:17:13.452679+00:00",
+    "stopped_reason": "完成",
+    "windows": [
+      {
+        "start": "2024-09-14",
+        "stop": "2024-11-13",
+        "cursor": null,
+        "issue_count": 6,
+        "pages": 1,
+        "prs_seen": 6,
+        "candidates": 5,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2024-11-14",
+        "stop": "2025-01-13",
+        "cursor": null,
+        "issue_count": 14,
+        "pages": 1,
+        "prs_seen": 14,
+        "candidates": 11,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-01-14",
+        "stop": "2025-03-14",
+        "cursor": null,
+        "issue_count": 9,
+        "pages": 1,
+        "prs_seen": 9,
+        "candidates": 7,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-03-15",
+        "stop": "2025-05-14",
+        "cursor": null,
+        "issue_count": 5,
+        "pages": 1,
+        "prs_seen": 5,
+        "candidates": 1,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-05-15",
+        "stop": "2025-07-14",
+        "cursor": null,
+        "issue_count": 1,
+        "pages": 1,
+        "prs_seen": 1,
+        "candidates": 1,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-07-15",
+        "stop": "2025-09-13",
+        "cursor": null,
+        "issue_count": 0,
+        "pages": 1,
+        "prs_seen": 0,
+        "candidates": 0,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-09-14",
+        "stop": "2025-11-13",
+        "cursor": null,
+        "issue_count": 0,
+        "pages": 1,
+        "prs_seen": 0,
+        "candidates": 0,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2025-11-14",
+        "stop": "2026-01-13",
+        "cursor": null,
+        "issue_count": 6,
+        "pages": 1,
+        "prs_seen": 6,
+        "candidates": 3,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-01-14",
+        "stop": "2026-03-15",
+        "cursor": null,
+        "issue_count": 21,
+        "pages": 1,
+        "prs_seen": 21,
+        "candidates": 18,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-03-16",
+        "stop": "2026-05-14",
+        "cursor": null,
+        "issue_count": 1,
+        "pages": 1,
+        "prs_seen": 1,
+        "candidates": 1,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-05-15",
+        "stop": "2026-07-14",
+        "cursor": null,
+        "issue_count": 3,
+        "pages": 1,
+        "prs_seen": 3,
+        "candidates": 3,
+        "done": true,
+        "degraded_attempts": 0
+      },
+      {
+        "start": "2026-07-15",
+        "stop": "2026-09-13",
+        "cursor": null,
+        "issue_count": 5,
+        "pages": 1,
+        "prs_seen": 5,
+        "candidates": 5,
+        "done": true,
+        "degraded_attempts": 0
+      }
+    ],
+    "rejects": {
+      "NO_TEST_FILES": 15,
+      "NO_SOURCE_FILES": 1
+    },
+    "suspect_base_commit": 0,
+    "non_default_base_ref": 0,
+    "files_truncated_ok": 0,
+    "points_spent": 24,
+    "quota_remaining": 4886,
+    "quota_reset_at": "2026-09-13T13:14:08Z",
+    "problems": [],
+    "prs_seen": 71,
+    "candidates": 55,
+    "pages": 12,
+    "windows_done": 12,
+    "windows_total": 12,
+    "yield_rate": 0.7746478873239436,
+    "finished": true
+  }
+}
