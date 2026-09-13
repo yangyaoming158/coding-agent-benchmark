@@ -18,6 +18,7 @@ from app.storage.base import (
     ArtifactRef,
     ArtifactStore,
     InvalidArtifactKeyError,
+    key_from_uri,
     validate_key,
 )
 from app.storage.local import LocalArtifactStore
@@ -47,5 +48,6 @@ __all__ = [
     "InvalidArtifactKeyError",
     "LocalArtifactStore",
     "create_artifact_store",
+    "key_from_uri",
     "validate_key",
 ]

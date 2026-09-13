@@ -1002,7 +1002,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ## E7 — Frontend & Leaderboard
 
-### E7-T0 后端 REST 端点（§14.4 的 P0 子集） · **P0 · C:M · E:1.5d**
+### E7-T0 后端 REST 端点（§14.4 的 P0 子集） ✅ 已于 2026-09-12 完成 · **P0 · C:M · E:1.5d**
 - **Goal**：把 `07-platform-architecture.md` §14.4 里**前端 P0 页面用得到的**那些端点实现出来。
   现在后端只有 `/api/health` 一个端点，而 E7 的八个页面全部要数据 ——
   这段活原来不在任何一张卡里（2026-09-12 发现，E7-T1 写的是"前端骨架 + API 类型生成"，
@@ -1038,6 +1038,62 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   不做用户体系（P2，§29）
 - **为什么单开一张卡而不是塞进 E7-T1**：E7-T1 是前端骨架（1 天），把 12 个端点
   连测试塞进去会让它变成 2.5 天的卡，而且"前端做不动"和"后端没写完"混在一起看不出来
+- **实际交付**（2026-09-12）：`app/api/` 下按资源分七个文件
+  （`errors.py` 统一错误形状、`deps.py` 会话/分页/鉴权/凭证、`benchmark_sets.py`、
+  `tasks.py`、`agents.py`、`runs.py`、`task_runs.py`、`leaderboard.py`）
+  + `app/evaluation/leaderboard.py`（准入口径和多轮聚合，**不在 API 层**）
+  + 迁移 0006（`evaluation_runs.leaderboard_excluded_reason`）
+  + `python -m cli.experiment exclude/include`。
+  **AC 10 条全达成**，15 个端点 + 原有的 `/api/health` 一共 16 条路径，
+  `make gen-api` 生成的类型过 `npm run typecheck`。
+  实现记录在 `07-platform-architecture.md` **§14.5（六节）**。
+
+  **开工前对了一遍 §14.4 和 §16.2，四处和设计表不一样**：
+  ① 砍掉 `GET /api/repositories` 和 `POST /api/tasks/{task_id}/validate`
+  （P0 页面没有落点，构成统计并进 `/api/benchmark-sets/{slug}` 的 `composition`）；
+  ② 给 `/api/tasks` 补 `repo` / `difficulty` / `language` 三个参数
+  （Benchmark Detail 页的筛选条件是四个，§14.4 只写了三个参数）；
+  ③ 题目接口不透出 `gold_patch_uri` 和 `test_patch_paths`（C-44 / C-76，读接口是开放的）；
+  ④ Agents 页要的"probe 状态"**数据库里没有任何落点**，两张表都没这个字段，
+  这张卡不建表，所以接口不返回它 —— **留给 E7-T1**，那时再决定是加一列还是去掉展示项。
+
+  **排行榜的准入口径开工前和人确认过，六条**（协议只给了两条）：
+  `COMPLETED`（C-26b）、`dirty=false`（C-28）、没被人工排除、参赛者启用、
+  不是哨兵、跑满整份快照。按协议那两条筛，库里 18 个实验有 14 个"合格"，
+  包括哨兵、只跑 2 道题的探测跑，和 4 个一次模型都没调到的。
+  行按 `(参赛者, 协议版本)` 分组（C-59 要求不同协议版本不混排），
+  带轮间 `min/max/spread`（§18.6 第六节实测抖动有 9 个百分点，只报均值会误导）。
+  响应里把六条规则和被排除的实验连同理由一起返回 ——
+  **一个不说自己筛掉了什么的排行榜没法复核**。
+
+  **顺带修掉两个会让数字反过来的坑**：
+  ① `?metric=cost` 第一版把 claude-code 排第一，理由是"每题 $0" ——
+  它 44 次全报 `unavailable`，总额确实是 0，而 §18.6 第七节手算出来它是
+  **$0.042/题，比 aider 贵 2.4 倍**。现在只要有一次报不出成本，
+  `cost_per_task` 就是 `None`、排序垫底，金额和三种来源计数照常给出；
+  ② `tests/integration/factories.py` 的 `content_hash=f"{index}" * 64`
+  在题号到两位数时变成 128 个字符，超过 `CHAR(64)` 直接写不进去 ——
+  造 10 道以上题的测试才撞得上，改成补零。
+
+  **#119–#122 按确认的口径标了排除**（`cli.experiment exclude`，理由写进那一列）。
+  **那四行原有的判定字段一个没动** —— `infra_outcome` 仍是 `SUCCESS`、
+  `agent_outcome` 仍是 `EMPTY_PATCH`，加一条注不重写测量结果，
+  和 §18.6 第九节"数据故意留着当证据"是同一个态度。
+
+  **实测排行榜**（本机真实数据）：claude-code 86.4%（2 轮，抖动 0.0%，成本不可用）、
+  aider 13.6%（2 轮，抖动 9.1%，$0.0175/题）。
+  aider 的每题成本和 §18.6 第七节那张表逐位相同。
+
+  **回答"能不能开前端"时又补了一个洞**：制品端点第一版只查 `artifacts` 表，
+  而补丁正文在 `patch_artifacts` —— `ArtifactKind.PATCH` 那个值全库没人往里写
+  （查过：`artifacts` 7 种 kind 没有它，`patch_artifacts` 有 431+431 行）。
+  于是 Task Run Detail 页的 **Patch Viewer 取不到 diff 正文**，
+  而那是 P0 页面最显眼的功能。现在 `{kind}` 跨两张表找。
+  **顺带挡住一个更要紧的**：`PatchKind` 有四个值，`GOLD` 是官方修复补丁
+  （C-44）、`TEST` 是官方测试补丁（C-76），而这是个不要 token 的开放读接口。
+  端点的 kind 参数换成只含两个 Agent 补丁的独立枚举 `AgentPatchKind` ——
+  限制进 OpenAPI，前端生成的类型里**根本没有 GOLD 这个选项**，
+  比在函数里加一句 `if` 可靠（实测 GOLD/TEST → 422）。细账在 §14.5 第六节。
 
 ### E7-T1 前端骨架 + API 类型生成 + 布局导航 · **P0 · C:M · E:1d**
 ### E7-T2 Runs / Run Detail（进度、分组网格、取消重试） · **P0 · C:M · E:1.5d**

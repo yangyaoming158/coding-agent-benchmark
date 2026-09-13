@@ -30,15 +30,19 @@ import sys
 import warnings
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from alembic.config import Config
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, event, text
 from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from alembic import command
 from app.infrastructure.db import create_db_engine, get_database_url
+
+if TYPE_CHECKING:
+    from fastapi.testclient import TestClient
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
@@ -169,3 +173,76 @@ def session(engine: Engine) -> Iterator[Session]:
         if transaction.is_active:
             transaction.rollback()
         connection.close()
+
+
+# ── API 测试的夹具（E7-T0）────────────────────────────────────
+
+#: 测试用的管理员 token。**拼出来而不是整串写死** —— 整串写会被
+#: pre-commit 的密钥扫描当成真密钥拦下来（`make check` 不跑那一步，
+#: 提交前的 `pre-commit run --all-files` 会跑）。
+ADMIN_TOKEN_FOR_TESTS = "bench-test-" + "admin-" + "0123456789abcdef"
+
+
+@pytest.fixture
+def admin_token(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
+    """给这条测试配一个管理员 token，结束后把配置缓存清掉。
+
+    显式设进进程环境而不是依赖开发机的 `.env`：CI 上没有那个文件，
+    而 `create_app()` 现在没配 token 就**拒绝启动**（E7-T0 AC-3）。
+    """
+    from app.infrastructure.config import reset_settings_cache
+
+    monkeypatch.setenv("ADMIN_TOKEN", ADMIN_TOKEN_FOR_TESTS)
+    reset_settings_cache()
+    yield ADMIN_TOKEN_FOR_TESTS
+    reset_settings_cache()
+
+
+@pytest.fixture
+def client(session: Session, admin_token: str) -> Iterator["TestClient"]:
+    """一个连着**测试自己那个事务**的 API 客户端。
+
+    把 `get_session` 这个依赖换成测试的会话，接口读到的就是测试刚写进去、
+    还没提交的数据；测试结束外层事务一回滚，什么都不留下。
+
+    写接口里的 `session.commit()` 不会破坏这个隔离：会话绑在一条已经
+    开了事务的连接上，SQLAlchemy 2.0 默认用 SAVEPOINT 加入外层事务
+    （`join_transaction_mode="conditional_savepoint"`），commit 释放的是保存点。
+    """
+    from fastapi.testclient import TestClient
+
+    from app.api.app import create_app
+    from app.api.deps import get_session
+
+    app = create_app()
+    app.dependency_overrides[get_session] = lambda: session
+    with TestClient(app) as test_client:
+        yield test_client
+    app.dependency_overrides.clear()
+
+
+def count_queries(eng: Engine) -> "QueryCounter":
+    """数一段代码里发了几条 SQL。AC-7 的"不许有 N+1"靠它钉住。"""
+    return QueryCounter(eng)
+
+
+class QueryCounter:
+    """`with count_queries(engine) as counter: ...` 之后读 `counter.count`。"""
+
+    def __init__(self, eng: Engine) -> None:
+        self._engine = eng
+        self.statements: list[str] = []
+
+    @property
+    def count(self) -> int:
+        return len(self.statements)
+
+    def _record(self, _conn, _cursor, statement, *_args) -> None:  # type: ignore[no-untyped-def]
+        self.statements.append(statement)
+
+    def __enter__(self) -> "QueryCounter":
+        event.listen(self._engine, "before_cursor_execute", self._record)
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        event.remove(self._engine, "before_cursor_execute", self._record)

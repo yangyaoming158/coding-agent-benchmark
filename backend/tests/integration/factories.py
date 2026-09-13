@@ -88,7 +88,9 @@ def seed_minimal(session: Session, *, tasks: int = 1, slug: str = "golden") -> S
             test_patch_paths=["tests/test_a.py"],
             gold_patch_uri="local://gold.patch",
             difficulty=TaskDifficulty.EASY,
-            content_hash=f"{index}" * 64,
+            # 补零到正好 64 位：`f"{index}" * 64` 在 index 到两位数时会变成 128 个字符，
+            # 超过 CHAR(64) 直接写不进去（造 10 道以上的题时才撞上）
+            content_hash=f"{index:064d}",
             raw_definition={},
         )
         session.add(task)

@@ -114,6 +114,21 @@ def physical_name(key: str, *, compressed: bool) -> str:
     return key + GZIP_SUFFIX if compressed else key
 
 
+def key_from_uri(uri: str) -> str:
+    """`artifacts.uri` → 逻辑 key。`local://runs/1/x.log.gz` → `runs/1/x.log`。
+
+    库里存的是 uri（带后端前缀和 `.gz` 后缀的**物理**位置），而 `get()` / `open()`
+    认的是逻辑 key。换算规则属于存储层，所以放这里 —— 同一条道理写在
+    `app.evaluation.jobs.normalized_patch_key` 的文档里。
+
+    调用方只有 `artifacts` 表的行时才需要它（比如 API 要把一份日志流式转发出去）。
+    能自己算出 key 的地方（Worker）不要绕这一圈。
+    """
+    _, _, rest = uri.partition("://")
+    key = rest or uri
+    return key.removesuffix(GZIP_SUFFIX)
+
+
 class ArtifactStore(Protocol):
     """制品存储的接口（§17.1）。
 
@@ -169,6 +184,7 @@ __all__ = [
     "ArtifactRef",
     "ArtifactStore",
     "InvalidArtifactKeyError",
+    "key_from_uri",
     "physical_name",
     "validate_key",
 ]
