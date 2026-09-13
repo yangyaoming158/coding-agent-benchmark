@@ -5,6 +5,8 @@
     python -m cli.experiment status --run 12                   # 看一个实验的细账
     python -m cli.experiment cancel --run 12                   # 取消
     python -m cli.experiment retry-failed --run 12             # 把没结论的题补跑
+    python -m cli.experiment exclude --run 12 --reason "..."   # 不进排行榜，并写下理由
+    python -m cli.experiment include --run 12                  # 撤销上一条
     python -m cli.experiment concurrency --run 12 --run 13     # 有效并发时序
     python -m cli.experiment timing --run 12 --run 13          # 阶段耗时 + makespan 投影
     python -m cli.experiment manifest --run 12                 # 看可复现性清单
@@ -344,6 +346,62 @@ def cmd_retry_failed(args: argparse.Namespace) -> int:
         print(f"  到 4 次上限    {list(summary.at_attempt_cap)} 题，不再补（协议 C-71）")
     if summary.requeued:
         print("起 Worker 来跑：python -m app.worker")
+    return 0
+
+
+# ── exclude / include ───────────────────────────────────────
+
+
+def cmd_exclude(args: argparse.Namespace) -> int:
+    """把一次实验标成"不进排行榜"，并写下理由。
+
+    为什么要这条命令：协议 C-26（平台故障率 5%）和 C-28（dirty）覆盖不了
+    "这次实验的数字根本不是测量结果"这一类。库里的 #119–#122 就是 ——
+    余额耗尽那一轮，88 次运行一次模型都没调到，却以
+    `COMPLETED / infra_failure_count=0 / resolved=0/22` 落库，
+    按协议筛完**完全合格**（细账见 `07-platform-architecture.md` §18.6 第九节）。
+
+    **只加一条注，不动那几行原有的判定字段。** `infra_outcome` 是适配器跑的时候
+    写下的一次性判断，没有重新推导的路；而且这次改的不是协议（版本号还是 v1.2），
+    谈不上"按新协议重算"。协议"冻结后的效力"第 3 条是同一个态度：
+    旧结果不重算，但要注明差异。
+    """
+    settings = get_settings()
+    factory = create_session_factory(create_db_engine(settings.database_url))
+    with session_scope(factory) as session:
+        run = session.get(EvaluationRun, args.run)
+        if run is None:
+            print(f"找不到实验 #{args.run}")
+            return 1
+        previous = run.leaderboard_excluded_reason
+        run.leaderboard_excluded_reason = args.reason
+        label = run.name
+
+    if previous:
+        print(f"实验 #{args.run}（{label}）原来的理由：{previous}")
+    print(f"实验 #{args.run}（{label}）已排除出排行榜")
+    print(f"  理由：{args.reason}")
+    print(f"  撤销：python -m cli.experiment include --run {args.run}")
+    return 0
+
+
+def cmd_include(args: argparse.Namespace) -> int:
+    """撤销排除，让一次实验重新有资格进排行榜。"""
+    settings = get_settings()
+    factory = create_session_factory(create_db_engine(settings.database_url))
+    with session_scope(factory) as session:
+        run = session.get(EvaluationRun, args.run)
+        if run is None:
+            print(f"找不到实验 #{args.run}")
+            return 1
+        previous = run.leaderboard_excluded_reason
+        run.leaderboard_excluded_reason = None
+        label = run.name
+
+    if previous is None:
+        print(f"实验 #{args.run}（{label}）本来就没被排除，什么都没做")
+        return 0
+    print(f"实验 #{args.run}（{label}）已撤销排除，原来的理由是：{previous}")
     return 0
 
 
@@ -918,6 +976,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_retry = sub.add_parser("retry-failed", help="把没有结论的题补跑（只补洞，见协议 C-25/C-55）")
     p_retry.add_argument("--run", type=int, required=True)
     p_retry.set_defaults(func=cmd_retry_failed)
+
+    p_exclude = sub.add_parser("exclude", help="把一次实验标成不进排行榜，并写下理由")
+    p_exclude.add_argument("--run", type=int, required=True)
+    p_exclude.add_argument(
+        "--reason", required=True, help="为什么不进排行榜。会原样显示在榜单下面，写清楚"
+    )
+    p_exclude.set_defaults(func=cmd_exclude)
+
+    p_include = sub.add_parser("include", help="撤销排除，让一次实验重新有资格进排行榜")
+    p_include.add_argument("--run", type=int, required=True)
+    p_include.set_defaults(func=cmd_include)
 
     p_manifest = sub.add_parser("manifest", help="看运行 manifest；给两个 --run 就是比对")
     p_manifest.add_argument("--run", type=int, action="append", required=True, help="实验号")

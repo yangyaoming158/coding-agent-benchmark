@@ -142,6 +142,26 @@ class EvaluationRun(Base):
     #: 标了 dirty 的结果不得进入排行榜 —— 因为记录的代码版本号已经对不上实际代码了。
     dirty: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, server_default=sa.false())
 
+    #: 人工判定"这次实验不该进排行榜"的理由。为空表示没被排除。
+    #:
+    #: 存理由文本而不是一个 bool：排除是**要向人解释**的动作，
+    #: 光一个 true 事后没人说得清当初为什么排。
+    #:
+    #: 为什么需要这一列：协议 C-26（平台故障率）和 C-28（dirty）覆盖不了
+    #: "这次实验的数字根本不是测量结果"这种情况。库里的 #119–#122 就是 ——
+    #: 那是 DeepSeek 余额耗尽那一轮，88 次运行一次模型都没调到，
+    #: 却以 `status=COMPLETED / infra_failure_count=0 / resolved=0/22` 落库，
+    #: **和一次正常跑出 0% 的实验长得一模一样**（细账见
+    #: `07-platform-architecture.md` §18.6 第九节）。
+    #:
+    #: 做成一列而不是在排行榜里现算启发式规则（比如"整场 token 为 0 就算没跑"），
+    #: 理由和 `dirty` 是同一条：排除依据必须是**记下来的事实**，可复核、可撤销，
+    #: 而不是一条藏在查询里、会误伤将来某个真的一次模型都没调就交空补丁的参赛者的猜测。
+    #:
+    #: **不改那几行原有的判定字段。** 排除是加一条注，不是重写测量结果
+    #: （协议"冻结后的效力"第 3 条：旧结果不重算，但要注明差异）。
+    leaderboard_excluded_reason: Mapped[str | None] = mapped_column(sa.String(300))
+
     #: 可复现性清单：镜像 digest 表、harness 的 git sha、数据集哈希、
     #: 环境变量白名单、随机种子。结构会演化且不需要 join 查询，所以放 JSONB。
     manifest: Mapped[dict[str, object]] = mapped_column(

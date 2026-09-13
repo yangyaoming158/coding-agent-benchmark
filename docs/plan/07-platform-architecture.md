@@ -340,6 +340,147 @@ POST /api/reports  {scope, run_ids, format}   GET /api/reports/{id}
 ```
 认证：P0 用**单一管理员 Token**（`X-Bench-Token` header）保护写操作，读接口开放。完整用户体系属于 P2（§29）。
 
+## 14.5 P0 子集实现落地（2026-09-12，E7-T0）
+
+上面那张表是设计时列的。真按 §16.2 的八个 P0 页面倒推一遍，落地的和它有四处不一样。
+
+### 一、砍掉两个端点，补上四个查询参数
+
+`GET /api/repositories` 和 `POST /api/tasks/{task_id}/validate` **没做**。
+
+前者原本的用途是 Benchmarks 页的"来源构成"，但那一页真正要问的是
+"**这一版数据集**里的题来自哪些仓库"，不是"库里一共有哪些仓库" ——
+后者在前端没有任何落点。所以构成统计放进了
+`GET /api/benchmark-sets/{slug}` 的 `composition` 字段（按语言 / 难度 / 仓库三组）。
+后者是写操作，验题走 `make validate-tasks`，八个 P0 页面没有一个要它。
+
+反过来，§14.4 给 `/api/tasks` 写的 `?set=&state=&q=` 三个参数**不够**：
+§16.2 的 Benchmark Detail 页写着筛选条件是"仓库 / 难度 / 语言 / 状态"，
+所以补了 `repo`、`difficulty`、`language` 三个。这三个参数在设计表里看不出来，
+只有对着页面倒推才会发现。
+
+### 二、题目接口不透出两个字段
+
+`gold_patch_uri`（官方修复补丁的位置）和 `test_patch_paths`（官方测试补丁改了哪些文件）
+**一个都不返回**。
+
+协议 C-44 禁止把 gold patch 发给被测 AI，C-76 禁止下发 `test_patch_paths`。
+这两条管的是"发给 AI 的任务输入"，而读接口是开放的（不需要 token），谁都能拉 ——
+把它们放进一个开放的 JSON 接口，等于给绕过任务输入开了第二扇门。
+要看官方补丁走命令行（`python -m cli.task show`），那条路上有人在场。
+
+### 三、排行榜的准入口径：协议给的两条不够，一共六条
+
+`/api/leaderboard` 要回答一个协议没覆盖的问题：**哪些运行有资格上榜。**
+
+协议给了两条：C-26 / C-26b（平台故障率超 5% 的记 `PARTIAL`）、C-28（`dirty` 的不进）。
+只按这两条筛，库里 18 个实验有 **14 个"合格"** —— 里面有哨兵、有停用的诊断参赛者、
+有只跑了 1–2 道题的探测跑，还有 4 个一次模型都没调到的（§18.6 第九节的 #119–#122）。
+
+实现的六条（`app/evaluation/leaderboard.py`）：
+
+| # | 规则 | 依据 |
+|:--|:---|:---|
+| 1 | `status = COMPLETED` | C-26b 的落点 |
+| 2 | `dirty = false` | C-28 |
+| 3 | `leaderboard_excluded_reason IS NULL` | 新增，见下 |
+| 4 | `agent_configs.enabled = true` | 停用的参赛者不是选手 |
+| 5 | `agents.kind` 不是 ORACLE / NOOP / MOCK | 哨兵是量具不是选手 |
+| 6 | `total_tasks = benchmark_sets.task_count` | 跑满整份快照才可比 |
+
+第 3–6 条协议里没有。它们回答的不是"这次实验跑得对不对"（那是 C-26 的事），
+而是"这个数字能不能和别人的放在一起比"。第 6 条尤其容易漏：严格解决率的分母是
+题库总题数（C-21），只跑了 2 道题的探测跑，它的 0% 和跑满 22 道的 0% 不是一个数。
+
+**按 `(参赛者, 协议版本)` 分组**，不是只按参赛者 —— 协议 C-59 要求排行榜按协议版本
+分开展示，不能把不同门槛下的结果混排。数据集不进分组键，它是查询参数：
+不同数据集的解决率之间没有可比性。
+
+**一行带轮间离散度**（`min` / `max` / `spread` / `run_count`）。
+§18.6 第六节实测同一批题跑两遍有五分之一的题会改结论，单轮解决率光凭抖动就差
+±9 个百分点，而 MET-01 要求"偏差 ≤5 个百分点" —— 只报一个平均数那个指标没法解释。
+
+### 四、`evaluation_runs` 加了一列：`leaderboard_excluded_reason`（迁移 0006）
+
+上面第 3 条的落点。存的是**理由文本**不是 bool —— 排除是要向人解释的动作，
+只记一个 true，半年后没人说得清当初为什么排。
+
+它是被 #119–#122 逼出来的：那四行 `COMPLETED / infra_failure_count=0 / dirty=false /
+22 题全有结论`，按协议**完全合格**，但 22 道题的 token 全是 0，一次模型都没调到。
+做成一列而不是在查询里现算启发式规则（比如"整场 token 为 0 就算没跑"），理由和 `dirty`
+是同一条：排除依据必须是**记下来的事实**，可复核、可撤销，而不是一条藏在 SQL 里、
+会误伤将来某个真的一次模型都没调就交空补丁的参赛者的猜测。
+
+填法：`python -m cli.experiment exclude --run 119 --reason "..."`，撤销用 `include`。
+**没做成 API 写端点** —— 这种要留痕的判断适合走命令行，不适合在网页上点一下就改掉。
+**那四行原有的判定字段一个没动**（`infra_outcome` 仍是 `SUCCESS`、
+`agent_outcome` 仍是 `EMPTY_PATCH`）：加一条注，不重写测量结果。
+
+排行榜响应里会把六条规则和被排除的实验连同理由一起返回 ——
+**一个不说自己筛掉了什么的排行榜没法复核**，而这里恰好有四条规则协议里没有。
+
+### 五、"报不出成本"不等于"最便宜"
+
+`?metric=cost` 第一版写完，跑真实数据出来是这样：
+
+```
+1 claude-code@deepseek-chat   $0.0/题     ← 排第一
+2 aider@deepseek-chat         $0.0175/题
+```
+
+claude-code 走中转端点，44 次全报 `cost_source=unavailable`（E3-T5 定的规矩），
+`total_cost_usd` 因此是 0。用"已知部分 ÷ 全部题数"算，每题就是 $0，于是它以"免费"夺冠。
+而 §18.6 第七节手算出来它是 **$0.042/题，比 aider 贵 2.4 倍**。
+
+改法：**只要有一次 attempt 报不出成本，`cost_per_task` 就是 `None`**，排序时垫到最后。
+金额本身照样放在 `cost_usd_total` 里，配上 reported / estimated / unavailable
+三个计数，看的人自己判断那笔钱有多少水分（协议纪律 3 要求三种来源区分显示）。
+
+这不是一个边角情况：库里两个真参赛者，有一个就是全程报不出成本。
+
+### 六、补丁正文在另一张表里，端点要跨两张表找
+
+`/artifacts/{kind}` 的 `{kind}` 接受**两套枚举**：`ArtifactKind`（日志、轨迹、
+测试报告）和只含两个值的 `AgentPatchKind`（`AGENT_RAW` / `AGENT_NORMALIZED`）。
+
+原因是文件索引确实分在两张表：日志类在 `artifacts`，补丁在 `patch_artifacts`
+（后者多出 `files_changed` / `is_empty` / `applies_cleanly` 这些补丁独有的统计，
+当初没并进 `artifacts`）。`ArtifactKind` 里那个 `PATCH` 值**全库没有任何一处往里写** ——
+2026-09-12 查库，`artifacts` 表 7 种 kind 里没有 PATCH，而 `patch_artifacts`
+有 431 + 431 行。
+
+第一版只查 `artifacts`，结果是 §16.2 的 Task Run Detail 页那个 **Patch Viewer
+取不到 diff 正文** —— 详情接口按 AC-6 只给补丁的统计，正文只能从制品端点拿，
+而那条路 404。对调用方来说这个分表没有意义：它只想问"给我这次执行的某个文件"。
+
+**顺带挡住一个更要紧的**：`PatchKind` 一共**四个**值，除了上面两个还有
+`GOLD`（官方修复补丁）和 `TEST`（官方测试补丁）。协议 C-44 / C-76 禁止它们
+到达被测 AI，而这是个**不要 token 的开放读接口**。库里现在没有这两种行，
+但枚举允许 —— 所以端点的 kind 参数用一个**只含两个值的独立枚举**
+（`app/api/task_runs.py` 的 `AgentPatchKind`），不是在函数里加一句 `if`：
+
+- 限制进 OpenAPI，`make gen-api` 生成的前端类型是
+  `AgentPatchKind: "AGENT_RAW" | "AGENT_NORMALIZED"`，**根本没有 GOLD 这个选项**；
+- 运行时会被忘掉，类型不会。
+
+实测：`GOLD` / `TEST` → **422**（参数非法），`AGENT_NORMALIZED` → 200（9555 字节的真 diff）。
+
+### 七、实测（本机，2026-09-12）
+
+15 个新端点全部可用，`make gen-api` 生成的 16 条路径过 `npm run typecheck`。
+拿库里的真实数据跑出来的排行榜，和 §18.6 手算的数字对得上：
+
+| 名次 | 参赛者 | 轮数 | 平均解决率 | 轮间抖动 | 每题成本 |
+|---:|:---|---:|---:|---:|:---|
+| 1 | claude-code@deepseek-chat | 2（#127/#128） | 86.4% | 0.0% | 不可用（44 次报不出） |
+| 2 | aider@deepseek-chat | 2（#125/#126） | 13.6% | 9.1% | $0.0175 |
+
+aider 的 $0.0175/题和 §18.6 第七节那张表**逐位相同**，
+9.1% 的轮间抖动就是 #125 的 9.09% 和 #126 的 18.18% 之差。
+被挡在榜外的：哨兵 #123/#129、门禁的 #115/#116（`dirty`）、
+探测跑 #117/#118/#124（分母不是 22）、诊断参赛者 #130–#132（`enabled=false`）、
+人工排除的 #119–#122。
+
 ---
 
 # 15 Async Execution Architecture

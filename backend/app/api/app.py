@@ -1,7 +1,20 @@
 """FastAPI 应用装配。
 
-目前只有健康检查。完整的 REST 接口是 E5 的活，这里先把骨架和启动方式定下来，
-让 `make dev` 有东西可起 —— 前端脚手架要对着一个真实的服务调通才有意义。
+路由按资源分文件（E7-T0）：
+
+| 文件 | 端点 |
+|:---|:---|
+| `health` | `/api/health` |
+| `benchmark_sets` | `/api/benchmark-sets{,/{slug}}` |
+| `tasks` | `/api/tasks{,/{task_id}}` |
+| `agents` | `/api/agents`、`/api/agent-configs` |
+| `runs` | `/api/runs{,/{id}}`、`/cancel`、`/retry-failed`、`/task-runs` |
+| `task_runs` | `/api/task-runs/{id}{,/tests,/artifacts/{kind}}` |
+| `leaderboard` | `/api/leaderboard` |
+
+**没配 `ADMIN_TOKEN` 就起不来**（E7-T0 AC-3）。写操作靠这个 token 把门，
+默认放行的部署从外面看和配好了的一模一样 —— 没有任何症状，
+直到有人发现谁都能掐掉一场跑了两小时的实验。起不来是看得见的。
 """
 
 from __future__ import annotations
@@ -11,11 +24,14 @@ from functools import lru_cache
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
-from app.api import health
+from app.api import agents, benchmark_sets, health, leaderboard, runs, task_runs, tasks
+from app.api.deps import require_admin_token_configured
+from app.api.errors import install_error_handlers
 from app.domain.protocol import PROTOCOL_VERSION
 from app.infrastructure.config import get_settings
-from app.infrastructure.db import create_db_engine
+from app.infrastructure.db import create_db_engine, create_session_factory
 from app.infrastructure.logging import configure_logging, get_logger
 
 
@@ -29,12 +45,20 @@ def get_engine() -> Engine:
     return create_db_engine()
 
 
+@lru_cache(maxsize=1)
+def get_session_factory() -> sessionmaker[Session]:
+    """进程内共用一个会话工厂。请求级的会话由 `app.api.deps.get_session` 开。"""
+    return create_session_factory(get_engine())
+
+
 def create_app() -> FastAPI:
     """建应用。写成工厂函数而不是模块级单例，测试里才能建互不干扰的实例。"""
     settings = get_settings()
     # 日志在这里配一次。Worker 有自己的入口，也要各配一次 ——
     # 两个进程各配各的，不共享。
     configure_logging(settings)
+    # 没配 ADMIN_TOKEN 直接抛，进程起不来（AC-3）
+    require_admin_token_configured()
 
     app = FastAPI(
         title="AI Coding Agent 评测基准平台",
@@ -53,7 +77,17 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # 错误响应统一成 {code, message}（AC-8）。要在挂路由之前装，
+    # 不然 Starlette 自己的 404 处理器会先注册上去
+    install_error_handlers(app)
+
     app.include_router(health.router)
+    app.include_router(benchmark_sets.router)
+    app.include_router(tasks.router)
+    app.include_router(agents.router)
+    app.include_router(runs.router)
+    app.include_router(task_runs.router)
+    app.include_router(leaderboard.router)
 
     get_logger(__name__).info(
         "API 已装配",

@@ -24,10 +24,654 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/benchmark-sets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Benchmark Sets
+         * @description 数据集版本列表，新的在前。
+         */
+        get: operations["list_benchmark_sets_api_benchmark_sets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/benchmark-sets/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Benchmark Set
+         * @description 一个数据集版本的详情。
+         *
+         *     不给 `version` 时走和 `cli.experiment start` 同一个解析规则
+         *     （`app.benchmark.dataset.resolve_set`）：先找最新的 `PUBLISHED`，
+         *     没有再退回最新的、有题的 `DRAFT`。两边用同一个函数，
+         *     免得"网页上看到的那一版"和"实际跑的那一版"是两个东西。
+         */
+        get: operations["get_benchmark_set_api_benchmark_sets__slug__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tasks
+         * @description 题目列表。六个筛选条件对应 Benchmark Detail 页的四个筛选器加搜索框。
+         */
+        get: operations["list_tasks_api_tasks_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/tasks/{task_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task
+         * @description 一道题的详情。按 `task_id`（字符串题号）取，不是主键。
+         *
+         *     §14.4 写的就是 `/api/tasks/{task_id}`，而题号才是人会从别处抄过来的那个 ——
+         *     日志、验证证据、数据集 CSV 里出现的都是 `pallets__click-2721`。
+         */
+        get: operations["get_task_api_tasks__task_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agents
+         * @description 适配器列表，按 id 升序。
+         */
+        get: operations["list_agents_api_agents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/agent-configs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Agent Configs
+         * @description 参赛者列表，按 id 升序。一条 SQL 带出所属 Agent 的名字和类型。
+         */
+        get: operations["list_agent_configs_api_agent_configs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Runs
+         * @description 实验列表，新的在前。进度条要的数全在行里，**一条 SQL**（AC-7）。
+         */
+        get: operations["list_runs_api_runs_get"];
+        put?: never;
+        /**
+         * Create Run
+         * @description 建一次（或多轮）实验，并把题展开成作业。
+         *
+         *     题从**数据集快照**（`benchmark_set_items`）里取，不是整张 `benchmark_tasks` ——
+         *     那张表里混着 INVALID 的题和别的数据集的题，全投进去解决率的分母就不对了。
+         */
+        post: operations["create_run_api_runs_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run
+         * @description 一次实验的详情，带可复现性清单。
+         */
+        get: operations["get_run_api_runs__run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/task-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Task Runs
+         * @description 一次实验的逐题执行记录。
+         *
+         *     排序是 `(题目 id, attempt 号)`，两者合起来唯一，所以翻页稳定（AC-4）。
+         *
+         *     **一条 SQL**：题号和 issue 标题是 join 出来的，不是每格再查一次
+         *     （22 道题的网格，一不留神就是 23 条查询，AC-7 点名的就是这个）。
+         */
+        get: operations["list_task_runs_api_runs__run_id__task_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel
+         * @description 取消一次实验。转给 `cancel_run()`，这里一行业务逻辑都没有。
+         */
+        post: operations["cancel_api_runs__run_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/runs/{run_id}/retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry
+         * @description 把没有认定结果、也没有在跑的题补投一次作业。转给 `retry_failed()`。
+         */
+        post: operations["retry_api_runs__run_id__retry_failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/task-runs/{task_run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task Run
+         * @description 一次执行的详情，带补丁统计和制品清单。
+         *
+         *     三条 SQL（本体 + 补丁 + 制品），**条数不随制品数量增长**（AC-7）。
+         */
+        get: operations["get_task_run_api_task_runs__task_run_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/task-runs/{task_run_id}/tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Tests
+         * @description 逐条用例的结果。
+         *
+         *     排序是 `(role, test_id, id)`。带上 id 是因为同一个 `test_id` 在参数化用例里
+         *     可能出现多次，只按前两项排不唯一，翻页会不稳（AC-4）。
+         */
+        get: operations["list_tests_api_task_runs__task_run_id__tests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/task-runs/{task_run_id}/artifacts/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Artifact
+         * @description 取一份制品或一份补丁的正文。**不把内容塞进 JSON**（AC-6）。
+         *
+         *     能拿到签名 URL 就 302 过去，拿不到就流式转发。
+         *     `kind` 为什么接受两套枚举，见模块开头第二节。
+         */
+        get: operations["get_artifact_api_task_runs__task_run_id__artifacts__kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/leaderboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Leaderboard
+         * @description 排行榜。
+         *
+         *     **一个数据集版本一张榜。** 不给 `set` 就取最新已发布的那一版 ——
+         *     不同数据集的解决率之间没有可比性，混在一起等于把两场考试的分数排在一起。
+         *
+         *     查询条数固定：合格实验 1 条、成本来源 1 条、分面 0 或 1 条（AC-7）。
+         */
+        get: operations["get_leaderboard_api_leaderboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AgentConfigSummary
+         * @description 一个参赛者。
+         */
+        AgentConfigSummary: {
+            /** Id */
+            id: number;
+            /** Agent Id */
+            agent_id: number;
+            /** Agent Name */
+            agent_name: string;
+            /** Agent Display Name */
+            agent_display_name: string;
+            agent_kind: components["schemas"]["AgentKind"];
+            /** Label */
+            label: string;
+            /** Agent Version */
+            agent_version: string;
+            /** Model Name */
+            model_name: string;
+            /** Params */
+            params: {
+                [key: string]: unknown;
+            };
+            /** Price Input Per Mtok */
+            price_input_per_mtok: string | null;
+            /** Price Output Per Mtok */
+            price_output_per_mtok: string | null;
+            /** Config Hash */
+            config_hash: string;
+            /** Enabled */
+            enabled: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * AgentKind
+         * @description 被测 AI 的类型。
+         *
+         *     MOCK / ORACLE / NOOP 是假 Agent，用来在完全不依赖外部服务的情况下测通整条链路：
+         *     ORACLE 交官方补丁（解决率必须 100%），NOOP 交空补丁（必须 0%）。
+         * @enum {string}
+         */
+        AgentKind: "MOCK" | "ORACLE" | "NOOP" | "CLI" | "CUSTOM";
+        /**
+         * AgentOutcome
+         * @description 被测 AI 修好了没有（协议 C-08）。
+         *
+         *     非终态时该字段一律为 NULL（协议 C-09），所以数据库里它是可空的。
+         *
+         *     EMPTY_PATCH 特别容易理解错：它的含义是"**标准化之后**的补丁为空"，
+         *     不等于"AI 什么都没做"（协议 C-08a）。AI 可能改了一堆受保护路径下的文件
+         *     想蒙混过关，被平台按 C-41 全部丢弃后也是空补丁。
+         *     这两种行为要靠 raw_patch_empty / protected_path_edit_attempted 区分（C-08b）。
+         * @enum {string}
+         */
+        AgentOutcome: "RESOLVED" | "UNRESOLVED" | "EMPTY_PATCH" | "INVALID_PATCH" | "NOT_ATTEMPTED";
+        /**
+         * AgentPatchKind
+         * @description 这个端点**允许**取的补丁种类：只有被测 AI 自己交出来的那两份。
+         *
+         *     `app.domain.enums.PatchKind` 一共四个值，另外两个**绝不能从这里出去**：
+         *
+         *     - `GOLD` 是官方修复补丁。协议 C-44 禁止它到达被测 AI ——
+         *       而这是个不要 token 的开放读接口，谁都能拉。
+         *     - `TEST` 是官方测试补丁，C-76 是同一个道理。
+         *
+         *     做成一个独立的窄枚举、而不是在函数里加一句 `if kind is GOLD: raise`：
+         *     这样限制会进 OpenAPI，`make gen-api` 生成的前端类型里**根本没有 GOLD 这个选项**，
+         *     写错了当场编译不过。运行时检查会被忘掉，类型不会。
+         *
+         *     库里现在只有这两种（2026-09-12 查过 `patch_artifacts`：431 + 431），
+         *     但枚举允许四种 —— 挡在这里，而不是指望将来没人往里写。
+         * @enum {string}
+         */
+        AgentPatchKind: "AGENT_RAW" | "AGENT_NORMALIZED";
+        /**
+         * AgentSummary
+         * @description 一个适配器定义。
+         */
+        AgentSummary: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            kind: components["schemas"]["AgentKind"];
+            /** Adapter Class */
+            adapter_class: string;
+            /** Homepage */
+            homepage: string | null;
+            /** Is Domestic */
+            is_domestic: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * ArtifactKind
+         * @description 制品的种类。日志、补丁、轨迹这些都可达数 MB，一律不入库，只在库里留索引行。
+         * @enum {string}
+         */
+        ArtifactKind: "AGENT_STDOUT" | "AGENT_STDERR" | "TEST_STDOUT" | "TEST_REPORT_XML" | "TRAJECTORY" | "PATCH" | "REPORT_HTML" | "VALIDATION_EVIDENCE" | "BUILD_LOG";
+        /**
+         * ArtifactSummary
+         * @description 一个制品的索引。前端靠 `kind` 拼下载链接。
+         */
+        ArtifactSummary: {
+            kind: components["schemas"]["ArtifactKind"];
+            /** Content Type */
+            content_type: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Sha256 */
+            sha256: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * BenchmarkSetDetail
+         * @description 详情。比列表多两块：构成和发布证据。
+         */
+        BenchmarkSetDetail: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Version */
+            version: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            status: components["schemas"]["BenchmarkSetStatus"];
+            /** Task Count */
+            task_count: number;
+            /** Source Dataset Id */
+            source_dataset_id: string | null;
+            /** Snapshot Digest */
+            snapshot_digest: string | null;
+            /** Published At */
+            published_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Composition */
+            composition: {
+                [key: string]: components["schemas"]["CompositionCell"][];
+            };
+            /** Publish Evidence */
+            publish_evidence: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * BenchmarkSetStatus
+         * @description 数据集版本的状态。PUBLISHED 之后题目清单就冻结了，靠 benchmark_set_items 快照保证。
+         * @enum {string}
+         */
+        BenchmarkSetStatus: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+        /**
+         * BenchmarkSetSummary
+         * @description 列表里的一行。
+         */
+        BenchmarkSetSummary: {
+            /** Id */
+            id: number;
+            /** Slug */
+            slug: string;
+            /** Version */
+            version: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            status: components["schemas"]["BenchmarkSetStatus"];
+            /** Task Count */
+            task_count: number;
+            /** Source Dataset Id */
+            source_dataset_id: string | null;
+            /** Snapshot Digest */
+            snapshot_digest: string | null;
+            /** Published At */
+            published_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * CancelResponse
+         * @description 取消的结果。
+         */
+        CancelResponse: {
+            /** Evaluation Run Id */
+            evaluation_run_id: number;
+            /** Dropped Jobs */
+            dropped_jobs: number;
+            /** In Flight Jobs */
+            in_flight_jobs: number;
+            /** Already Cancelled */
+            already_cancelled: boolean;
+        };
+        /**
+         * CompositionCell
+         * @description 构成里的一格：某个取值下有几道题。
+         */
+        CompositionCell: {
+            /** Value */
+            value: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * CostSource
+         * @description 费用数字是怎么来的。
+         *
+         *     unavailable 在订阅制 CLI 上很常见（它不报 token 用量），
+         *     这时平台按 token_usage × 配置单价估算并标成 estimated，报告里必须区分显示。
+         * @enum {string}
+         */
+        CostSource: "reported" | "estimated" | "unavailable";
+        /**
+         * CreateRunRequest
+         * @description 建实验的请求体。字段对齐 §14.4。
+         */
+        CreateRunRequest: {
+            /** Benchmark Set Id */
+            benchmark_set_id: number;
+            /** Agent Config Id */
+            agent_config_id: number;
+            /** Agent Concurrency */
+            agent_concurrency?: number | null;
+            /** Sandbox Concurrency */
+            sandbox_concurrency?: number | null;
+            /** Name */
+            name?: string | null;
+            /**
+             * Rounds
+             * @default 1
+             */
+            rounds: number;
+        };
+        /**
+         * CreateRunResponse
+         * @description 建完之后返回建了哪几个。
+         */
+        CreateRunResponse: {
+            /** Runs */
+            runs: components["schemas"]["RunSummary"][];
+            /** Task Count */
+            task_count: number;
+        };
+        /**
+         * ErrorResponse
+         * @description 出错时的响应体。OpenAPI 里所有 4xx/5xx 都指向它。
+         */
+        ErrorResponse: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * EvaluationRunStatus
+         * @description 一次实验的状态（协议 C-33）。
+         *
+         *     COMPLETED：全部子任务结束，且平台故障题数 ≤ floor(总题数 × 5%) → 可进排行榜
+         *     PARTIAL：  全部子任务结束，但平台故障题数超标 → 前端显示"降级"，不进排行榜
+         *     FAILED：   调度层自己挂了
+         *
+         *     界面上的"降级"只是 PARTIAL 的中文说法，**不要**再引入 DEGRADED 这个值（C-26b）。
+         * @enum {string}
+         */
+        EvaluationRunStatus: "DRAFT" | "QUEUED" | "RUNNING" | "COMPLETED" | "PARTIAL" | "FAILED" | "CANCELLED";
+        /**
+         * ExcludedRun
+         * @description 被人工排除出排行榜的一次实验。
+         */
+        ExcludedRun: {
+            /** Evaluation Run Id */
+            evaluation_run_id: number;
+            /** Reason */
+            reason: string;
+        };
+        /**
+         * FacetCellOut
+         * @description 某个分面取值上的成绩。`value` 是枚举原值，不做中文映射（AC-10）。
+         */
+        FacetCellOut: {
+            /** Value */
+            value: string;
+            /** Resolved */
+            resolved: number;
+            /** Total */
+            total: number;
+            /** Resolve Rate */
+            resolve_rate: string | null;
+        };
         /**
          * HealthResponse
          * @description 健康检查的返回。
@@ -48,6 +692,682 @@ export interface components {
             /** Migration Revision */
             migration_revision: string | null;
         };
+        /**
+         * InfraOutcome
+         * @description 这次跑得对不对 —— 平台自己有没有出故障（协议 C-05）。
+         *
+         *     注意 OOM_KILLED 的判定方式：只能用 `docker inspect .State.OOMKilled`，
+         *     **禁止**用退出码判断（协议 C-06、C-07）。内存超限和超时强杀的退出码都是 137，
+         *     已在开发机实测确认，靠退出码会把两种相反的情况判成一样。
+         * @enum {string}
+         */
+        InfraOutcome: "SUCCESS" | "ENV_BUILD_FAILED" | "WORKSPACE_ERROR" | "AGENT_TIMEOUT" | "AGENT_RUNTIME_ERROR" | "AGENT_AUTH_ERROR" | "SANDBOX_ERROR" | "OOM_KILLED" | "TEST_TIMEOUT" | "TEST_DISCOVERY_ERROR" | "PATCH_APPLY_FAILED" | "HARNESS_ERROR" | "CANCELLED";
+        /**
+         * IssueLanguage
+         * @description Issue 正文的语言。zh 占比是本项目的公开指标之一，所以要单独存一列而不是靠事后检测。
+         * @enum {string}
+         */
+        IssueLanguage: "zh" | "en" | "mixed";
+        /**
+         * LeaderboardFacet
+         * @description 按哪个维度分面（§16.2 的 Leaderboard 页要"按难度/语言/仓库分面"）。
+         * @enum {string}
+         */
+        LeaderboardFacet: "difficulty" | "language" | "repository";
+        /**
+         * LeaderboardMetric
+         * @description 排行榜按什么排。名字是 URL 参数里直接用的值。
+         * @enum {string}
+         */
+        LeaderboardMetric: "resolve_rate" | "cost" | "duration" | "tokens";
+        /**
+         * LeaderboardResponse
+         * @description 榜单 + 它是怎么筛出来的。
+         */
+        LeaderboardResponse: {
+            /** Benchmark Set Id */
+            benchmark_set_id: number;
+            /** Benchmark Set */
+            benchmark_set: string;
+            metric: components["schemas"]["LeaderboardMetric"];
+            facet: components["schemas"]["LeaderboardFacet"] | null;
+            rows: components["schemas"]["Page_LeaderboardRowOut_"];
+            /** Eligibility */
+            eligibility: string[];
+            /** Excluded Runs */
+            excluded_runs: components["schemas"]["ExcludedRun"][];
+        };
+        /**
+         * LeaderboardRowOut
+         * @description 榜单的一行 = 一个参赛者 × 一个协议版本。
+         */
+        LeaderboardRowOut: {
+            /** Rank */
+            rank: number;
+            /** Agent Config Id */
+            agent_config_id: number;
+            /** Label */
+            label: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Agent Display Name */
+            agent_display_name: string;
+            /** Agent Version */
+            agent_version: string;
+            /** Model Name */
+            model_name: string;
+            /** Protocol Version */
+            protocol_version: string;
+            /** Run Count */
+            run_count: number;
+            /** Run Ids */
+            run_ids: number[];
+            /** Tasks Per Run */
+            tasks_per_run: number;
+            /** Resolve Rate Mean */
+            resolve_rate_mean: string | null;
+            /** Resolve Rate Min */
+            resolve_rate_min: string | null;
+            /** Resolve Rate Max */
+            resolve_rate_max: string | null;
+            /** Resolve Rate Spread */
+            resolve_rate_spread: string | null;
+            /** Effective Resolve Rate Mean */
+            effective_resolve_rate_mean: string | null;
+            /** Resolved Mean */
+            resolved_mean: string;
+            /** Cost Usd Total */
+            cost_usd_total: string;
+            /** Cost Per Task */
+            cost_per_task: string | null;
+            /** Cost Reported Attempts */
+            cost_reported_attempts: number;
+            /** Cost Estimated Attempts */
+            cost_estimated_attempts: number;
+            /** Cost Unavailable Attempts */
+            cost_unavailable_attempts: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Tokens Per Task */
+            tokens_per_task: number | null;
+            /** Makespan Ms Mean */
+            makespan_ms_mean: number | null;
+            /** Infra Failure Total */
+            infra_failure_total: number;
+            /** Retry Total */
+            retry_total: number;
+            /** Facets */
+            facets: components["schemas"]["FacetCellOut"][];
+        };
+        /**
+         * LifecycleStatus
+         * @description 一次评测走到哪一步了（协议 C-04）。
+         *
+         *     终态只有三个：COMPLETED、FAILED、CANCELLED（协议 C-04a）。
+         *     **没有 TIMEOUT 终态** —— 超时的具体类型记在 InfraOutcome 里。
+         *     AI 自己超时算"拿到了结论"（COMPLETED），环境问题超时算"没拿到结论"（FAILED）。
+         * @enum {string}
+         */
+        LifecycleStatus: "QUEUED" | "PREPARING" | "AGENT_RUNNING" | "PATCH_CAPTURED" | "TESTING" | "JUDGING" | "ANALYZING" | "COMPLETED" | "FAILED" | "CANCELLED";
+        /** Page[AgentConfigSummary] */
+        Page_AgentConfigSummary_: {
+            /** Items */
+            items: components["schemas"]["AgentConfigSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[AgentSummary] */
+        Page_AgentSummary_: {
+            /** Items */
+            items: components["schemas"]["AgentSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[BenchmarkSetSummary] */
+        Page_BenchmarkSetSummary_: {
+            /** Items */
+            items: components["schemas"]["BenchmarkSetSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[LeaderboardRowOut] */
+        Page_LeaderboardRowOut_: {
+            /** Items */
+            items: components["schemas"]["LeaderboardRowOut"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[RunSummary] */
+        Page_RunSummary_: {
+            /** Items */
+            items: components["schemas"]["RunSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[TaskRunSummary] */
+        Page_TaskRunSummary_: {
+            /** Items */
+            items: components["schemas"]["TaskRunSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[TaskSummary] */
+        Page_TaskSummary_: {
+            /** Items */
+            items: components["schemas"]["TaskSummary"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /** Page[TestResultRow] */
+        Page_TestResultRow_: {
+            /** Items */
+            items: components["schemas"]["TestResultRow"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
+        /**
+         * PatchKind
+         * @description 补丁的种类。
+         *
+         *     AGENT_RAW 是 AI 交出来的原样，AGENT_NORMALIZED 是过滤受保护路径之后的。
+         *     两份都要存：只存后者的话，"AI 试图改测试文件"这个行为就查不到了。
+         * @enum {string}
+         */
+        PatchKind: "AGENT_RAW" | "AGENT_NORMALIZED" | "GOLD" | "TEST";
+        /**
+         * PatchSummary
+         * @description 一份补丁的统计。**只给统计，不给正文**。
+         *
+         *     正文走 `/artifacts/{kind}`，`kind` 填这里的 `AGENT_RAW` 或 `AGENT_NORMALIZED`。
+         */
+        PatchSummary: {
+            kind: components["schemas"]["PatchKind"];
+            /** Sha256 */
+            sha256: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Files Changed */
+            files_changed: number;
+            /** Lines Added */
+            lines_added: number;
+            /** Lines Deleted */
+            lines_deleted: number;
+            /** Is Empty */
+            is_empty: boolean;
+            /** Applies Cleanly */
+            applies_cleanly: boolean | null;
+        };
+        /**
+         * RetryResponse
+         * @description 补跑的结果。
+         */
+        RetryResponse: {
+            /** Evaluation Run Id */
+            evaluation_run_id: number;
+            /** Requeued */
+            requeued: number[];
+            /** At Attempt Cap */
+            at_attempt_cap: number[];
+            /** Already Decided */
+            already_decided: number;
+            /** Still Running */
+            still_running: number;
+        };
+        /**
+         * RunDetail
+         * @description 实验详情。多一份可复现性清单。
+         */
+        RunDetail: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Benchmark Set Id */
+            benchmark_set_id: number;
+            /** Benchmark Set */
+            benchmark_set: string;
+            /** Agent Config Id */
+            agent_config_id: number;
+            /** Agent Config Label */
+            agent_config_label: string;
+            /** Agent Name */
+            agent_name: string;
+            status: components["schemas"]["EvaluationRunStatus"];
+            /** Total Tasks */
+            total_tasks: number;
+            /** Completed Tasks */
+            completed_tasks: number;
+            /** Resolved Count */
+            resolved_count: number;
+            /** Infra Failure Count */
+            infra_failure_count: number;
+            /** Strict Resolve Rate */
+            strict_resolve_rate: string | null;
+            /** Effective Resolve Rate */
+            effective_resolve_rate: string | null;
+            /** Total Cost Usd */
+            total_cost_usd: string;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Makespan Ms */
+            makespan_ms: number | null;
+            /** Agent Concurrency */
+            agent_concurrency: number;
+            /** Sandbox Concurrency */
+            sandbox_concurrency: number;
+            /** Retry Count */
+            retry_count: number;
+            /** Recovered Infra Failure Count */
+            recovered_infra_failure_count: number;
+            /** Dirty */
+            dirty: boolean;
+            /** Leaderboard Excluded Reason */
+            leaderboard_excluded_reason: string | null;
+            /** Protocol Version */
+            protocol_version: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Manifest */
+            manifest: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * RunSummary
+         * @description 实验列表里的一行。进度条要的数都在这儿，不用再查子表。
+         */
+        RunSummary: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string;
+            /** Benchmark Set Id */
+            benchmark_set_id: number;
+            /** Benchmark Set */
+            benchmark_set: string;
+            /** Agent Config Id */
+            agent_config_id: number;
+            /** Agent Config Label */
+            agent_config_label: string;
+            /** Agent Name */
+            agent_name: string;
+            status: components["schemas"]["EvaluationRunStatus"];
+            /** Total Tasks */
+            total_tasks: number;
+            /** Completed Tasks */
+            completed_tasks: number;
+            /** Resolved Count */
+            resolved_count: number;
+            /** Infra Failure Count */
+            infra_failure_count: number;
+            /** Strict Resolve Rate */
+            strict_resolve_rate: string | null;
+            /** Effective Resolve Rate */
+            effective_resolve_rate: string | null;
+            /** Total Cost Usd */
+            total_cost_usd: string;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Makespan Ms */
+            makespan_ms: number | null;
+            /** Agent Concurrency */
+            agent_concurrency: number;
+            /** Sandbox Concurrency */
+            sandbox_concurrency: number;
+            /** Retry Count */
+            retry_count: number;
+            /** Recovered Infra Failure Count */
+            recovered_infra_failure_count: number;
+            /** Dirty */
+            dirty: boolean;
+            /** Leaderboard Excluded Reason */
+            leaderboard_excluded_reason: string | null;
+            /** Protocol Version */
+            protocol_version: string;
+            /** Started At */
+            started_at: string | null;
+            /** Finished At */
+            finished_at: string | null;
+            /** Created By */
+            created_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * TaskDetail
+         * @description 详情。多的是 issue 正文、用例清单、资源限额和验证结论。
+         */
+        TaskDetail: {
+            /** Id */
+            id: number;
+            /** Task Id */
+            task_id: string;
+            /** Repository */
+            repository: string;
+            /** Environment Id */
+            environment_id: string;
+            /** Base Commit */
+            base_commit: string;
+            /** Issue Title */
+            issue_title: string;
+            issue_language: components["schemas"]["IssueLanguage"];
+            difficulty: components["schemas"]["TaskDifficulty"];
+            validation_state: components["schemas"]["TaskValidationState"];
+            /** Tags */
+            tags: string[];
+            /** Fail To Pass Count */
+            fail_to_pass_count: number;
+            /** Pass To Pass Count */
+            pass_to_pass_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Issue Body */
+            issue_body: string;
+            /** Source Issue Url */
+            source_issue_url: string | null;
+            /** Source Pr Url */
+            source_pr_url: string | null;
+            /** Fail To Pass */
+            fail_to_pass: string[];
+            /** Pass To Pass */
+            pass_to_pass: string[];
+            /** Agent Timeout S */
+            agent_timeout_s: number;
+            /** Test Timeout S */
+            test_timeout_s: number;
+            /** Sandbox Cpu */
+            sandbox_cpu: string;
+            /** Sandbox Memory Mb */
+            sandbox_memory_mb: number;
+            /** Sandbox Pids Limit */
+            sandbox_pids_limit: number;
+            /** Invalid Reason Code */
+            invalid_reason_code: string | null;
+            /** Validated At */
+            validated_at: string | null;
+            /** Validation Evidence Uri */
+            validation_evidence_uri: string | null;
+            /** Quarantine */
+            quarantine: {
+                [key: string]: unknown;
+            } | null;
+            /** Content Hash */
+            content_hash: string;
+        };
+        /**
+         * TaskDifficulty
+         * @description 题目难度。由 gold_patch 改动行数、改动文件数、F2P 用例数三个客观量派生，不靠拍脑袋。
+         *
+         *     取值用小写，与任务 JSON（`docs/plan/03-benchmark-spec.md` §7.1）保持一致。
+         * @enum {string}
+         */
+        TaskDifficulty: "easy" | "medium" | "hard";
+        /**
+         * TaskRunDetail
+         * @description 一次执行的完整经过。
+         */
+        TaskRunDetail: {
+            /** Id */
+            id: number;
+            /** Evaluation Run Id */
+            evaluation_run_id: number;
+            /** Benchmark Task Id */
+            benchmark_task_id: number;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Is Canonical */
+            is_canonical: boolean;
+            /** Retry Of Id */
+            retry_of_id: number | null;
+            lifecycle_status: components["schemas"]["LifecycleStatus"];
+            infra_outcome: components["schemas"]["InfraOutcome"] | null;
+            agent_outcome: components["schemas"]["AgentOutcome"] | null;
+            /** Queued At */
+            queued_at: string | null;
+            /** Prepare Started At */
+            prepare_started_at: string | null;
+            /** Agent Started At */
+            agent_started_at: string | null;
+            /** Agent Finished At */
+            agent_finished_at: string | null;
+            /** Test Started At */
+            test_started_at: string | null;
+            /** Test Finished At */
+            test_finished_at: string | null;
+            /** Judged At */
+            judged_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Agent Duration Ms */
+            agent_duration_ms: number | null;
+            /** Test Duration Ms */
+            test_duration_ms: number | null;
+            /** Total Duration Ms */
+            total_duration_ms: number | null;
+            /** Exit Code */
+            exit_code: number | null;
+            /** Tokens Input */
+            tokens_input: number | null;
+            /** Tokens Output */
+            tokens_output: number | null;
+            /** Tokens Cache Read */
+            tokens_cache_read: number | null;
+            /** Tokens Total */
+            tokens_total: number | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            cost_source: components["schemas"]["CostSource"] | null;
+            /** Turns */
+            turns: number | null;
+            /** Files Changed */
+            files_changed: number | null;
+            /** Lines Added */
+            lines_added: number | null;
+            /** Lines Deleted */
+            lines_deleted: number | null;
+            /** F2P Passed */
+            f2p_passed: number | null;
+            /** F2P Total */
+            f2p_total: number | null;
+            /** P2P Passed */
+            p2p_passed: number | null;
+            /** P2P Total */
+            p2p_total: number | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Error Message Excerpt */
+            error_message_excerpt: string | null;
+            /** Worker Id */
+            worker_id: string | null;
+            /** Raw Patch Empty */
+            raw_patch_empty: boolean | null;
+            /** Protected Path Edit Attempted */
+            protected_path_edit_attempted: boolean | null;
+            /** Filtered Change Reasons */
+            filtered_change_reasons: {
+                [key: string]: unknown;
+            }[] | null;
+            /** Patches */
+            patches: components["schemas"]["PatchSummary"][];
+            /** Artifacts */
+            artifacts: components["schemas"]["ArtifactSummary"][];
+        };
+        /**
+         * TaskRunSummary
+         * @description Run Detail 页那张任务网格的一格。
+         */
+        TaskRunSummary: {
+            /** Id */
+            id: number;
+            /** Evaluation Run Id */
+            evaluation_run_id: number;
+            /** Benchmark Task Id */
+            benchmark_task_id: number;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            /** Attempt No */
+            attempt_no: number;
+            /** Is Canonical */
+            is_canonical: boolean;
+            lifecycle_status: components["schemas"]["LifecycleStatus"];
+            infra_outcome: components["schemas"]["InfraOutcome"] | null;
+            agent_outcome: components["schemas"]["AgentOutcome"] | null;
+            /** F2P Passed */
+            f2p_passed: number | null;
+            /** F2P Total */
+            f2p_total: number | null;
+            /** P2P Passed */
+            p2p_passed: number | null;
+            /** P2P Total */
+            p2p_total: number | null;
+            /** Agent Duration Ms */
+            agent_duration_ms: number | null;
+            /** Test Duration Ms */
+            test_duration_ms: number | null;
+            /** Total Duration Ms */
+            total_duration_ms: number | null;
+            /** Cost Usd */
+            cost_usd: string | null;
+            /** Tokens Total */
+            tokens_total: number | null;
+            /** Error Code */
+            error_code: string | null;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+        };
+        /**
+         * TaskSummary
+         * @description 列表里的一行。
+         */
+        TaskSummary: {
+            /** Id */
+            id: number;
+            /** Task Id */
+            task_id: string;
+            /** Repository */
+            repository: string;
+            /** Environment Id */
+            environment_id: string;
+            /** Base Commit */
+            base_commit: string;
+            /** Issue Title */
+            issue_title: string;
+            issue_language: components["schemas"]["IssueLanguage"];
+            difficulty: components["schemas"]["TaskDifficulty"];
+            validation_state: components["schemas"]["TaskValidationState"];
+            /** Tags */
+            tags: string[];
+            /** Fail To Pass Count */
+            fail_to_pass_count: number;
+            /** Pass To Pass Count */
+            pass_to_pass_count: number;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /**
+         * TaskValidationState
+         * @description 题目的验证状态。只有 VALID 的题目能进数据集。
+         *
+         *     QUARANTINED 是隔离：题目复验也失败才会到这一步（协议 C-20 第 6 步）。
+         *     **禁止**因为一次超时就直接隔离题目（协议 C-20a）。
+         * @enum {string}
+         */
+        TaskValidationState: "DISCOVERED" | "CANDIDATE" | "VALIDATING" | "VALID" | "INVALID" | "REVIEW_REQUIRED" | "QUARANTINED";
+        /**
+         * TestResultRow
+         * @description 一条用例的结果 —— 判定的证据。
+         */
+        TestResultRow: {
+            /** Id */
+            id: number;
+            /** Test Id */
+            test_id: string;
+            role: components["schemas"]["TestRole"];
+            status: components["schemas"]["TestStatus"];
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Message Excerpt */
+            message_excerpt: string | null;
+        };
+        /**
+         * TestRole
+         * @description 这条用例在题目里担任什么角色。
+         *
+         *     F2P：修复前必须失败、修复后必须通过
+         *     P2P：修复前后都必须通过，用来检查有没有把别的功能改坏
+         *     OTHER：不在这两个名单里但报告中出现了的用例，存下来备查，不参与判定
+         * @enum {string}
+         */
+        TestRole: "F2P" | "P2P" | "OTHER";
+        /**
+         * TestStatus
+         * @description 单条测试用例的状态（协议 C-10）。
+         *
+         *     MISSING 表示题目里列了这条用例，但测试报告里找不到它（C-11）。
+         *     **禁止**把 MISSING、SKIPPED、XFAIL 当作通过（C-12）。
+         *     也**禁止**仅凭 MISSING 就判定作弊（C-13a）—— 用例 ID 归一化写错本身
+         *     就会制造大量假 MISSING，这是本项目公认最容易出的静默 bug。
+         * @enum {string}
+         */
+        TestStatus: "PASSED" | "FAILED" | "ERROR" | "SKIPPED" | "XFAIL" | "XPASS" | "MISSING";
     };
     responses: never;
     parameters: never;
@@ -73,6 +1393,819 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HealthResponse"];
+                };
+            };
+        };
+    };
+    list_benchmark_sets_api_benchmark_sets_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这个 slug 的版本 */
+                slug?: string | null;
+                /** @description 只看这个状态 */
+                status?: components["schemas"]["BenchmarkSetStatus"] | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_BenchmarkSetSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_benchmark_set_api_benchmark_sets__slug__get: {
+        parameters: {
+            query?: {
+                /** @description 不给就取最新已发布的那一版 */
+                version?: string | null;
+            };
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BenchmarkSetDetail"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_tasks_api_tasks_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这一版数据集快照里冻住的题 */
+                set?: number | null;
+                /** @description 验证状态 */
+                state?: components["schemas"]["TaskValidationState"] | null;
+                /** @description 仓库全名，如 pallets/click */
+                repo?: string | null;
+                /** @description 难度 */
+                difficulty?: components["schemas"]["TaskDifficulty"] | null;
+                /** @description issue 语言 */
+                language?: components["schemas"]["IssueLanguage"] | null;
+                /** @description 在题号和 issue 标题里搜，不区分大小写 */
+                q?: string | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TaskSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_task_api_tasks__task_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskDetail"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_agents_api_agents_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这一类 */
+                kind?: components["schemas"]["AgentKind"] | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AgentSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_agent_configs_api_agent_configs_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这个 Agent 的配置，用 name */
+                agent?: string | null;
+                /** @description 只看启用/停用的 */
+                enabled?: boolean | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_AgentConfigSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_runs_api_runs_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这一版数据集的 */
+                set?: number | null;
+                /** @description 只看这个参赛者的 */
+                agent_config?: number | null;
+                /** @description 只看这个状态的 */
+                status?: components["schemas"]["EvaluationRunStatus"] | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_RunSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    create_run_api_runs_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateRunResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run_api_runs__run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunDetail"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_task_runs_api_runs__run_id__task_runs_get: {
+        parameters: {
+            query?: {
+                /** @description 只看这个生命周期状态的 */
+                status?: components["schemas"]["LifecycleStatus"] | null;
+                /** @description 只看认定结果那一次 attempt（协议 C-24） */
+                canonical_only?: boolean;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TaskRunSummary_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_api_runs__run_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CancelResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    retry_api_runs__run_id__retry_failed_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path: {
+                run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RetryResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_task_run_api_task_runs__task_run_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskRunDetail"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_tests_api_task_runs__task_run_id__tests_get: {
+        parameters: {
+            query?: {
+                /** @description 只看 F2P 或 P2P */
+                role?: components["schemas"]["TestRole"] | null;
+                /** @description 只看某个状态的用例 */
+                status?: components["schemas"]["TestStatus"] | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                task_run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_TestResultRow_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_artifact_api_task_runs__task_run_id__artifacts__kind__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_run_id: number;
+                kind: components["schemas"]["ArtifactKind"] | components["schemas"]["AgentPatchKind"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 制品内容（流式） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "*/*": unknown;
+                };
+            };
+            /** @description 重定向到签名 URL */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_leaderboard_api_leaderboard_get: {
+        parameters: {
+            query?: {
+                /** @description 数据集 slug。不给就取最新已发布的那一版 */
+                set?: string | null;
+                /** @description 数据集版本，配合 set 用 */
+                version?: string | null;
+                /** @description 按什么排 */
+                metric?: components["schemas"]["LeaderboardMetric"];
+                /** @description 按难度/语言/仓库分面 */
+                facet?: components["schemas"]["LeaderboardFacet"] | null;
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LeaderboardResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
         };
