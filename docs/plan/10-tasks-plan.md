@@ -995,7 +995,73 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ## E6 — Failure Attribution & Human Review
 
-### E6-T1 规则前置分类器 · **P0 · C:M · E:1d**（F6/F7/F8/N1 确定性归类 + Stage2 特征提取）
+### E6-T1 规则前置分类器 ✅ 已于 2026-09-13 完成 · **P0 · C:M · E:1d**（F6/F7/F8/N1 确定性归类 + Stage2 特征提取）
+- **Goal**：把失败里"规则就能判死"的那部分判掉，不调大模型；顺带把 F1–F5 要用的
+  结构化特征抽出来，交给 E6-T2
+- **Req**：MET-04 · **Deps**：E4-T3 · **Modules**：`attribution`
+- **Output**：`app/attribution/rules.py` + `python -m cli.attribute rules`；
+  `failure_attributions` 落 `stage=RULE` 的行
+- **两处偏离卡面，开工前定的**：
+  1. **只做批量回填的命令行，不接进 `execute_task_run()` 的主流程。**
+     §12.4 最后一条要求"归因挂了不能影响判定"，跑在主流程外是最省事的保证。
+     而且 E6-T2 的大模型归因必然是异步的（要缓存、要投票、要退避），两层归因
+     应该共用一个入口 —— 那个入口连同 `LifecycleStatus.ANALYZING` 一起留给 E6-T2。
+  2. **`TEST_TIMEOUT` 这一格规则判不了，不猜。** 协议 C-20 要求跑对照组才能定责任方，
+     而对照组是 E4-T5，还没做；`INFRA_TO_AGENT_MAPPING` 里它的三个字段也确实写着
+     `BY_CONTROL_RUN`。这一格归入"规则判不了"，交给 E6-T2 / 人工。库里现在一条
+     `TEST_TIMEOUT` 都没有，不挡验收。
+- **AC**（**卡片原本只有标题那一行**，10 条是 2026-09-13 开工前定的）：
+  1. 分类器是**纯函数**：吃一个结构化快照（`agent_outcome`、`infra_outcome`、
+     f2p/p2p 四个计数、`raw_patch_empty`、`protected_path_edit_attempted`），
+     吐 `(category, evidence)`，不连库、不连网、不看文件
+  2. 责任方查 `app/domain/protocol.py` 的 `INFRA_TO_AGENT_MAPPING`，不另写一串 `if`
+     （协议 C-19）。有一条**穷举测试**：13 个 `infra_outcome` 每个都有确定归类，
+     将来往枚举里加值，测试立刻变红
+  3. F6 / F7 / F8 / N1 各有单元测试；边界也要有：`f2p_total=0`、`p2p_total=0`、
+     `agent_outcome` 为 NULL、`CANCELLED`、`TEST_TIMEOUT`
+  4. 结果落 `failure_attributions`（`stage=RULE`、`status=OK`，`evidence` 里带
+     触发这条规则的字段原值）。按 `UNIQUE(evaluation_task_run_id)` upsert：
+     重跑不产生重复行，**也不覆盖已有的 `stage=LLM` / `HUMAN` 结论**
+  5. 规则判不了的**一行都不写**，留给 E6-T2。不落"先猜着"的 category
+  6. 一条命令回填全库：`python -m cli.attribute rules [--run-id N] [--redo]`，
+     跑完打一张分布表
+  7. **实测覆盖率**：库里现有的失败上，规则层判死 **≥ 55%**（§12.2 给的下限）。
+     开工前用 SQL 预演过一遍是 77%，低于 55% 要查原因，不能改 AC
+  8. Stage2 特征提取跟着落地，四组特征（改动文件与官方补丁的重合度、报错信息
+     前后变没变、日志里的错误类型、轨迹统计），输出结构化 JSON，**不调大模型**。
+     取不到的维度标 `unavailable`，不编
+  9. 归因挂了不影响判定：分类器抛异常时 `agent_outcome` 一个字都不变，有测试盖住
+  10. 不碰冻结件，不加数据库迁移（`failure_attributions` 表 E0-T3 就建好了）
+- **实际交付**（2026-09-13）：`app/attribution/{rules,features,persistence}.py` +
+  `python -m cli.attribute {rules,features}`。**10 条 AC 全达成**，53 个新测试
+  （合计 1856 全绿，`make check` 四条模块边界契约也全过）。
+  **实测覆盖率 77.0%（238/309）**，AC 要 ≥55%，和开工前用 SQL 预演的数逐位相同：
+  F7 空补丁 123、F8 Agent 问题 95、F6 回归 19、N1 平台故障 1，剩 71 次交给 E6-T2。
+  回填幂等：连跑两次第二次"新增 0 更新 0"，238 行 `evaluation_task_run_id` 无重复。
+  Stage2 四组特征在**全部 71 次**待判运行上都取到了，没有一次降级成 unavailable。
+- **三处实现发现**：
+  1. **官方补丁不在制品库里，在 `raw_definition` 里。** `benchmark_tasks.gold_patch_uri`
+     是 `cli/queue.py:137` 拼出来的占位符（注释写着"留给 E1-T3 落制品之后回填"，
+     那次回填没做）。挖掘来的题上它长成 `mined://…`，制品库不认这个 scheme。
+     只认 URI 的话 `patch_overlap` 会对**所有真实题目**静默降级成 unavailable ——
+     而它恰好是分 F2/F3/F4 最要紧的一维。已补一条回归测试钉住。
+  2. **"修改前的报错"有现成来源：Noop 哨兵。** §12.2 要比对报错前后变没变，
+     可是验证证据 `evidence.json.gz` 的 `baseline` 只存用例**状态**不存文本。
+     Noop 哨兵（空补丁跑同一份快照）的 `test_results.message_excerpt` 就是
+     "什么都不改时的报错"，`benchmark-dev@v1` 上有 85 条，正好对上 85 条 F2P。
+     所以这一维不用改验证流水线。
+  3. **穷举测试第一版自己就错了**：给 `PATCH_APPLY_FAILED` 配了 `UNRESOLVED`，
+     而协议 C-18 规定它只能是 `INVALID_PATCH`，于是造出一个协议里不存在的组合。
+     改成从 `INFRA_TO_AGENT_MAPPING` 的 `outcome_rule` 推 `agent_outcome`。
+- **⚠ 一个不属于本卡、但本卡量出来的问题**：库里 95 次 `AGENT_RUNTIME_ERROR`
+  被规则层全判成 F8（AI 自己的工具/预算问题），但**逐条翻日志之后，没有一次是 AI 的问题**：
+  **87 次（92%）是 DeepSeek 账户余额不足**，8 次是容器一个字节没输出
+  （孤儿回收误杀的特征，数目和 §18.7 记的 8 个对得上）。
+  按协议 C-18，余额不足属于外部服务、该落 `AGENT_AUTH_ERROR`（**计入平台故障率**），
+  而 `AGENT_RUNTIME_ERROR` **不计入** —— 等于把外部服务和平台自己的问题
+  算进了被测 AI 的失败分布，排行榜上还看不出来。
+  **根因在适配器的错误映射（E3-T4/E3-T5），不在归因层**，本卡不改。
+  留给 E6-T3 抽检时重点看这一格。
 ### E6-T2 LLM-as-Judge 归因 · **P1 · C:L · E:2d · 🔑**（结构化输出、evidence 强制、缓存、低置信投票）
 ### E6-T3 抽检队列与盲检界面 · **P1 · C:M · E:1.5d**（分层抽样、双人标注、仲裁）
 ### E6-T4 准确率与 κ 统计 · **P1 · C:S · E:0.5d**（MET-04 的报表）
