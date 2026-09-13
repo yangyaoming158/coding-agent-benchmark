@@ -16,8 +16,17 @@ from tests.integration.conftest import alembic_config
 pytestmark = pytest.mark.db
 
 
-def test_health_reports_database_and_protocol(engine: Engine, database_url: str) -> None:
-    """服务起来之后，一个接口就能看清三件事：连没连上库、迁移到哪一版、依据哪版协议。"""
+def test_health_reports_database_and_protocol(
+    engine: Engine, database_url: str, admin_token: str
+) -> None:
+    """服务起来之后，一个接口就能看清三件事：连没连上库、迁移到哪一版、依据哪版协议。
+
+    要 `admin_token` 夹具是因为 `create_app()` **没配 `ADMIN_TOKEN` 就拒绝启动**
+    （E7-T0 AC-3）。健康检查本身和鉴权没关系，但它要先把应用建起来。
+
+    这一条是 CI 上红了才补的：开发机的 `.env` 里有 token，本地怎么跑都是绿的，
+    而 CI 没有 `.env` —— 典型的"本地环境把依赖掩盖了"。
+    """
     with TestClient(create_app()) as client:
         body = client.get("/api/health").json()
 
