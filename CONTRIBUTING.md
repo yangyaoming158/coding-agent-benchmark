@@ -47,7 +47,7 @@ VS Code 装 **WSL 扩展**就能直接在里面开发，体验和本地一样。
 
 - **在 WSL 里装原生 docker engine**（本项目开发机用的就是这个）。省内存 —— Docker Desktop
   会额外常驻一个 WSL 发行版和一堆 GUI 进程，白吃 1~2 GB。这个项目内存很紧
-  （沙箱并发 5 × 1.5 GB + 基线 3.2 GB 已经逼近 11 GB 的上限），这 1~2 GB 是有代价的
+  （沙箱并发 4 × 1.5 GB + 基线 3.2 GB 已经逼近 11 GB 的上限），这 1~2 GB 是有代价的
 - **Docker Desktop + WSL 集成**。装起来最省事，但**如果 WSL 里已经有原生 dockerd，
   千万别开集成** —— 开了之后它接管 `/var/run/docker.sock`，docker 命令连到另一个
   守护进程上，表现是镜像和容器"凭空消失"（这个坑已经踩过）
@@ -86,19 +86,64 @@ make check       # 全套检查，应该全绿
 | 东西 | 大小 | 怎么来 |
 |:---|---:|:---|
 | `.env`（各家大模型 API Key） | — | **走私密渠道找项目负责人要**，绝不能进仓库 |
-| `var/cache/`（GitHub 响应 + 大模型回答的缓存） | ~3 MB | **一定要拿**。没有它，重跑挖掘和预筛要真花钱、真消耗 GitHub 配额；有它就是纯走缓存 |
-| `var/mirrors/`（git 镜像） | ~55 MB | 拿，或者自己重新 clone（过代理很慢） |
-| `var/build-snapshots/` | ~16 MB | 同上 |
-| Docker 镜像（`bench-base` + 每个环境一个） | 每个 ~840 MB | **不传，自己建**：`python -m cli.images build`。小仓库几分钟，大仓库十分钟出头 |
+| `var/cache/`（GitHub 响应 + 大模型回答的缓存） | ~70 MB | **一定要拿**。没有它，重跑挖掘和预筛要真花钱、真消耗 GitHub 配额；有它就是纯走缓存 |
+| `var/mirrors/`（git 镜像） | ~261 MB | 拿。自己 clone 过代理很慢，而且 `xorbitsai/inference` 直接 clone 会断（见下面那条注） |
+| `var/build-snapshots/` | ~76 MB | 同上 |
+| Docker 镜像（`bench-base` + 每个环境一个） | 见下 | **不传，自己建**：`python -m cli.images build` |
 | 开发库里的数据（题目、数据集版本） | — | **不传，自己重灌**：照 `AGENTS.md` 第 12 节的重灌规程跑一遍，前提是 `var/cache/` 在 |
 
-交接包这样打（实测 69 MB，聊天工具传得动）：
+**镜像体积别看 `docker images` 那一列**，它把共享层重复算了（本机那一列相加是 47.7 GB，
+`docker system df` 去重后只有 16 GB）。2026-09-14 清理后的实际占用是 **16 GB**，
+下面只列值得说的几个，postgres、python:3.11-slim 这些基础镜像和共享底座没列：
+
+| | 独占空间 | 说明 |
+|:---|---:|:---|
+| `bench-env:xorbitsai__inference__py311` | **10.4 GB** | 装了 torch 全家桶，建一次十几分钟 |
+| `bench-agent:py311-aider` / `py311-claude-code` | 993 MB / 839 MB | 两个真实 Agent |
+| `bench-env:sqlfluff__sqlfluff__py311` | 272 MB | |
+| `bench-env:tortoise__tortoise-orm__py311` | 212 MB | |
+| `bench-base:py311` + click + 4 个 golden | 加起来 **6 MB** | 全是共享层 |
+
+最后一行是重点：小仓库的环境镜像**几乎不占地**。`bench-env:bench-golden__auth__py311`
+显示 840 MB，实际只独占 286 KB —— 840 MB 是和 `bench-base` 共用的底座，整机只存一份。
+所以"每个环境一个镜像"这件事本身不贵，贵的是装了深度学习依赖的那几个。
+
+清理构建残留（**悬空镜像和构建缓存，删了不影响任何在用的镜像**）：
+
+```bash
+docker image prune -f && docker builder prune -f
+```
+
+本机这一下回收了 12.1 GB —— 每建一次大镜像就会留一份旧的悬空层，定期跑一下。
+
+交接包这样打：
 
 ```bash
 tar czf handoff.tar.gz var/cache var/mirrors var/build-snapshots
 ```
 
-`.env` **不要**放进去。
+**实测 343 MB（2026-09-14）。** 2026-09-08 那会儿还是 69 MB，聊天工具直接传；
+E8-T3 挖了 8 个仓库之后翻了五倍，微信和企业微信的单文件上限都过不了。
+现在走网盘、`scp`，或者 U 盘。
+
+嫌大可以只传 `var/cache`（70 MB，**这个必须拿**，没有它重跑挖掘和预筛要真花钱），
+`var/mirrors/` 让接手的人自己 clone —— 代价是慢，而且 `xorbitsai/inference` 有坑，见下一条。
+
+> **`xorbitsai/inference` 直接 clone 会断。** 实测三次都失败（HTTP/2 CANCEL、
+> early EOF、GnuTLS decode error），仓库太大加上过代理。绕法是浅克隆再按需补：
+>
+> ```bash
+> git clone --bare --shallow-since="2.5 years ago" https://github.com/xorbitsai/inference var/mirrors/xorbitsai__inference.git
+> ```
+>
+> 这样拿到 2094 个提交、86 MB。之后哪个 `base_commit` 不在里面，
+> 用 `git fetch --depth 1 origin <sha>` 单独补一条。
+
+`.env` **不要**放进去。里面是各家大模型的 API Key，走私密渠道单独给。
+顺带提醒接手的人：**DeepSeek 那个 Key 会欠费**，
+余额掉到 0 的表现是 87 次调用全部返回 `Insufficient Balance`，
+而平台会把它记成 `AGENT_RUNTIME_ERROR`（issue #96 在跟这件事），
+看起来像被测 AI 自己挂了。跑大批量之前先去控制台看一眼余额。
 
 拿到之后的顺序：
 

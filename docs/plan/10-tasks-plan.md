@@ -214,9 +214,81 @@
 
 ### E1-T7 SWE-bench Verified 子集导入
 - **Goal**：官方数据集字段映射 + 官方镜像复用 + 固定种子分层抽样
-- **Req**：MET-01 · **Deps**：E1-T1, E2-T2
-- **AC**：导入 50 题，Oracle 解决率 = 100%（证明我们的 harness 对官方任务判定正确）
-- **P1 · C:L · E:2d · 🌐🐳**
+- **Req**：MET-01 · **MET-05** · **Deps**：E1-T1, E2-T2
+- **P1 → 升 P0 · C:L · E:2d · 🌐🐳**
+- **2026-09-14 升优先级**：E8-T3 第一段探明自建题的天花板在 60 道左右
+  （见该卡的实测表），**MET-05 的"≥100 道"这条底线现在只能靠这张卡补齐**。
+  §4.1 原文就是这么设计的：「不够 100 道时，用 SWE-bench Verified 官方题目补齐」。
+  它不再是"有空再做"，是验收的必经项。
+- **AC**（**卡片原本只有一行**，下面 8 条是 2026-09-14 补的）：
+  1. 字段映射按 `03-benchmark-spec.md` §8.6 那张表逐项落实：
+     `instance_id→task_id`、`repo`、`base_commit`、`problem_statement→issue_body`、
+     `patch→gold_patch`、`test_patch`、`FAIL_TO_PASS→fail_to_pass`、
+     `PASS_TO_PASS→pass_to_pass`、`environment_setup_commit→environment_id 分桶依据`
+  2. 抽样是**固定种子分层随机**（按 repo 分层），同一种子两次抽出同一批题；
+     种子和抽样代码进仓库，不是手工挑的名单
+  3. 导入 **50 题**，全部过 `cli.validate run` 的八步验证
+  4. **Oracle 解决率 = 100%**。这是这张卡真正的目的 ——
+     它证明我们的判定引擎对官方任务判得和官方一致（MET-01）
+  5. **Noop 解决率 = 0%**。和 Oracle 是一对，缺一个都说明不了问题
+  6. 环境优先复用官方镜像 `swebench/sweb.eval.x86_64.<instance_id>`；
+     拉不动就退回自建 env spec，**退回了哪几道题要记进导入报告**
+  7. 这批题**不混进 `benchmark-cn-v1` 的解决率统计**（§8.6 明写），
+     数据集里单独一个 slug，报告里单独一栏
+  8. 导入漏斗有分类计数（官方题数 → 抽样后 → 镜像拉得到 → 八步过 → VALID），
+     写进 `03-benchmark-spec.md` §8.6 的落地实录，注明日期
+
+### E1-T8 多语言支持：Go（服务"自建中文题"这条降级线）
+- **Goal**：让挖掘→清洗→建题→判定这条流水线能处理 Go 仓库，
+  从而挖到**测试不依赖网络和模型**的中文项目
+- **Req**：FR-02 · MET-05 · **Deps**：E1-T4, E1-T5, E4-T1 ·
+  **Modules**：`benchmark/{cleaning,assembly}`、`judge/test_ids`、`sandbox/images`
+- **P1 · C:L · E:4.5d · 🐳**
+- **为什么要开这张卡（2026-09-14，E8-T3 第二段查出来的）**：
+  MET-05 的降级线要求「自建中文题 ≥40」，而 E8-T3 实测下来**自建中文题不到 15 道**。
+  根因是一条结构性冲突，不是环境故障：
+
+  ```
+  中文 issue 多的活跃 Python 项目 → 绝大多数是 AI 基础设施
+      （xinference / LLaMA-Factory / lmdeploy / sglang）
+  这类项目的测试 → 要下模型权重、要起推理服务、有的要 GPU
+  评测沙箱 → 协议 C-31 / C-35【必须】断网（否则被测 AI 能去 GitHub 抄补丁）
+      ↓
+  这些测试永远跑不了
+  ```
+
+  实测证据：xorbitsai 探 17 条只过 1 条（6%），9 条「gold 没修好」逐条查过，
+  **8/8 都是"要下模型或要起服务"**；LLaMA-Factory 32 份测试补丁里 18 份碰模型加载。
+  **给沙箱开网解决不了** —— 开了就没有防作弊，基准本身作废。
+  唯一的出路是**换一批测试不碰模型的仓库**，而 Go 生态里的中文大项目
+  （TiDB、go-zero、Kratos、beego）正是这种。
+- **为什么选 Go 不选 Java**：**依赖冻结**。Go 的 `go mod vendor` 把依赖
+  跟着 commit 一起冻在仓库目录里，断网直接能跑；Maven 要预热整个本地仓库，
+  而且每个 commit 的依赖树都不一样。E8-T3 在 tortoise-orm 上刚栽过这个跟头
+  （镜像装 2026 年的 aiosqlite，2024 年的 `base_commit` 1196 条用例全 ERROR），
+  Java 会把这个坑放大十倍。次要理由：Go 的测试识别是一个正则
+  （`func TestXxx(t *testing.T)`），Java 要分 JUnit4 / JUnit5 / TestNG 三套。
+- **已有的东西一条都不作废**：语言是**每道题自己的属性**，不是数据集的属性
+  （`benchmark_sets` 表没有 language 列；语言挂在 `benchmark_tasks.issue_language`
+  和 `environment_specs.test_framework` 上）。一个数据集里混多种语言是设计时就支持的。
+  `schema.py` 的 `test_framework` 早就声明了
+  `Literal["pytest", "unittest", "jest", "gotest", "junit"]`。
+- **AC**：
+  1. `bench-base:go` 镜像基座建起来，`images/envs/` 的配方格式能表达 Go 环境
+  2. `extract_f2p_candidates()` 加 Go 分支：认 `func TestXxx(t *testing.T)`，
+     子测试（`t.Run("name", …)`）如实记成候选。**按 `test_framework` 分派，
+     不是加 if 判断文件后缀** —— 现有 pytest 那条路一行不改，回归测试全绿
+  3. `judge/test_ids.py` 加 Go 的用例 ID 重建（`包路径.TestXxx/子测试名`）
+  4. 报告解析走 `gotestsum --junitfile`，复用现有 `report_parser.py`；
+     复用不了的地方单独说明为什么
+  5. **断网自检**：`go mod vendor` 之后 `go test ./...` 在 `--network none` 下跑通，
+     这一条不过就别往下做
+  6. 挖 2–3 个中文 Go 仓库，走完挖掘→预筛→探测，出一张和 E8-T3 同格式的漏斗表
+  7. **至少 1 道 Go 题跑完八步验证并进数据集**，Oracle 100% / Noop 0%
+  8. 中文占比如实标注，和 Python 题**分开统计**
+- **时间盒**：AC 1–5 是"能不能做"的前提，**2 天做不出来就停**，
+  把结论写进报告走 §8.5 的 Plan B（人工构造中文 Golden 题）。
+  AC 6–7 才是产出，成不成要真探过才知道 —— E8-T3 就是在这一步翻的车。
 
 ---
 
@@ -1315,14 +1387,17 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **一个把选型结论掀翻的发现：候选池深度不等于出题能力。**
   sqlfluff 候选池 676 是全场最大（E8-T1 就是按这个把它排第一），
   但只有 **70 条抽得出候选 F2P（10.4%）**，是八个仓库里最差的。
-  数过了：674 份 sqlfluff 测试补丁里，**只有 68 份加了 Python 测试函数，
-  619 份只改 `test/fixtures` 下的 `.yml` / `.sql` 语料**。
+  数过了：674 份 sqlfluff 测试补丁里，**只有 69 份加了 Python 测试函数（10.2%），
+  582 份改动全在 `test/fixtures/` 下（86.4%），只是 `.yml` / `.sql` 语料**。
+  （2026-09-14 用 `^\+\s*(async\s+)?def\s+test_` 重数了一遍，
+  比开工当天口算的 68 / 619 准，结论不变。）
   它是 SQL linter，bugfix 通常是往语料库里加一条 SQL 加一份期望输出，不写测试函数；
   而 F2P 要的是"修好之后才由失败变通过的**用例名**"，语料文件里没有用例名可抽。
 
   **E8-T1 的数没错，是没量这一项** —— 那一轮只查 GitHub 不拆补丁，
   而拆补丁抽 F2P 是 E1-T5 的活，到今天才第一次对这 7 个仓库跑。
-  教训写给 §8.3：仓库选型准则里应该补一条"测试补丁带不带测试函数"，
+  **教训已写进 §8.3**（2026-09-14）：准则表加了一行"测试补丁里加了 Python 测试函数的比例 ≥ 50%"，
+  证据和 8 个仓库的对照表在 `03-benchmark-spec.md` §8.8 最后一节。
   光看候选池深度会把数据驱动测试的仓库排到前面。
 - **中文题的上限**：三个中文仓库（xorbitsai 39 + LlamaFactory 13 + lmdeploy 7 = 59 条
   两关都过且中文）按 E8-T2 的转化率（探测 86% × 验证 97% × 终审 70% ≈ 58%）

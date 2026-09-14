@@ -489,5 +489,50 @@ docker exec bench-postgres psql -U bench -d bench -c "delete from benchmark_task
 docker exec bench-postgres psql -U bench -d bench -c "update task_candidates set state = 'PRESCREENED' where state = 'PROMOTED';"
 ```
 
+### E8-T3 之后多出来的那一段（2026-09-13 起）
+
+上面那一串只重灌 `benchmark-dev`（click 一个仓库）。E8-T3 第一段把另外 7 个仓库的候选
+也挖进库了，重灌时要多跑这两步——**同样全走 `var/cache/`，不联网不花钱**
+（实测 1071 次预筛调用全部命中缓存）：
+
+```bash
+cd backend && uv run python -m cli.mine run --restart \
+  --repo sgl-project/sglang --repo sqlfluff/sqlfluff --repo xorbitsai/inference \
+  --repo tortoise/tortoise-orm --repo hiyouga/LlamaFactory \
+  --repo InternLM/lmdeploy --repo Delgan/loguru
+cd backend && uv run python -m cli.prescreen clean
+cd backend && uv run python -m cli.prescreen score --model deepseek/deepseek-chat
+```
+
+挖掘结果另有一份存档在 `datasets/mining/*-2026-09-13.json`，可以拿来对数。
+
+两个新环境的镜像（**建之前先 `docker images` 看一眼在不在**，11.3 GB 那个建一次十几分钟）：
+
+```bash
+cd backend && uv run python -m cli.images build --env sqlfluff__sqlfluff__py311
+cd backend && uv run python -m cli.images build --env xorbitsai__inference__py311
+```
+
+配方在 `images/envs/*.json`，里面已经带了三个踩出来的坑，改配方前先读注释：
+
+- **sqlfluff 要单独装 `appdirs`。** 镜像按 2026 年的快照建，而候选的 `base_commit`
+  停在 2024–2025，那时候的代码还 `import appdirs`。不装的话套件一条测试都收集不到，
+  探测直接报 `ENV_NOT_RUNNABLE`
+- **sqlfluff 全量套件 663 秒**，超过探测原来写死的 480 秒。探测那一侧已经改成
+  可配的 `--suite-timeout`（默认 1800）；题目运行期的 `test_timeout_s` 没动，
+  它跑的是 §7.7 的子集，不是全量
+- **xorbitsai 要跳过 `test_got_ocr2.py`**。它在模块层 `import diffusers`，
+  装了也没用——那批测试还要联网下模型权重。配方里用 `--ignore=` 跳过
+
+**`xorbitsai/inference` 直接 clone 会断**（实测三次：HTTP/2 CANCEL、
+early EOF、GnuTLS decode error；仓库大，又过代理）。浅克隆再按需补：
+
+```bash
+git clone --bare --shallow-since="2.5 years ago" https://github.com/xorbitsai/inference var/mirrors/xorbitsai__inference.git
+```
+
+拿到 2094 个提交、86 MB；剩下 5 个不在浅克隆里的 `base_commit`
+用 `git fetch --depth 1 origin <sha>` 一条条补，补完 51 条候选全部能物化。
+
 **前端类型不要手写。** 改完后端接口跑一次 `make gen-api`，
 用错字段的地方会直接编译不过。手写的类型漂移了不会报错，只会在运行时拿到 undefined。
