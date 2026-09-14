@@ -425,7 +425,20 @@ def _probe_one(
             f"base 上收集不出来 {len(f2p.uncollectable_on_base)} 条、"
             f"基线上就通过 {len(f2p.not_failing or {})} 条、gold 没修好 {len(f2p.not_fixed)} 条"
         )
-        record.update(state="F2P_NOT_FAILING", detail=detail)
+        # 名字也一起记下来。只留计数的话，想知道"到底是哪几条挂了"就只能重跑一遍探测
+        # （起两个容器、跑两遍全量套件），而这些名字本来就在手上。
+        # 2026-09-14 查 xorbitsai 那批 `gold 没修好` 时吃过这个亏。
+        record.update(
+            state="F2P_NOT_FAILING",
+            detail=detail,
+            excluded={
+                "unmatched": list(f2p.unmatched),
+                "uncollectable_on_base": list(f2p.uncollectable_on_base),
+                "not_failing": dict(f2p.not_failing or {}),
+                "not_fixed": list(f2p.not_fixed),
+                "dropped_unusable": list(f2p.dropped_unusable),
+            },
+        )
         return ProbeOutcome(candidate.task_id, False, "F2P_NOT_FAILING", detail), record
 
     probe_file = _probe_file(candidate)
