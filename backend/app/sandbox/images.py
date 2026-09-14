@@ -973,6 +973,7 @@ def ensure_snapshot_repo(
     具体题目上莫名其妙地找不到 commit。两个目录分开，这个歧义就不存在。
     """
     from app.sandbox.git_cli import GitError, run_git  # 局部导入，避免模块级循环依赖
+    from app.sandbox.mirror import pin_archive_attributes
 
     mirror = Path(mirror_root) / f"{recipe.repo_name.replace('/', '__')}.git"
     if (mirror / "HEAD").is_file():
@@ -983,6 +984,7 @@ def ensure_snapshot_repo(
             check=False,
         )
         if check.returncode == 0:
+            pin_archive_attributes(mirror)
             return mirror
 
     shallow = Path(snapshot_root) / f"{recipe.repo_name.replace('/', '__')}.git"
@@ -994,6 +996,7 @@ def ensure_snapshot_repo(
             check=False,
         )
         if check.returncode == 0:
+            pin_archive_attributes(shallow)
             return shallow
 
     if not allow_fetch:
@@ -1025,6 +1028,9 @@ def ensure_snapshot_repo(
             f"拉 {recipe.repo_name} 的快照 {recipe.snapshot_commit[:12]} 失败：{exc}。"
             "这台机器过代理拉 GitHub 容易断，重试一次通常就好"
         ) from exc
+    # 浅克隆和完整镜像一样要关掉 export-subst，否则 `git archive` 会把
+    # 上游 commit 哈希替换进文件里，构建上下文的树哈希对不上（见那个函数的文档）。
+    pin_archive_attributes(shallow)
     return shallow
 
 

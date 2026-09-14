@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from app.sandbox.git_cli import run_git
 from app.sandbox.mirror import (
     CommitNotFoundError,
     MirrorError,
@@ -161,3 +162,74 @@ def test_rejects_option_like_url(mirrors: MirrorManager) -> None:
     """以 `-` 开头的 URL 会被 git 当成选项。`repo_url` 是外部数据，必须挡。"""
     with pytest.raises(MirrorError, match="不能以 - 开头"):
         mirrors.clone(REPO_NAME, "--upload-pack=whatever")
+
+
+# ── export-subst：不关掉的话有些仓库根本物化不了 ───────────────
+
+
+def test_clone_disables_export_subst(tmp_path: Path, mirrors: MirrorManager) -> None:
+    """`git archive` 不许改写文件内容，否则树哈希对不上（协议 C-43）。
+
+    `export-subst` 打开时，`git archive` 会把 `$Format:%H$` 换成真实的 commit 哈希。
+    导出的内容就和树里的 blob 不一样了，`materialize_workspace()` 那道
+    "树哈希必须等于上游树哈希"的校验必然失败。
+
+    2026-09-13（E8-T3）实测撞上：`xorbitsai/inference` 的 `.gitattributes` 里写着
+    `.git_archival.txt export-subst`，建镜像直接卡住。`setuptools-scm` 的文档
+    就推荐这么配，不是个别仓库的怪癖。
+
+    顺带：被替换进去的恰好是上游 commit 哈希，而 `AGENTS.md` §5.3 要求
+    工作区里不能留下任何指回上游历史的线索。
+    """
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    run_git(["init", "--quiet", "."], cwd=upstream, timeout_s=60)
+    write(upstream, ".gitattributes", "archival.txt export-subst\n")
+    write(upstream, "archival.txt", "node: $Format:%H$\n")
+    commit_all(upstream, "one")
+
+    mirrors.clone(REPO_NAME, str(upstream))
+    path = mirrors.path_for(REPO_NAME)
+    head = run_git(["rev-parse", "HEAD"], cwd=path, timeout_s=60).stdout.strip()
+
+    exported = _archive_file(path, head, "archival.txt")
+    assert exported == "node: $Format:%H$\n", "git archive 把上游 commit 哈希写进了工作区"
+
+
+def test_ensure_commit_fixes_mirrors_cloned_before_the_fix(
+    tmp_path: Path, mirrors: MirrorManager
+) -> None:
+    """这行代码之前拉好的老镜像，走一次 `ensure_commit` 也要被补上。"""
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    run_git(["init", "--quiet", "."], cwd=upstream, timeout_s=60)
+    write(upstream, ".gitattributes", "archival.txt export-subst\n")
+    write(upstream, "archival.txt", "node: $Format:%H$\n")
+    head = commit_all(upstream, "one")
+
+    mirrors.clone(REPO_NAME, str(upstream))
+    path = mirrors.path_for(REPO_NAME)
+    # 手工退回"老镜像"的样子
+    (path / "info" / "attributes").unlink()
+    assert _archive_file(path, head, "archival.txt") != "node: $Format:%H$\n"
+
+    mirrors.ensure_commit(REPO_NAME, str(upstream), head)
+
+    assert _archive_file(path, head, "archival.txt") == "node: $Format:%H$\n"
+
+
+def _archive_file(mirror: Path, commit: str, name: str) -> str:
+    """从镜像里 `git archive` 出一份归档，取其中一个文件的内容。"""
+    import io
+    import subprocess
+    import tarfile
+
+    raw = subprocess.run(
+        ["git", "-C", str(mirror), "archive", "--format=tar", commit],
+        capture_output=True,
+        check=True,
+    ).stdout
+    with tarfile.open(fileobj=io.BytesIO(raw)) as archive:
+        member = archive.extractfile(name)
+        assert member is not None
+        return member.read().decode("utf-8")

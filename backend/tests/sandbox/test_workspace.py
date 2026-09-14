@@ -325,3 +325,37 @@ def test_remove_workspace_refuses_root_itself(tmp_path: Path) -> None:
     with pytest.raises(WorkspaceError, match="拒绝删除"):
         remove_workspace(root, root=root)
     assert root.exists()
+
+
+# ── export-subst：镜像不是 MirrorManager 建的也得挡住 ──────────
+
+
+def test_materialize_survives_export_subst_on_an_unpinned_mirror(
+    tmp_path: Path,
+) -> None:
+    """`export-subst` 的关闭必须发生在物化里，不能只靠 `MirrorManager`。
+
+    `git archive` 遇到 `export-subst` 会把 `$Format:%H$` 换成真实的 commit 哈希，
+    于是导出内容和树里的 blob 不一致，物化自查的"树哈希必须相等"必然失败。
+
+    `MirrorManager.clone()` / `ensure_commit()` 里各钉了一次，但**调用方未必走那两条路**：
+    `cli/promote.py` 的探测直接用 `path_for()` 拿镜像路径，2026-09-13 就是这样漏过去的 ——
+    xorbitsai/inference 的两条候选全报 `WORKSPACE_ERROR`。
+    所以这条用例故意造一个"没被钉过"的镜像，走的是最坏情况。
+    """
+    upstream = tmp_path / "upstream"
+    upstream.mkdir()
+    run_git(["init", "--quiet", "."], cwd=upstream, timeout_s=60)
+    write(upstream, ".gitattributes", "archival.txt export-subst\n")
+    write(upstream, "archival.txt", "node: $Format:%H$\n")
+    base = commit_all(upstream, "base")
+
+    # 手工建镜像，绕开 MirrorManager —— info/attributes 是空的
+    mirror = tmp_path / "raw-mirror.git"
+    run_git(["clone", "--mirror", "--quiet", "--", str(upstream), str(mirror)], timeout_s=120)
+    assert not (mirror / "info" / "attributes").exists()
+
+    workspace = materialize_workspace(mirror_path=mirror, base_commit=base, dest=tmp_path / "ws")
+
+    archival = (workspace.path / "archival.txt").read_text(encoding="utf-8")
+    assert archival == "node: $Format:%H$\n", "上游 commit 哈希被写进了工作区"

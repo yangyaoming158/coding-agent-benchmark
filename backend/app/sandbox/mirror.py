@@ -156,6 +156,7 @@ class MirrorManager:
             ["clone", "--mirror", "--quiet", "--", repo_url, str(path)],
             timeout_s=self.timeout_s,
         )
+        pin_archive_attributes(path)
         return path
 
     def fetch(self, repo_name: str) -> None:
@@ -186,6 +187,9 @@ class MirrorManager:
         """
         validate_commit(commit)
         self.clone(repo_name, repo_url)
+        # clone 里已经写过一次；这里再写一次是为了**已经存在的老镜像** ——
+        # 它们是这行代码之前拉的，info/attributes 还是空的。写文件是幂等的。
+        pin_archive_attributes(self.path_for(repo_name))
         if self.has_commit(repo_name, commit):
             return self.path_for(repo_name)
 
@@ -208,6 +212,32 @@ def _reject_option_like(value: str, field: str) -> None:
         raise MirrorError(f"{field} 不能以 - 开头，会被 git 当成选项：{value!r}")
 
 
+def pin_archive_attributes(path: Path) -> None:
+    """关掉这份镜像上的 `export-subst`，让 `git archive` 导出的内容等于树里的内容。
+
+    **不关的话有些仓库根本物化不了。** `export-subst` 是 `.gitattributes` 里的一个开关，
+    打开之后 `git archive` 会把文件里的 `$Format:%H$` 之类占位符**替换成真实的
+    commit 哈希和日期**。于是导出的文件内容和树里存的 blob 不一样，
+    `materialize_workspace()` 那道"树哈希必须等于上游树哈希"的校验（协议 C-43）
+    就必然失败 —— 报出来的是"内容或权限不同：某个文件"。
+
+    2026-09-13（E8-T3）实测：`xorbitsai/inference` 的 `.gitattributes` 里写着
+    `.git_archival.txt export-subst`，建镜像直接卡在这里。这不是个别仓库的怪癖，
+    `setuptools-scm` 的文档就推荐这么配，用到的仓库不少。
+
+    **顺带堵一个泄题口子**：被替换进去的恰好是**上游的 commit 哈希**，
+    而 `AGENTS.md` §5.3 要求工作区里不能留下任何指回上游历史的线索。
+    所以关掉它是两头都赚，不是为了迁就某个仓库而放宽校验。
+
+    写 `$GIT_DIR/info/attributes` 是因为**它的优先级高于树里的 `.gitattributes`**，
+    而树里那份我们不能改（改了树哈希就变了，正是要守的那个东西）。
+    整份镜像一律 `* -export-subst`，不按仓库开小灶。
+    """
+    info = path / "info"
+    info.mkdir(parents=True, exist_ok=True)
+    (info / "attributes").write_text("* -export-subst\n", encoding="utf-8")
+
+
 __all__ = [
     "FULL_SHA_PATTERN",
     "REPO_NAME_PATTERN",
@@ -215,6 +245,7 @@ __all__ = [
     "MirrorError",
     "MirrorManager",
     "mirror_dir_name",
+    "pin_archive_attributes",
     "validate_commit",
     "validate_repo_name",
 ]

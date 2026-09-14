@@ -492,3 +492,39 @@ def test_assemble_drops_flaky_even_from_a_cached_list() -> None:
     # `full` 的定义是"候选池全收"，池子小了这个数要跟着小
     assert task.p2p_sampling is not None
     assert task.p2p_sampling.total_pool == 1
+
+
+# ── 探测的全量套件超时（E8-T3）────────────────────────────────
+
+
+def test_probe_suite_timeout_is_separate_from_the_task_runtime_budget() -> None:
+    """探测跑全量要用自己的超时，不能被题目运行期那 480 秒卡住。
+
+    两者管的是两件事：
+
+    - 题目上的 `test_timeout_s`（480）管**运行期**。§7.7 规定套件超过 3 分钟时
+      P2P 取子集，正式评测只跑 `F2P ∪ P2P 子集` —— 那才是 MET-02 六小时预算里的项。
+    - 探测必须跑**全量**，因为 P2P 候选池就是从那份全量报告推出来的（§7.2(6)）。
+
+    用 480 卡探测，等于把"全量超过 8 分钟的仓库"整个挡在门外，而 §7.7 本来就是
+    为这种仓库写的。2026-09-13 实测：`sqlfluff` 全量 8152 条用例跑 663 秒，
+    按 480 卡时三条好候选全被判成 `TEST_TOO_SLOW`。
+    """
+    from dataclasses import fields
+
+    from app.domain.execution_plan import ExecutionPlan
+    from cli.promote import PROBE_SUITE_TIMEOUT_S
+
+    # ExecutionPlan 是 slots 的 dataclass，类属性拿到的是 member_descriptor 不是默认值
+    runtime_budget = next(f.default for f in fields(ExecutionPlan) if f.name == "test_timeout_s")
+    assert runtime_budget < PROBE_SUITE_TIMEOUT_S, (
+        "探测的超时必须比题目运行期的宽，否则套件长的仓库一条题都出不来"
+    )
+
+
+def test_probe_parser_exposes_suite_timeout() -> None:
+    from cli.promote import PROBE_SUITE_TIMEOUT_S, build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(["probe"]).suite_timeout == PROBE_SUITE_TIMEOUT_S
+    assert parser.parse_args(["probe", "--suite-timeout", "900"]).suite_timeout == 900

@@ -64,7 +64,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.sandbox.git_cli import DEFAULT_GIT_TIMEOUT_S, GitError, hermetic_env, run_git
-from app.sandbox.mirror import validate_commit
+from app.sandbox.mirror import pin_archive_attributes, validate_commit
 
 #: 工作区里那个唯一提交的固定身份与时间。
 #:
@@ -274,6 +274,12 @@ def _extract_archive(mirror_path: Path, commit: str, dest: Path, *, timeout_s: i
     那会阻塞在读管道上。这里可以接受：`git archive` 读的是本地 bare 仓库，
     不碰网络，真正需要超时保护的是会联网的 clone / fetch，那两条走 `run_git`。
     """
+    # 导出之前先关掉这份镜像上的 `export-subst`。**这里是唯一真正管用的地方** ——
+    # `MirrorManager.clone()` / `ensure_commit()` 里也各钉了一次，但调用方未必走那两条路
+    # （`cli/promote.py` 的探测就是直接 `path_for()` 拿路径的，2026-09-13 实测漏掉了）。
+    # 不关的话 `git archive` 会把 `$Format:%H$` 换成真实的 commit 哈希，导出内容和树里的
+    # blob 不一致，下面那道树哈希自查必然失败。细节见 `mirror.pin_archive_attributes`。
+    pin_archive_attributes(mirror_path)
     command = ["git", "-C", str(mirror_path), "archive", "--format=tar", commit]
     file_count = 0
     # Popen 而不是 run：要边出边解，不把整个 tar 读进内存

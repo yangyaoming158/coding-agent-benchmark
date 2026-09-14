@@ -6,7 +6,8 @@
   "python_version": "3.11",
   "install_steps": [
     "python -m pip install -q --no-cache-dir -e .",
-    "python -m pip install -q --no-cache-dir -r requirements_dev.txt"
+    "python -m pip install -q --no-cache-dir -r requirements_dev.txt",
+    "python -m pip install -q --no-cache-dir appdirs"
   ],
   "workspace_source_roots": [
     "src",
@@ -16,5 +17,5 @@
     "sqlfluff"
   ],
   "collect_check": true,
-  "note": "候选池最深的仓库（682）。src 布局。E8-T1 实测安装 12.3 秒、测试 14.7 秒。"
+  "note": "候选池最深的仓库（682）。src 布局。E8-T1 实测安装 12.3 秒、测试 14.7 秒。 2026-09-13（E8-T3）补第三条 install_steps 装 appdirs：镜像按 2026 年的 snapshot_commit 装依赖，而候选的 base_commit 在 2024–2025 年，那时 sqlfluff 还 import appdirs（后来换成了 platformdirs）。不补的话 test/conftest.py 在导入阶段就挂，junit 里零条用例，探测一律报 ENV_NOT_RUNNABLE —— 表现和「题目坏了」一模一样，实际是镜像和题目不在同一个年代。这是「一个仓库一个镜像」这个方案的固有张力：镜像只有一份，题目却横跨两年。实测抽了 4 条跨时间的候选（#5872/#6254/#6333/#6366），补上 appdirs 之后收集到8149–8243 条用例，一条依赖就够，不是每个年代缺不同的包。 ⚠ 2026-09-13 实测两个数，接手这个仓库前先看：① 全量套件 8152 条用例跑 606–663 秒（2 CPU），远超题目默认的 test_timeout_s=480 —— 探测要给 `--suite-timeout`（默认已改成 1800）；正式评测不受影响，按 §7.7 那时 P2P 走 module_and_random 子集。② 内存峰值 1.885 GiB，而沙箱默认 sandbox_memory_mb=1536（1.5 GiB），差 0.39 GiB，表现是探测报 OOM_KILLED。要 2.5 GB 才有余量 —— 但那会撞上 E9-T2 定档的 sandbox=4（4×2.5=10GB vs 本机 11 GiB，没余量），所以这件事没有就地改，留给单独决策。**在这两条解决之前，sqlfluff 的候选一条都推不成题。**"
 }
