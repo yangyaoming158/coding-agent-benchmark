@@ -812,8 +812,11 @@ def _review_rows(session: Session, dataset_id: str) -> list[dict[str, Any]]:
             TaskCandidate,
             sa.and_(
                 TaskCandidate.repository_id == BenchmarkTask.repository_id,
+                # PR 号是 task_id 最后一个 `-` 之后的那段。不能用 split_part(…, "-", 2)：
+                # 仓库名本身带 `-` 时（`tortoise__tortoise-orm-2076`）第二段是 `orm`，
+                # 一条候选都对不上，导出的表里预筛三列全空（2026-09-15 实测）
                 sa.cast(TaskCandidate.pr_number, sa.String)
-                == sa.func.split_part(BenchmarkTask.task_id, "-", 2),
+                == sa.func.regexp_replace(BenchmarkTask.task_id, "^.*-", ""),
             ),
         )
         .where(
