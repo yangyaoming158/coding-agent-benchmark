@@ -435,20 +435,30 @@ cd backend && uv run python -m cli.prescreen score --model deepseek/deepseek-cha
 # 只有上次没探成的那几条会真起容器（想全部重探加 --redo）
 make promote-probe && make promote-assemble
 cd backend && uv run python -m cli.images build --env pallets__click__py311
-make validate-tasks                # 八步验证，约 8 分钟
+# tortoise 的题也在这一批里（2026-09-14 起），它的镜像也要在验证前建好，见下面"E8-T3 之后多出来的那一段"
+cd backend && uv run python -m cli.images build --env tortoise__tortoise-orm__py311
+make validate-tasks                # 八步验证，click 约 8 分钟；tortoise 套件 14 秒一趟，14 道另加几分钟
 # 人工终审的结论（E8-T2 定档 22 收 9 否）不在库里，要从提交进仓库的 CSV 导回来。
 # 不导的话 22 道题会停在 REVIEW_REQUIRED，而数据集只收 VALID —— 快照会是空的
 cd backend && uv run python -m cli.promote import-review \
   ../datasets/benchmark-dev/review-2026-09-10-final.csv
 cd backend && uv run python -m cli.promote import-review \
   ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv
+# click 剩下那 20 道的终审（2026-09-14，收 11 否 9）和 tortoise 14 道的终审（2026-09-15，收 8 否 6）
+cd backend && uv run python -m cli.promote import-review \
+  ../datasets/benchmark-dev/review-2026-09-14-parked20.csv
+cd backend && uv run python -m cli.promote import-review \
+  ../datasets/benchmark-dev/review-2026-09-15-tortoise14.csv
 # ⚠ 还要把**没人审过**的题退回 REVIEW_REQUIRED（2026-09-12 E9-T2 补的一步）。
-# promote-assemble 会把全部 51 道探测通过的候选都组装成题，而人工终审只覆盖 31 道；
-# 不退的话 dataset stage 会把 20 道没审过的题一起冻进快照，快照摘要和已发布的
-# benchmark-dev@v1 对不上（正确的是 sha256:300746559b84…），而且不会报错
+# 八步验证会把跑得通的题一律置 VALID，而人工终审只覆盖上面四份 CSV 里的题；
+# 不退的话 dataset stage 会把没审过的题一起冻进快照，快照摘要和已发布的
+# benchmark-dev@v1 对不上（正确的是 sha256:300746559b84…），而且不会报错。
+# 到 2026-09-15 为止四份 CSV 已经盖住全部 65 道，这一步退回 0 道，但别省——下次多推一批就不是 0 了
 cd backend && uv run python -m cli.promote park-unreviewed \
   ../datasets/benchmark-dev/review-2026-09-10-final.csv \
-  ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv
+  ../datasets/benchmark-dev/review-3642-2026-09-10-final.csv \
+  ../datasets/benchmark-dev/review-2026-09-14-parked20.csv \
+  ../datasets/benchmark-dev/review-2026-09-15-tortoise14.csv
 # 数据集版本（E1-T6）。**`make enqueue` 和 `cli.experiment start` 从这张快照里取题**，
 # 不冻的话它们一道题都选不出来
 make dataset-stage                 # benchmark-dev → 一版 DRAFT
@@ -472,11 +482,11 @@ python -m cli.experiment start --agent oracle --allow-dirty   # CLI 的口子
 
 逃生口：`BENCH_TEST_FORCE_DB_RESET=1`。
 
-**`promote-assemble` 一定要给 `--limit`。** 不给的话它会把**全部** 51 条探测通过的候选
-都推成题目，而 `benchmark-dev` 定档的是其中 30 条（外加终审后补的 `--pr 3642`）。
-等距抽样是确定性的：同一批候选每次抽出同一批题，所以 `--limit 30` 复现出来的 30 个 PR 号
-和 `datasets/benchmark-dev/review-2026-09-10-final.csv` 里那 30 条**逐个相同**，
-不需要记题号。
+**`promote-assemble` 现在不用给 `--limit` 了**（2026-09-15 起）。它会把全部探测通过的候选
+都推成题目 —— click 51 条 + tortoise 14 条 —— 而这 65 道的终审结论上面四份 CSV 已经全盖住了。
+以前要给 `--limit 30` 是因为只审了 30 条、多推的会混进快照，2026-09-14 把剩下 20 道也审完之后
+这个前提没了。等距抽样是确定性的（同一批候选每次抽出同一批题），要是哪天又只想推一部分，
+`--limit N` 复现出来的题号和当时的 CSV 逐个相同，不需要记题号。
 
 **不要只删 `benchmark_tasks` 想重来一遍。** 候选的状态会留在 `PROMOTED`，
 而 `cli.promote assemble` 只挑 `PRESCREENED` 的（`cli/promote.py:125`），
@@ -512,6 +522,16 @@ cd backend && uv run python -m cli.prescreen score --model deepseek/deepseek-cha
 cd backend && uv run python -m cli.images build --env sqlfluff__sqlfluff__py311
 cd backend && uv run python -m cli.images build --env xorbitsai__inference__py311
 ```
+
+第二段真正推成题的只有 tortoise（2026-09-14 起；xorbitsai 判不可用、sqlfluff 暂缓，见 E8-T3 卡）。
+上面 `make promote-probe && make promote-assemble` 那两步不带 `--repo`，会把 tortoise 一起带上：
+探测结果同样缓存在 `var/promote/tortoise__tortoise-orm/`，镜像 43 秒就建好：
+
+```bash
+cd backend && uv run python -m cli.images build --env tortoise__tortoise-orm__py311
+```
+
+顺序仍然是 assemble → images build → validate-tasks，理由和 click 一样（digest 只写回已有的行）。
 
 配方在 `images/envs/*.json`，里面已经带了三个踩出来的坑，改配方前先读注释：
 

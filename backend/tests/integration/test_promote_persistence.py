@@ -32,7 +32,7 @@ from app.infrastructure.models.benchmark import (
     TaskCandidate,
 )
 from app.sandbox.images import parse_recipe
-from cli.promote import _select_candidates
+from cli.promote import _review_rows, _select_candidates
 from cli.queue import upsert_task
 from tests.integration.factories import wipe
 
@@ -268,3 +268,59 @@ def test_assemble_can_redo_candidates_that_are_already_promoted(session: Session
 
     assert picked(include_promoted=False) == {101}
     assert picked(include_promoted=True) == {101, 102}
+
+
+def test_export_review_matches_candidates_when_the_repo_name_has_a_hyphen(
+    session: Session, tmp_path: Any
+) -> None:
+    """终审对照表要把候选的预筛结论带上，而对上候选靠的是 task_id 里的 PR 号。
+
+    `tortoise__tortoise-orm-2076` 这种仓库名本身带 `-` 的，按第二段取 PR 号会取到
+    `orm`，一条都对不上，表里预筛三列全空（2026-09-15 导 tortoise 那 14 道时撞到）。
+    click 一路没暴露是因为 `pallets__click-3858` 恰好只有一个 `-`。
+    """
+    wipe(session)
+    repo_name = "tortoise/tortoise-orm"
+    directory = tmp_path / "tortoise__tortoise-orm"
+    directory.mkdir(parents=True)
+    (directory / "2076.test.patch").write_text(TEST_PATCH, encoding="utf-8")
+    (directory / "2076.code.patch").write_text(CODE_PATCH, encoding="utf-8")
+
+    raw = {**payload(2076), "repo": repo_name}
+    candidate = load_candidate(raw, patch_root=tmp_path)
+    env_id = "tortoise__tortoise-orm__py311"
+    environment = environment_from_recipe(
+        parse_recipe({**RECIPE, "environment_id": env_id, "repo_name": repo_name})
+    )
+    task = assemble(
+        candidate,
+        environment,
+        dataset_id="benchmark-dev",
+        fail_to_pass=["tests/test_x.py::test_new"],
+        pass_to_pass=["tests/test_x.py::test_old"],
+        p2p_sampling=P2PSampling(strategy="full", seed=None, total_pool=1),
+    )
+    assert task.task_id == "tortoise__tortoise-orm-2076"
+    upsert_task(
+        session,
+        task,
+        {env_id: {**env_spec_row(), "image_tag": f"bench-env:{env_id}"}},
+        patch_uri_scheme="mined",
+    )
+    session.flush()
+    row = session.execute(sa.select(BenchmarkTask)).scalar_one()
+    row.validation_state = TaskValidationState.VALID
+    session.add(
+        TaskCandidate(
+            repository_id=row.repository_id,
+            pr_number=2076,
+            raw_payload=raw,
+            state=TaskCandidateState.PROMOTED,
+        )
+    )
+    session.flush()
+
+    (exported,) = _review_rows(session, "benchmark-dev")
+    assert exported["pr"] == "2076"
+    assert exported["prescreen_decision"] == "PASS"
+    assert exported["prescreen_score"] == 5.0
