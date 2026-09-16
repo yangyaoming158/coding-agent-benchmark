@@ -554,5 +554,49 @@ git clone --bare --shallow-since="2.5 years ago" https://github.com/xorbitsai/in
 拿到 2094 个提交、86 MB；剩下 5 个不在浅克隆里的 `base_commit`
 用 `git fetch --depth 1 origin <sha>` 一条条补，补完 51 条候选全部能物化。
 
+### E1-T7 之后多出来的那一段：SWE-bench 官方题（2026-09-15 起）
+
+官方题的 slug 单独是 `swebench-verified-subset`，**不进 `benchmark-cn-v1` 的统计**。
+重灌时它和上面那串互不干扰，顺序是：
+
+```bash
+# 官方数据集 500 行（走 HF 的 JSON 分页接口，不装 pyarrow；有缓存就不重拉）
+make swebench-fetch
+# 固定种子分层抽样。名单在 datasets/swebench/sample-seed20260915-n50.json，重算必须逐字相同：
+make swebench-sample && cd backend && uv run python -m cli.swebench sample --check
+# git 镜像：按 base_commit 浅拉，不 clone 全史（astropy / matplotlib 全史几百 MB 还常被代理掐断）
+make swebench-mirror
+# 环境镜像。官方镜像（`make swebench-pull`）在这台机器上拉不动：50 个去重 38.9 GB，过代理
+# 0.2–6 MB/s 还整条卡死，一夜拉到 2 个。**主路是按官方配方本机建**（2026-09-16 起，47 道这么来的）：
+# 配方原文在 datasets/swebench/build-specs.json（`scripts/export_swebench_specs.py` 从 swebench 包导出），
+# 下载全走清华源，改动只有 03-benchmark-spec.md §8.6 七点六那五处。
+# 并行数：不用 conda 的题 2 个没问题；matplotlib 的 3 个 conda 环境各吃 5 GB 内存，11 GB 的机器只能 1 个。
+make swebench-build                # 先建能并行的
+make swebench-build SWEBENCH_JOBS=1   # 再补 conda 那几个（已建好的会跳过）
+# 无人值守：等 build 退出后自动串 build(补跑) → import → validate → 终审表 → 导回 → 漏斗：
+#   nohup scripts/swebench_build_then_validate.sh > var/swebench-logs/chain.log 2>&1 &
+# 入库：environment_specs 一题一行（镜像就是按题发的），digest 和 READY 一起写，不用 cli.images build
+make swebench-import
+# 八步验证只跑声明的用例（官方 P2P 已经给定，不需要全量候选池；全量套件一道题要一小时）
+make swebench-validate
+# 终审从 CSV 导回，不导它们会一直停在 REVIEW_REQUIRED：flask-5014 按"题面短"政策收（下面一份），6 道人工 0 收 6 否（再下面一份）
+cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-official.csv
+cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-final-official.csv
+# 之后走 E1-T6 那套，DATASET / SLUG 都要指过来：
+make dataset-stage DATASET=swebench-verified-subset
+make dataset-gate SLUG=swebench-verified-subset && make worker
+make dataset-publish SLUG=swebench-verified-subset
+make swebench-report               # 漏斗，--save 落 datasets/swebench/
+```
+
+**终审政策（2026-09-16 定）**：官方题只因"题面 < 200 字"停在 REVIEW_REQUIRED 的一律收
+（`cli.swebench review-csv` 自动填 ACCEPT，理由写明是官方原文）；其他原因的留给人填。
+**题目定义变了要重验**：`cli.swebench import` 重跑不会把已验的题打回 DISCOVERED，
+所以改了 `pre_test_command` / 用例清洗规则之后，要自己 `cli.validate run --task` 重跑受影响的题。
+
+**官方镜像只能用在测试阶段。** 镜像里 `/testbed/.git` 是完整 clone，`git log --all` 翻得到修复；
+Agent 阶段用的是 `bench-agent` 镜像、只挂我们物化的工作区，碰不到它。谁要是把 Agent 放进官方镜像跑，
+§5.3 的防泄题就破了。
+
 **前端类型不要手写。** 改完后端接口跑一次 `make gen-api`，
 用错字段的地方会直接编译不过。手写的类型漂移了不会报错，只会在运行时拿到 undefined。

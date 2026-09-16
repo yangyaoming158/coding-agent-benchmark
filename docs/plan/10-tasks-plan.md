@@ -212,7 +212,7 @@
   `benchmark_set_items` 取题，并加了 `--version`。
   新增 74 个测试（合计 1565 全绿）。落地方式和十二处实现决策记在 `03-benchmark-spec.md` §7.11。
 
-### E1-T7 SWE-bench Verified 子集导入
+### E1-T7 SWE-bench Verified 子集导入 ✅ 已于 2026-09-16 完成（42/50 VALID，未提交）
 - **Goal**：官方数据集字段映射 + 官方镜像复用 + 固定种子分层抽样
 - **Req**：MET-01 · **MET-05** · **Deps**：E1-T1, E2-T2
 - **P1 → 升 P0 · C:L · E:2d · 🌐🐳**
@@ -237,6 +237,42 @@
      数据集里单独一个 slug，报告里单独一栏
   8. 导入漏斗有分类计数（官方题数 → 抽样后 → 镜像拉得到 → 八步过 → VALID），
      写进 `03-benchmark-spec.md` §8.6 的落地实录，注明日期
+- **实施记录（2026-09-15 开工，分支 `feat/E1-T7-swebench-import`）**。
+  导入逻辑全在新文件里：`app/benchmark/swebench_import.py`（纯函数：字段映射、离线筛、
+  固定种子分层抽样、组装、漏斗）+ `cli/swebench.py`（fetch / screen / sample / estimate /
+  pull / mirror / import / report），`assembly.py` 一个分支都没加。`cli.validate run` 加了
+  `--dataset` 和 `--scope declared` 两个开关，`ValidationRequest` 多一个 `suite_scope` 字段
+  （证据结构版本 1.0 → 1.1）。`make swebench-*` 是快捷方式。落地方式和实测发现记在
+  `03-benchmark-spec.md` §8.6 的落地实录。三条实测结论先记在这里：
+  1. **判定引擎读不了 django / sympy**（231 + 75 道）：官方测试命令不是 pytest，不出逐用例 junit。
+     **沙箱跑不了 requests**（8 道）：测试打 httpbin.org，断网（C-31）下 P2P 在 base 上就挂 52/133。
+     池子从 500 缩到 **175**，如实计数；分层抽样在剩下 9 个仓库上做，每个仓库都有份。
+  2. **官方镜像能直接用，但要绕三件事**：conda 没激活（测试命令写绝对路径的 python）、
+     editable 安装指向 `/testbed`（`env PYTHONPATH=/workspace[/src|/lib]`）、
+     编译产物只在 `/testbed`（`pre_test_command` 只拷 git 忽略的文件）。
+     `psf__requests-2317` 全链路跑到 S4 证明这条路通：声明的 141 条用例、报告完整、8 条 F2P 全 FAILED。
+  3. **真正的墙是网络**：50 个镜像去重后 38.9 GB，这台机器过代理 0.2–6 MB/s 还会整条连接卡死；
+     `cli.swebench pull` 带 300 秒无进度即掐断重试，断了重跑接着拉，
+     `scripts/swebench_pull_loop.sh` 在后台循环到拉完为止。
+
+  **2026-09-16 实跑记录**：官方镜像拉不动（一夜 2 个），改为**按官方配方本机建**
+  （`cli/swebench_build.py` + `app/benchmark/swebench_recipes.py`），47 道建成、2 道官方镜像、
+  1 道建不出（astropy-8707）。配方是 2024 年的，今天的工具链换代，改了五处（conda 并行/混频道、
+  pip 25 删的开关、setuptools/docutils 版本约束、官方数据里半截的用例 id），全记在
+  `03-benchmark-spec.md` §8.6 七点六；每处都在容器里复现过、单测各有一条。
+  因为筛子加了"半截 id"这条，池子 175 → 173，同一种子重抽后 sphinx 换了 5 道（§8.6 四）。
+  结果：**50 道里 42 VALID、6 REVIEW_REQUIRED（每道原因查清，留人终审）、1 INVALID、1 建不出**。
+
+  **AC 对账（2026-09-16 18:00）**：AC 1 ✅（映射有单测逐项核）；AC 2 ✅（种子 20260915，
+  名单进仓库、`sample --check` 对得上；重抽一次已注明）；AC 3 ⚠ 50 道全部走过八步，42 VALID，
+  另 8 道各有明确原因（§8.6 八的表）；AC 6 ✅（官方镜像 2 道、官方配方本机建 47 道、退回名单进报告）；
+  AC 7 ✅（slug `swebench-verified-subset`，`dataset_id` 同名）；AC 8 ✅（漏斗回填 §8.6 八，带日期）；
+  **AC 4 / 5 ✅（19:07）**：旧名单 5 行清掉后冻快照 42 道，Oracle #133 42/42 = 100%、Noop #134 0/42 = 0%，
+  `swebench-verified-subset@v1` 已发布（dirty=true，未提交工作区上跑的门禁）。
+  **终审（16 日晚）**：6 道 REVIEW 全部否掉，理由进 `datasets/swebench/review-2026-09-16-final-official.csv`，
+  导回后库里 42 VALID / 7 INVALID；没有 ACCEPT，v1 快照不用重发。
+  和 E8 那边的 41 道合起来是 83 道 VALID，离 MET-05 的 100 还差 17：抽 60（多 10 道，前 50 不动）
+  加上终审放行几道能到 90 上下，剩下的缺口另议。
 
 ### E1-T8 多语言支持：Go（服务"自建中文题"这条降级线）
 - **Goal**：让挖掘→清洗→建题→判定这条流水线能处理 Go 仓库，

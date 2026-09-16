@@ -1,0 +1,31 @@
+task_id,pr,validation_state,difficulty,f2p_count,p2p_count,issue_title,fail_to_pass,review,verdict,reason
+matplotlib__matplotlib-20859,20859,REVIEW_REQUIRED,easy,1,88,Adding a legend to a `SubFigure` doesn't work,lib/matplotlib/tests/test_legend.py::test_subfigure_legend,这些 P2P 在 base + test_patch 上就没通过：{'lib/matplotlib/tests/test_legend.py::test_warn_big_data_best_loc': 'FAILED'},REJECT,当前版本不收：P2P test_warn_big_data_best_loc 依赖耗时触发警告，已有基线通过而 gold 失败及复验基线失败的记录，不能稳定验证回归。
+matplotlib__matplotlib-24149,24149,REVIEW_REQUIRED,easy,1,739,[Bug]: ax.bar raises for all-nan data on matplotlib 3.6.1,lib/matplotlib/tests/test_axes.py::test_bar_all_nan[png],"这些 P2P 在 base + test_patch 上就没通过：{'lib/matplotlib/tests/test_axes.py::test_bar_pandas': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_bar_pandas_indexed': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_boxplot_dates_pandas': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_bar_align_center': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_errorbar_indexing': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_index_shape': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_indexing_dates': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_indexing_hist': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_minimal_plot': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pandas_pcolormesh': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_pcolor_regression': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_scatter_series_non_zero_index': 'ERROR', 'lib/matplotlib/tests/test_axes.py::test_violinplot_pandas_series[png]': 'ERROR'}",REJECT,当前环境不收：pandas 要求 NumPy ≥1.26 而镜像为 1.25.2，导致 13 条 P2P 在基线导入报错，须修复依赖并重验。
+pydata__xarray-6744,6744,REVIEW_REQUIRED,medium,3,1815,"""center"" kwarg ignored when manually iterating over DataArrayRolling","xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[numpy-3-True-1]
+xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[numpy-3-True-2]
+xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[numpy-7-True-1]","这些 P2P 在 base + test_patch 上就没通过：{'xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[dask-3-True-1]': 'FAILED', 'xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[dask-3-True-2]': 'FAILED', 'xarray/tests/test_rolling.py::TestDataArrayRolling::test_rolling_iter[dask-7-True-1]': 'FAILED'}",REJECT,当前定义不收：3 条声明为 P2P 的 dask 居中滚动变体在两次基线验证中均失败，不满足 P2P 修复前已通过的要求。
+pylint-dev__pylint-4604,4604,REVIEW_REQUIRED,medium,21,0,unused-import false positive for a module used in a type comment,"tests/checkers/unittest_variables.py::TestMissingSubmodule::test_package_all
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_all_elements_without_parent
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_attribute_in_type_comment
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_bitbucket_issue_78
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_listcomp_in_ancestors
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_listcomp_in_decorator
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_no_name_in_module_skipped
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_redefined_builtin_custom_modules
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_redefined_builtin_ignored
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_redefined_builtin_in_function
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_redefined_builtin_modname_not_ignored
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_return_type_annotation
+tests/checkers/unittest_variables.py::TestVariablesChecker::test_unassigned_global
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_custom_callback_string
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_ignored_argument_names_no_message
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_ignored_argument_names_starred_args
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_import_as_underscore
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_lambda_in_classdef
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_nested_lambda
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_redefined_builtin_in_function
+tests/checkers/unittest_variables.py::TestVariablesCheckerWithTearDown::test_redefined_builtin_modname_not_ignored",s4-baseline：套件一条用例都没收集到，多半是环境跑不起来，不是题目坏了,REJECT,当前测试补丁不收：它导入仅由 gold 新增且题面未要求的 IS_PYPY，导致基线整个模块无法收集，21 条 F2P 不能证明目标缺陷。
+sphinx-doc__sphinx-8475,8475,REVIEW_REQUIRED,easy,1,17,Extend linkchecker GET fallback logic to handle Too Many Redirects,tests/test_build_linkcheck.py::test_TooManyRedirects_on_HEAD,"这些 P2P 在 base + test_patch 上就没通过：{'tests/test_build_linkcheck.py::test_anchors_ignored': 'FAILED', 'tests/test_build_linkcheck.py::test_defaults': 'FAILED', 'tests/test_build_linkcheck.py::test_defaults_json': 'FAILED'}",REJECT,当前定义不收：3 条 linkcheck P2P 依赖外网站点，在断网沙箱中因网络不可达失败，不满足基线全通过的要求。
+sphinx-doc__sphinx-9461,9461,REVIEW_REQUIRED,medium,3,59,Methods decorated with @classmethod and @property do not get documented.,"tests/test_domain_py.py::test_pyproperty
+tests/test_ext_autodoc_autoclass.py::test_properties
+tests/test_ext_autodoc_autoproperty.py::test_class_properties",这些 P2P 在 base + test_patch 上就没通过：{'tests/test_ext_autodoc_autoclass.py::test_uninitialized_attributes': 'FAILED'},REJECT,当前版本不收：P2P test_uninitialized_attributes 在基线输出中缺少 Derived.attr1 而失败，根因尚未确认，须排查并重验后再审。

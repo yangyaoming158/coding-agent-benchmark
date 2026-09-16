@@ -2,6 +2,7 @@
 
     python -m cli.validate run                 # 验库里所有题
     python -m cli.validate run --task X --task Y
+    python -m cli.validate run --dataset swebench-verified-subset --scope declared
     python -m cli.validate run --dry-run       # 只跑不写库
     python -m cli.validate show                # 看库里现在的验证状态
 
@@ -15,6 +16,13 @@
 
 只有 `VALID` 的题目能进数据集（§7.4）。所以真实题目**必须**先过这一关，
 否则会有坏题混进去，Oracle 哨兵就不再是 100%（协议 C-50）。
+
+## `--scope declared` 只给 P2P 已经给定的题用
+
+默认 `--scope full`：S4 / S7 / S8 跑全量套件，P2P 候选池从全量报告里来（§7.2(6)）。
+SWE-bench 官方题（E1-T7）的 P2P 是官方定的，不需要候选池，而它们的全量套件动辄
+几十分钟 —— `--scope declared` 让三轮都只跑 F2P ∪ P2P，和正式评测跑的集合一样（C-17）。
+挖掘出来的题**不要**用它：那样 P2P 候选池就是空的。证据文档里记着用的是哪一种。
 
 ## 拿不到结论时不动题目状态
 
@@ -32,6 +40,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
@@ -70,11 +79,16 @@ class _Loaded:
     previous_state: TaskValidationState
 
 
-def _load(session: Session, task_ids: Sequence[str]) -> list[_Loaded]:
+def _load(
+    session: Session, task_ids: Sequence[str], dataset_id: str | None = None
+) -> list[_Loaded]:
     """读题。`raw_definition` 里存的是完整的题目 JSON，从它还原 `TaskDefinition`。
 
     不从那十几个列拼：列只是给 SQL 查询用的投影，`test_patch` 和 `gold_patch`
     根本不在列里，而这两样是验证的核心输入。
+
+    `dataset_id` 按 `raw_definition->>'dataset_id'` 筛：题目的归属只写在那里
+    （§8.11 第十节说明了为什么 `benchmark_tasks` 不加 `dataset_id` 列）。
     """
     query = (
         sa.select(BenchmarkTask, EnvironmentSpec)
@@ -83,6 +97,8 @@ def _load(session: Session, task_ids: Sequence[str]) -> list[_Loaded]:
     )
     if task_ids:
         query = query.where(BenchmarkTask.task_id.in_(task_ids))
+    if dataset_id:
+        query = query.where(BenchmarkTask.raw_definition["dataset_id"].astext == dataset_id)
 
     loaded = []
     for row, env in session.execute(query).all():
@@ -103,7 +119,12 @@ def _load(session: Session, task_ids: Sequence[str]) -> list[_Loaded]:
 
 
 def _build_request(
-    loaded: _Loaded, settings: Settings, scratch_dir: Path, *, repeat: int
+    loaded: _Loaded,
+    settings: Settings,
+    scratch_dir: Path,
+    *,
+    repeat: int,
+    suite_scope: Literal["full", "declared"] = "full",
 ) -> ValidationRequest:
     task = loaded.task
     return ValidationRequest(
@@ -118,6 +139,7 @@ def _build_request(
         review_flags=tuple(task.review_flags()),
         previous_state=loaded.previous_state,
         repeat=repeat,
+        suite_scope=suite_scope,
     )
 
 
@@ -213,7 +235,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     factory = create_session_factory(engine)
 
     with session_scope(factory) as session:
-        loaded_all = _load(session, args.task or [])
+        loaded_all = _load(session, args.task or [], args.dataset)
     if not loaded_all:
         print("库里没有匹配的题目，先跑 `make seed-tasks`", file=sys.stderr)
         return 1
@@ -230,7 +252,10 @@ def cmd_run(args: argparse.Namespace) -> int:
         scratch = Path(settings.workspace_root) / f"validate-{stamp}" / task_id
         try:
             result = validate_task(
-                _build_request(loaded, settings, scratch, repeat=args.repeat), store=store
+                _build_request(
+                    loaded, settings, scratch, repeat=args.repeat, suite_scope=args.scope
+                ),
+                store=store,
             )
         finally:
             shutil.rmtree(scratch, ignore_errors=True)
@@ -283,6 +308,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="跑八步验证并把结论写回数据库")
     p_run.add_argument("--task", action="append", help="只验这几道题（task_id，可重复给）")
+    p_run.add_argument(
+        "--dataset", help="只验这个 dataset_id 的题（raw_definition->>'dataset_id'）"
+    )
+    p_run.add_argument(
+        "--scope",
+        choices=("full", "declared"),
+        default="full",
+        help="full = 跑全量套件（默认，挖掘题必须）；declared = 只跑 F2P ∪ P2P（官方导入题）",
+    )
     p_run.add_argument("--dry-run", action="store_true", help="只跑不写库、不落制品")
     p_run.add_argument(
         "--repeat",
