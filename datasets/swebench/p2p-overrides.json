@@ -1,0 +1,25 @@
+{
+  "_comment": "官方题逐题覆盖：剔掉执行器按名字选不中的 P2P 用例。规矩见 app/benchmark/swebench_overrides.py；只许剔 P2P，不许碰 F2P。改了要重跑 cli.swebench import 和 cli.validate run --task。",
+  "pytest-dev__pytest-7324": {
+    "drop_pass_to_pass": [
+      "testing/test_mark_expression.py::test_valid_idents[:::]",
+      "testing/test_mark_expression.py::test_valid_idents[a:::c]"
+    ],
+    "reason": "参数里带 ::，pytest 5.4 的命令行按 :: 切 nodeid，报 not found 后整场退出（2026-09-16 容器里复现：45 条 id 收集到 43 条、0 条运行）",
+    "decided_on": "2026-09-16"
+  },
+  "pytest-dev__pytest-7521": {
+    "drop_pass_to_pass": [
+      "test_capsysbinary.py::test_hello"
+    ],
+    "reason": "是 pytester 子会话里的 id，顶层没有这个文件；官方日志解析器把子会话输出串进了 P2P，和 [100%] 同类。pytest 找不到文件就整场退出（collected 0 items）",
+    "decided_on": "2026-09-16"
+  },
+  "pylint-dev__pylint-7277": {
+    "drop_pass_to_pass": [
+      "tests/test_self.py::TestRunTC::test_stdin[/mymodule.py]"
+    ],
+    "reason": "参数是绝对路径且被官方解析截过；本环境里真实 id 是 test_stdin[/workspace/tests/mymodule.py-mymodule-/workspace/tests/mymodule.py]，任何环境都对不上。pytest 7.4 报 not found 后整场退出",
+    "decided_on": "2026-09-16"
+  }
+}

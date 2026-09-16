@@ -96,8 +96,9 @@ HF_DATASET = "princeton-nlp/SWE-bench_Verified"
 
 #: 抽样种子。**写死一个常量**，不然"固定种子"就是一句空话。
 DEFAULT_SEED = 20260915
-#: §8.6 写的是 50–100 题，任务卡 AC 3 定的是 50。
-DEFAULT_SAMPLE_SIZE = 50
+#: §8.6 写的是 50–100 题，任务卡 AC 3 定的是 50；2026-09-16 晚为补 MET-05 的缺口抽到 75。
+#: 层内顺序固定，75 的名单前 50 道和 `sample-seed20260915-n50.json` 逐字相同（v1 那 42 道不动）。
+DEFAULT_SAMPLE_SIZE = 75
 
 #: 官方镜像的命名。仓库名里的 `__` 在 Docker Hub 上是非法的，官方用 `_1776_` 顶替
 #: （见 swebench 包 `test_spec.py` 的 `instance_image_key`），而且整个 id 小写。
@@ -649,12 +650,18 @@ def _difficulty_tag(label: str) -> str | None:
     return f"swebench-difficulty-{slug}" if slug else None
 
 
-def build_task(instance: VerifiedInstance, environment: EnvironmentBinding) -> TaskDefinition:
+def build_task(
+    instance: VerifiedInstance,
+    environment: EnvironmentBinding,
+    *,
+    extra_tags: Iterable[str] = (),
+) -> TaskDefinition:
     """官方行 + 环境 → `TaskDefinition`。
 
     构造 `TaskDefinition` 时会把 §7 和协议的规则挨条查一遍（test_patch 只能碰测试文件、
     gold 不能命中受保护路径、题面不能泄题……），不合格的在这里抛 `ValidationError`。
     难度按 §7.8 从 gold 补丁规模派生，和挖掘题同一把尺子；官方的人工难度标注进 tag。
+    `extra_tags` 给调用方加标记用（比如 `swebench_overrides` 剔过 P2P 的题）。
     """
     fail_to_pass, _ = clean_test_ids(instance.FAIL_TO_PASS)
     pass_to_pass, _ = clean_pass_to_pass(instance.PASS_TO_PASS)
@@ -668,6 +675,7 @@ def build_task(instance: VerifiedInstance, environment: EnvironmentBinding) -> T
             "official": "official-image",
             "built": "official-recipe-local-build",
         }.get(environment.kind, "fallback-env"),
+        *extra_tags,
     }
     difficulty_tag = _difficulty_tag(instance.difficulty)
     if difficulty_tag:

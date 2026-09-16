@@ -33,8 +33,9 @@
 - `mirrors.json`：每个仓库的 git 镜像备好了哪些 base_commit
 
 抽样名单**进仓库**（`datasets/swebench/sample-seed<seed>-n<n>.json`，KB 级）：
-它是"这 50 道是怎么来的"的可复核证据 —— 虽然同一种子重算就能得到同一份，
-但把结果也提交，review 的人不用跑代码就能看到名单。
+它是"这 75 道是怎么来的"的可复核证据 —— 虽然同一种子重算就能得到同一份，
+但把结果也提交，review 的人不用跑代码就能看到名单。50 道那份也留着，它是 v1 的证据；
+75 的名单前 50 道和它逐字相同（层内顺序固定，只是多出 25 道）。
 """
 
 from __future__ import annotations
@@ -81,6 +82,7 @@ from app.benchmark.swebench_import import (
     screen_all,
     stratified_sample,
 )
+from app.benchmark.swebench_overrides import P2P_OVERRIDE_TAG, apply_override, load_overrides
 from app.domain.enums import ImageBuildStatus, TaskValidationState
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
@@ -102,6 +104,8 @@ META_FILE = CACHE_DIR / "verified.meta.json"
 IMAGES_FILE = CACHE_DIR / "images.json"
 MIRRORS_FILE = CACHE_DIR / "mirrors.json"
 SAMPLE_DIR = REPO_ROOT / "datasets" / "swebench"
+#: 逐题覆盖清单（剔掉选不中的 P2P），规矩在 `app.benchmark.swebench_overrides`。
+OVERRIDES_FILE = SAMPLE_DIR / "p2p-overrides.json"
 
 #: HF 的 datasets-server：分页给 JSON 行，不用装 pyarrow 读 parquet。
 #: 一页最多 100 行；实测这台机器过代理时大页容易超时，默认 50。
@@ -1149,12 +1153,23 @@ def _mark_environment_ready(
 def cmd_import(args: argparse.Namespace) -> int:
     _, chosen = _sample_and_instances(args)
     images = _read_json(IMAGES_FILE)
+    overrides = load_overrides(OVERRIDES_FILE)
+    unknown = sorted(set(overrides) - {i.instance_id for i in chosen})
+    if unknown:
+        raise SystemExit(f"{OVERRIDES_FILE.name} 里有不在抽样名单里的题：{unknown}")
     factory = None if args.dry_run else create_session_factory(create_db_engine())
 
     created = updated = skipped = failed = 0
     fallback: list[str] = []
+    overridden: list[str] = []
     for instance in chosen:
         record = images.get(instance.instance_id) or {}
+        extra_tags: tuple[str, ...] = ()
+        if instance.instance_id in overrides:
+            # 清单写错（id 不在官方 P2P 里、想动 F2P）会在这里直接抛 OverrideError，不入库
+            instance = apply_override(instance, overrides[instance.instance_id])
+            extra_tags = (P2P_OVERRIDE_TAG,)
+            overridden.append(instance.instance_id)
         python_version = str(record.get("python_version") or "unknown")
         if record.get("status") == "pulled" and record.get("source") == "local-build":
             environment = built_environment(
@@ -1171,7 +1186,7 @@ def cmd_import(args: argparse.Namespace) -> int:
             continue
 
         try:
-            task = build_task(instance, environment)
+            task = build_task(instance, environment, extra_tags=extra_tags)
         except Exception as exc:  # 组装失败逐条报，不整批崩
             failed += 1
             print(f"  ✗ {instance.instance_id:<36} 组装失败：{str(exc).strip()[:120]}")
@@ -1201,6 +1216,11 @@ def cmd_import(args: argparse.Namespace) -> int:
         )
 
     print(f"\n新建 {created}，更新 {updated}，跳过 {skipped}，失败 {failed}")
+    if overridden:
+        print(f"按 {OVERRIDES_FILE.name} 剔过 P2P 的（打了 {P2P_OVERRIDE_TAG} 标签）：")
+        for instance_id in overridden:
+            entry = overrides[instance_id]
+            print(f"  {instance_id:<36} 剔 {len(entry.drop_pass_to_pass)} 条：{entry.reason[:70]}")
     if fallback:
         print("退回自建规格的（镜像没拉到，题目停在 DISCOVERED，等 images/envs/ 配方）：")
         print("  " + "、".join(fallback))

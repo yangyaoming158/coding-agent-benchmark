@@ -22,6 +22,7 @@ instance（仓库代码 + `pip install -e .`）。配方原文在 `datasets/sweb
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import time
@@ -33,6 +34,9 @@ from typing import Any
 from app.benchmark.swebench_import import VerifiedInstance, official_environment_id
 from app.benchmark.swebench_recipes import (
     BASE_TAG,
+    FREETYPE_SHA256,
+    FREETYPE_TARBALL,
+    FREETYPE_URLS,
     MIRROR_HOSTS,
     QHULL_TARBALL,
     QHULL_URL,
@@ -43,17 +47,19 @@ from app.benchmark.swebench_recipes import (
     env_tag,
     instance_tag,
     load_build_specs,
+    needs_freetype,
     needs_qhull,
 )
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.sandbox.container import ImageNotFoundError, get_docker_client, inspect_image
-from app.sandbox.git_cli import GitError
+from app.sandbox.git_cli import GitError, run_git
 from app.sandbox.mirror import MirrorManager
 
 SPECS_FILE = REPO_ROOT / "datasets" / "swebench" / "build-specs.json"
 BUILD_ROOT = REPO_ROOT / "var" / "cache" / "swebench" / "build"
 LOG_ROOT = REPO_ROOT / "var" / "swebench-logs" / "build"
 QHULL_CACHE = REPO_ROOT / "var" / "cache" / "swebench" / QHULL_TARBALL
+FREETYPE_CACHE = REPO_ROOT / "var" / "cache" / "swebench" / FREETYPE_TARBALL
 
 #: 一次 `docker build` 最多等多久。matplotlib 要装 texlive 再编译，半小时打底。
 BUILD_TIMEOUT_S = 3 * 3600
@@ -147,6 +153,56 @@ def ensure_qhull() -> Path:
     return QHULL_CACHE
 
 
+def ensure_freetype() -> Path:
+    """matplotlib 编译时要的 FreeType 2.6.1 源码包，2.3 MB，下一次缓存在 var/cache/，sha256 要对上。
+
+    走代理（savannah / sourceforge 都在境外），所以三个地址轮着试，坏包删掉重来。
+    """
+    if FREETYPE_CACHE.is_file() and _sha256(FREETYPE_CACHE) == FREETYPE_SHA256:
+        return FREETYPE_CACHE
+    from cli.swebench import make_client  # 复用带代理的 httpx 客户端
+
+    FREETYPE_CACHE.parent.mkdir(parents=True, exist_ok=True)
+    errors: list[str] = []
+    with make_client(timeout_s=180.0) as client:
+        for url in FREETYPE_URLS:
+            try:
+                response = client.get(url)
+                response.raise_for_status()
+            except Exception as exc:  # 一个地址挂了换下一个，最后一起报
+                errors.append(f"{url}: {type(exc).__name__}: {str(exc)[:80]}")
+                continue
+            digest = hashlib.sha256(response.content).hexdigest()
+            if digest != FREETYPE_SHA256:
+                errors.append(f"{url}: sha256 不对（{digest[:12]}…）")
+                continue
+            FREETYPE_CACHE.write_bytes(response.content)
+            return FREETYPE_CACHE
+    raise BuildError("FreeType 2.6.1 源码包没下到：\n  " + "\n  ".join(errors))
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def repo_has_setup_py(mirrors: MirrorManager, instance: VerifiedInstance) -> bool:
+    """base_commit 的树根下有没有 `setup.py`。
+
+    没有的仓库 editable 安装要把 pip 按回 24（`swebench_recipes` 模块文档第 6 条）。
+    """
+    completed = run_git(
+        ["cat-file", "-e", f"{instance.base_commit}:setup.py"],
+        cwd=mirrors.path_for(instance.repo),
+        timeout_s=60,
+        check=False,
+    )
+    return completed.returncode == 0
+
+
 def export_repo_tar(mirrors: MirrorManager, instance: VerifiedInstance, dest: Path) -> None:
     """从本地 git 镜像导出 base_commit 的文件树（纯文件，不带 .git）。"""
     if not mirrors.has_commit(instance.repo, instance.base_commit):
@@ -211,18 +267,26 @@ def build_instance(
     if image_exists(tag) and not force:
         return "已有"
     context = BUILD_ROOT / "instance" / instance.instance_id
+    legacy_pip = not repo_has_setup_py(mirrors, instance)
     _write_context(
-        context, build_context_files(specs, instance.instance_id, version=instance.version or "0")
+        context,
+        build_context_files(
+            specs, instance.instance_id, version=instance.version or "0", legacy_pip=legacy_pip
+        ),
     )
     export_repo_tar(mirrors, instance, context / "repo.tar")
-    if needs_qhull(specs.instances[instance.instance_id]["install_repo_script"]):
+    script = specs.instances[instance.instance_id]["install_repo_script"]
+    if needs_qhull(script):
         (context / QHULL_TARBALL).write_bytes(ensure_qhull().read_bytes())
+    if needs_freetype(script):
+        (context / FREETYPE_TARBALL).write_bytes(ensure_freetype().read_bytes())
     started = time.monotonic()
     try:
         docker_build(context, tag, proxy=proxy)
     finally:
         (context / "repo.tar").unlink(missing_ok=True)  # matplotlib 的 tar 上百 MB，别留
-    return f"建好，{time.monotonic() - started:.0f} 秒"
+    note = "，pip 按回 24（仓库没有 setup.py）" if legacy_pip else ""
+    return f"建好，{time.monotonic() - started:.0f} 秒{note}"
 
 
 # ══════════════════════════════════════════════════════════════
@@ -378,4 +442,12 @@ def add_build_parser(sub: Any, add_sample_args: Any) -> None:
     parser.set_defaults(func=cmd_build)
 
 
-__all__ = ["BuildError", "add_build_parser", "build_all", "cmd_build", "docker_build"]
+__all__ = [
+    "BuildError",
+    "add_build_parser",
+    "build_all",
+    "cmd_build",
+    "docker_build",
+    "ensure_freetype",
+    "repo_has_setup_py",
+]
