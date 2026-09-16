@@ -1691,3 +1691,256 @@ E1-T6 按它挑题，再连同 `content_hash` 一起冻进 `benchmark_set_items`
 - 环境优先复用**官方评测镜像**（`swebench/sweb.eval.x86_64.<instance_id>`），拉不动时退回自建 env spec；
 - 抽样：固定种子分层随机（按 repo 分层）取 50–100 题；
 - 这批任务**只用于校准**，不混入 `benchmark-cn-v1` 的解决率统计。
+
+### 落地实录（2026-09-15，E1-T7）
+
+> **本节是追加的实现记录**，§8.6 上面四条一条没动。工具：`app/benchmark/swebench_import.py`
+> + `python -m cli.swebench {fetch,screen,sample,estimate,pull,mirror,import,report}`
+> （`make swebench-*`），验证走 `python -m cli.validate run --dataset swebench-verified-subset --scope declared`。
+> 数据集 slug 单独是 `swebench-verified-subset`（§8.1 的 L2'），`dataset_id` 同名。
+
+#### 一、官方数据怎么拿：datasets-server 的 JSON 分页，不装 pyarrow
+
+HF 上的官方文件是 parquet，读它要 pyarrow（几十 MB 的依赖，只为这一件事）。
+改走 `https://datasets-server.huggingface.co/rows`（一页最多 100 行，带 `truncated_cells`
+标记）：500 行 7 页，实测一格都没被截断，最长的补丁也完整。落 `var/cache/swebench/verified.jsonl`，
+`verified.meta.json` 记行数、sha256 和 HF 仓库的 git 修订号（`c104f840cc67…`），
+以后有人问"你导的是哪一版 Verified"，答得出来。
+这台机器过代理时 100 行一页常超时，默认改成 50 行一页 + 退避重试。
+
+#### 二、字段映射：§8.6 那张表逐项落实，另加两条清洗
+
+| 官方字段 | 落到 | 备注 |
+|:---|:---|:---|
+| `instance_id` | `task_id` | 格式本来就是 `{owner}__{repo}-{pr}`，`TASK_ID_PATTERN` 直接认 |
+| `repo` | `repo_name`；`repo_url` 拼 `https://github.com/{repo}.git` | |
+| `base_commit` | `base_commit` | |
+| `problem_statement` | `issue_body`；第一行兼作 `issue_title` | 官方没有单独的标题字段 |
+| `hints_text` | **不用**，`hints_text=null` | 那是修复前的 PR 讨论，可能带答案；§7.1 默认就是对齐 Verified 不给提示 |
+| `patch` | `gold_patch` | |
+| `test_patch` | `test_patch` | |
+| `FAIL_TO_PASS` | `fail_to_pass` | 官方存的是 JSON **字符串**，要先解开 |
+| `PASS_TO_PASS` | `pass_to_pass` | 同上；**剔掉不是用例 ID 的条目**（见下） |
+| `environment_setup_commit` | 环境分桶依据 | 官方镜像一题一个，桶只在退回自建时用；tag 里记 `swebench-env-<sha12>` |
+| `version` / `difficulty` | tag | `swebench-version-5.1`、`swebench-difficulty-15-min-1-hour`；§7.8 的派生难度照算，不被官方标注替代 |
+
+两条清洗：
+
+1. **`PASS_TO_PASS` 里有不是用例的东西。** `pytest-dev__pytest-5262` 和 `-7521` 的 P2P 里各有一条
+   `[100%]` —— 官方日志解析器把进度百分比当成了用例名。判据只有一条：不含 `::` 的不是 nodeid，剔掉并记数。
+2. **P2P 不记 `p2p_sampling`。** 官方的 P2P 是"测试补丁碰到的文件里、修复前后都通过的用例"，
+   不是 §7.7 那种抽样，硬填一个 `strategy` 是在编。
+
+#### 三、离线筛：500 → 175，先剔判定引擎读不了和沙箱跑不了的
+
+| 格子 | 数量 | 说明 |
+|:---|---:|:---|
+| `REPO_NOT_PYTEST` | 314 | django 231 + sympy 75：官方测试命令是 `runtests.py` / `bin/test`，不出逐用例 junit，官方靠解析终端日志判定，我们按 §7.2(4) 只吃机器可解析的报告；**requests 8**：见下 |
+| `ISSUE_LEAKS_FIX` | 8 | 题面里带 PR 链接（7）或贴了 diff（1），§7.2(7) 的规则拒收 |
+| `TEST_PATCH_NON_TEST_PATH` | 2 | `pytest-dev__pytest-5631` 改了 `testing/python/integration.py`、`sphinx-doc__sphinx-7910` 改了 `sphinx/testing/util.py`，按 C-42 不算测试文件 |
+| `GOLD_TOUCHES_PROTECTED` | 1 | `pylint-dev__pylint-4661` 的 gold 动了 `setup.cfg`（C-64） |
+| **池** | **175** | 9 个仓库 |
+
+**`psf/requests` 是实测之后才排除的**：`psf__requests-2317` 全链路跑到 S4，官方 133 条 P2P
+在 base 上就挂 52 条（`test_DIGEST_*`、`TestTimeout::*`……），8 条 F2P 里
+`test_HTTP_302_ALLOW_REDIRECT_GET` 这类全打 httpbin.org。官方 harness 跑测试时有网，
+我们的沙箱按 C-31 断网 —— 和 E8-T3 判 xorbitsai 不可用是同一个病，给沙箱开网不是解法。
+
+#### 四、抽样：种子 20260915，按仓库分层，最大余数法，非空层至少 1 道
+
+| 仓库 | 池 | 配额 |
+|:---|---:|---:|
+| astropy/astropy | 22 | 6 |
+| matplotlib/matplotlib | 31 | 8 |
+| mwaskom/seaborn | 2 | 2 |
+| pallets/flask | 1 | 1 |
+| pydata/xarray | 19 | 6 |
+| pylint-dev/pylint | 9 | 3 |
+| pytest-dev/pytest | 18 | 5 |
+| scikit-learn/scikit-learn | 31 | 8 |
+| sphinx-doc/sphinx | 42 → 40 | 11 |
+
+层内用 `random.Random(f"{seed}/{repo}")` 打乱后取前 N 个，所以把总数从 50 调到 60，
+前 50 道原封不动、只多出 10 道；每层没抽中的按打乱顺序记成"备选"，要补题从头取，不用换种子。
+名单落 `datasets/swebench/sample-seed20260915-n50.json`（进仓库），`cli.swebench sample --check`
+能核对文件和重算结果逐字相同。
+
+**2026-09-16 名单重抽过一次。** 下午发现官方数据里有半截的用例 id（见七点六第 5 条），
+筛子加了一条"F2P 全是半截 id 的归 NO_F2P"，sphinx 池从 42 缩到 40（`sphinx-doc__sphinx-8621`
+和 `sphinx-doc__sphinx-8265`），池子 175 → 173。层内打乱是对整个池做的，池变了 sphinx 这一层的顺序就变了：
+同一种子重抽，其他 8 个仓库的 39 道一道不动，sphinx 换掉 5 道（8120、8459、8595、8621、9602
+出，10673、7757、8475、9320、9461 进）。**以仓库里的名单文件为准**，`--check` 对得上；
+旧名单里那 5 道在库里的行已在 19:00 清掉（没有任何实验或快照引用它们），冻快照只含最终名单。
+
+#### 五、官方镜像怎么用：三件事要绕，一个发现要记
+
+官方镜像叫 `swebench/sweb.eval.x86_64.<instance_id>`，但 Docker Hub 不许仓库名里有 `__`，
+官方换成了 `_1776_`、整个小写（`astropy__astropy-12907` → `…astropy_1776_astropy-12907:latest`）。
+镜像里是 `/testbed` 下的仓库加一个 conda 环境 `testbed`。要在我们的执行器里跑它，三件事：
+
+1. **conda 没激活。** 起容器不走 shell，`.bashrc` 里的 `conda activate` 不会执行。
+   测试命令直接写 `/opt/miniconda3/envs/testbed/bin/python -m pytest …`，不依赖 `PATH`。
+2. **`pip install -e .` 指向 `/testbed`，不是 `/workspace`。** 不处理的话测试 import 到的是镜像里
+   没打补丁的代码，Oracle 必然 0%。处理办法是命令前加 `env PYTHONPATH=/workspace[/src|/lib]`：
+   `PYTHONPATH` 排在 site-packages 前面，也就排在 editable 安装的 `.pth` / import hook 前面。
+   flask、pytest 是 `src/` 布局，matplotlib 的包在 `lib/`，其余在仓库根（`IMPORT_ROOTS`）。
+3. **编译产物只在 `/testbed` 里。** astropy / matplotlib / scikit-learn 的 `.so` 是建镜像时就地编译的，
+   `git archive` 物化出来的工作区没有。`pre_test_command` 把 `/testbed` 里**被 git 忽略的文件**
+   （`git ls-files --others --ignored --exclude-standard`）复制到工作区里不存在的位置：
+   只拷 git 忽略的，就不可能盖掉源文件，也不可能把被测 AI 删掉的文件还原回来。
+   `__pycache__` / `build/` 跳过。
+
+三件事有没有真的绕过去不靠肉眼：gold 补丁只存在于 `/workspace`，测试要是 import 了 `/testbed`，
+**Oracle 就过不了** —— 门禁本身就是证明。第 2 条另有一个直接的实测（`psf__requests-2317` 的镜像，
+把工作区里的包挪到 `src/` 下模拟 flask / pytest 的布局，再改一个版本号）：
+
+| 命令 | `requests.__file__` | 版本 |
+|:---|:---|:---|
+| 不加 `PYTHONPATH` | `/opt/miniconda3/envs/testbed/lib/python3.9/site-packages/requests/__init__.py` | 2.4.3（镜像里的）|
+| `env PYTHONPATH=/workspace/src …` | `/workspace/src/requests/__init__.py` | 2.4.3+workspace |
+
+不加的话被测 AI 改的代码根本没被 import，而且不报错。包在仓库根的仓库（astropy 等）
+靠 `python -m` 自带的"当前目录排最前"就够了，加 `PYTHONPATH` 只是统一写法。
+
+一个发现：**`/testbed` 的 HEAD 不是 `base_commit`**。2025 年后的官方 harness 建镜像时在 base 之上
+又提交了一个叫 "SWE-bench" 的 commit（`psf__requests-2317` 实测只改文件模式，`chmod -R 777` 的结果，
+一行内容都没变）。探测时按"base 是 HEAD 或 HEAD 的父提交"核对。
+
+**官方镜像只能用在测试阶段。** `/testbed/.git` 是完整 clone，`git log --all` 能翻到修复。
+Agent 阶段用的是 `bench-agent` 镜像、只挂我们物化的工作区，碰不到它；但谁要是把 Agent 放进官方镜像跑，
+§5.3 的防泄题就破了。
+
+#### 六、验证只跑声明的用例：`--scope declared`
+
+§7.3 的 S4 跑全量套件，为的是从全量报告里派生 P2P 候选池（§7.2(6)）。官方题的 P2P 是官方定的，
+不需要候选池；而 astropy / scikit-learn 的全量套件要跑几十分钟，三轮下来一道题一小时。
+`ValidationRequest.suite_scope="declared"` 让 S4 / S7 / S8 都只跑 F2P ∪ P2P —— 和正式评测跑的
+集合一样（C-17），对"这道题判得对不对"没有损失。证据文档 `task.suite_scope` 记着用的是哪一种，
+证据结构版本升到 1.1。挖掘题**不要**用它，那样候选池是空的。
+
+#### 七、镜像体积与网络：38.9 GB，这是这张卡真正的墙
+
+`cli.swebench estimate` 只读 manifest：50 个镜像去重后 133 层、**38.9 GB**（压缩后下载量）。
+基础层（ubuntu + build-essential + miniconda，0.66 GB）全部共享；env 层按 `environment_setup_commit`
+分桶，同桶共享（sphinx 11 道只有 6 个桶）；matplotlib 一桶 2.4 GB（带 texlive）。
+这台机器过代理拉 Docker Hub 的速度在 0.2–6 MB/s 之间晃，而且**会整条连接卡死**
+（`docker pull` 26 分钟进账 1 KB/s），所以 `cli.swebench pull` 带 300 秒无进度即掐断重试，
+拉完的层 docker 留着，重跑接着拉。镜像加速站（daocloud）对 `swebench/*` 返回 403，dockerd 自动退回直连。
+
+#### 七点五、拉不动怎么办：两条实测出来的路（2026-09-16）
+
+镜像站（`docker.1ms.run`）只对它缓存过的层快，没缓存的层它要先去 Docker Hub 抓，这期间给的是
+0–11 KB/s；一夜下来 50 个镜像只拉到 2 个。换了两条路，都验证通过：
+
+**路 1：Windows 侧下载，WSL 侧装载**（`cli.swebench fetch-blobs` + `load`，`scripts/swebench_fetch_loop.sh`）。
+同一个 VPN 代理，从 Windows 走 `127.0.0.1:10808` 是 **14–15 MB/s**，从 WSL 走 `172.30.80.1:10808`
+只有 0.08–1.2 MB/s，关掉 vEthernet 的 LSO 也没用 —— 瓶颈是 WSL 到宿主那一跳。`curl.exe` 是 Windows
+自带的 curl，从 WSL 里能直接调，走 Windows 的网络栈；层下到 `D:\Documents\swebench-blobs`
+（C 盘没空间，D 盘根目录 Windows 用户也写不了），WSL 从 `/mnt/d` 读回来校验 sha256、拼成 OCI 布局
+流式喂给 `docker load`，不落中间文件。实测一个 420 MB 的层 27 秒。线路仍会抖（偶发整条挂死、
+跳转后不认 Range），所以 30 秒低于 50 KB/s 就掐断续传、坏了就删掉重来、外面套循环。
+git 镜像同理：matplotlib 8 个 base_commit 在 WSL 里拉了三轮都是坏包，Windows 的 `git.exe`
+95 秒一个，拉完从 D 盘那个 bare 仓库 `git fetch` 进 WSL 镜像。
+
+**路 2：按官方配方本机建**（`cli.swebench build`，`app/benchmark/swebench_recipes.py`，配方原文
+`datasets/swebench/build-specs.json`）。官方镜像本来就是从公开的构建脚本建出来的
+（`swebench==3.0.15` 的 `MAP_REPO_VERSION_TO_SPECS`，50 道题 20 个环境全能生成），脚本要下载的
+东西 —— miniconda、conda 包、pip 包、apt 包 —— 清华源全有，国内直连 9 MB/s。只改四处：
+apt / miniconda / conda / pip 源换清华；`git clone` GitHub 换成解开本地 git 镜像导出的 tar 再
+`git init` 提交一次（顺带把 `/testbed` 的全史剥掉）；matplotlib 要的 qhull 源码包从本地拷；其余一行不动。
+实测 base 181 秒、pytest 的 env 160 秒、instance 13 秒，`pytest-dev__pytest-5809` 八步全过 VALID。
+产物和官方镜像**配方相同、二进制不同**（conda 那部分不钉版本），`images.json` 记 `source: local-build`，
+题目 tag 记 `official-recipe-local-build`，报告里分得开。
+
+两条路谁先出来用谁，官方二进制优先。
+
+#### 七点六、路 2 真跑一遍踩到的五个坑（2026-09-16 下午，50 道全部走完）
+
+路 2 最后成了主路：48 道走本机建（47 成、1 败），2 道之前已从官方拉到，全程约 3 小时。官方配方
+"一行不动"这个说法不成立 —— 配方是 2024 年中写的，今天从清华源装到的工具链已经换代，
+一共改了五处，每处都是先在容器里复现、再改 `swebench_recipes.py` / `swebench_import.py`，
+单测里各有一条对应：
+
+1. **并行两个 conda 求解会把机器压死。** 11 GB 内存的机器，两个 matplotlib 的 `conda env create`
+   各占 5 GB，换页到 55 分钟没解完；杀掉后 `--jobs 1` 单跑。`scripts/swebench_build_then_validate.sh`
+   第二轮固定 `SWEBENCH_JOBS=1`。
+2. **conda 混着 defaults 和 conda-forge 解不出来。** 单跑也 58 分钟、7.6 GB 没结果；yml 加一行
+   `nodefaults` 后 7 分钟解完（3 个环境 11 / 17 / 22 分钟建成）。yml 里 conda-forge 本来排第一，
+   包本来就优先从它取，影响很小。`rewrite_env_script` 只做这一件事。
+3. **pip 26 删了 `--no-use-pep517`**（scikit-learn 的安装命令用它）。去掉开关，`--no-build-isolation`
+   还在，行为一样。
+4. **隔离构建环境里的新 setuptools 没有 `pkg_resources`**（astropy 3.x 的 setup.py 要它），
+   **docutils 0.22 去掉了 `docutils.utils.roman`**（sphinx 3.x / 4.x 的 latex writer 一导入就炸，
+   测试的 `app` fixture 会加载 latex builder，6 道 sphinx 题因此在 S4 报 ERROR / 一条都收集不到）。
+   都是"官方镜像那一代"和"今天"的差距，处理方式是 `setup_repo.sh` 开头写一个 `PIP_CONSTRAINT`
+   文件：`setuptools<70`、`docutils<0.22`，只管构建那一步，不进运行时。sphinx 6 道 `--force` 重建后
+   `test_gettext_definition_terms` 从 ERROR 变 passed。
+5. **官方数据里的用例 id 有半截的。** SWE-bench 是从 pytest 日志按空白切 id 的，参数里带空格的
+   就断了（`test_stem[png-w/` 其实是 `test_stem[png-w/ line collection]`）。这种 id 交给 pytest 是
+   "not found"，**整场一条都不跑** —— 50 道里 12 道有，7 道因此停在 S4。判据"方括号没配对"，
+   F2P / P2P 都剔（`clean_test_ids`），F2P 剔空的归 `NO_F2P`（样本里没有）。
+
+另外两处是探测脚本自己的问题，不是配方：官方最老的环境是 python 3.6（scikit-learn 0.2x、astropy 3.x），
+`subprocess.run(capture_output=)` 是 3.7 才有的，8 道题镜像建好了、探测报 TypeError；改成
+`stdout=PIPE` 写法。`re.sub` 的替换串会把 `\n` 当转义，改成传函数。
+
+建不出来的只剩 `astropy__astropy-8707`（astropy 3.1，2019 年）：它的 `setup.py` 要 `astropy_helpers`
+子模块，官方 clone 也没带子模块，退而从 PyPI 装 `astropy-helpers`，今天的 pip 装不上这个 2019 年的包。
+一道题，记"拉不到也建不出"，不追。
+
+#### 八、漏斗（AC 8）—— 2026-09-16 18:00，50 道全部走完
+
+`make swebench-report --save` 生成，原件 `datasets/swebench/import-report-2026-09-16.md`。
+
+| 层 | 数量 | 说明 |
+|:---|---:|---:|
+| 官方题数 | 500 | `princeton-nlp/SWE-bench_Verified`，HF 修订 `c104f840cc67` |
+| 离线筛掉：REPO_NOT_PYTEST | 314 | django 231 + sympy 75 + requests 8 |
+| 离线筛掉：ISSUE_LEAKS_FIX | 8 | |
+| 离线筛掉：NO_F2P | 2 | F2P 全是半截 id（sphinx 8265、8621），16 日下午加的筛子 |
+| 离线筛掉：TEST_PATCH_NON_TEST_PATH | 2 | |
+| 离线筛掉：GOLD_TOUCHES_PROTECTED | 1 | |
+| 离线筛通过（抽样池） | 173 | 9 个仓库 |
+| 抽样后 | 50 | 种子 20260915（16 日重抽，见四） |
+| 环境镜像备好 | 49 | 2 道官方镜像（flask-5014、pylint-6386），47 道本机按官方配方建；建不出：astropy-8707 |
+| git 镜像备好 | 50 | |
+| 入库 | 49 | |
+| 八步验证：VALID | **42** | 含 flask-5014 按"题面短"政策终审收下的 1 道 |
+| 八步验证：REVIEW_REQUIRED | 6 | 见下表；**16 日晚人工终审 0 收 6 否**，已导回库变 INVALID |
+| 八步验证：INVALID(COMMIT_MISSING) | 1 | astropy-7606：仓库带 git 子模块，`git archive` 物化不了（`workspace._verify` 拦下） |
+
+| 仓库 | 池 | 抽中 | VALID |
+|:---|---:|---:|---:|
+| astropy/astropy | 22 | 6 | 4 |
+| matplotlib/matplotlib | 31 | 8 | 6 |
+| mwaskom/seaborn | 2 | 2 | 2 |
+| pallets/flask | 1 | 1 | 1 |
+| pydata/xarray | 19 | 6 | 5 |
+| pylint-dev/pylint | 9 | 3 | 2 |
+| pytest-dev/pytest | 18 | 5 | 5 |
+| scikit-learn/scikit-learn | 31 | 8 | 8 |
+| sphinx-doc/sphinx | 40 | 11 | 9 |
+
+停在 REVIEW_REQUIRED 的 6 道，每道都在容器里复现过原因。**人工终审（2026-09-16 晚）：6 道全部否掉**，
+理由在 `datasets/swebench/review-2026-09-16-final-official.csv`，已用 `cli.promote import-review` 导回（库里 42 VALID / 7 INVALID）。
+否的口径是"按当前题目定义或当前环境不收"，不是题本身坏：pylint-4604 和 sphinx-8475 是结构性的（测试补丁依赖 gold、要联网），
+另外 4 道修依赖或去掉挂掉的 P2P 后可以重验再审，但改官方题的定义要有逐题覆盖机制，现在没有，留给要抽 60 的时候一起决定。
+
+| 题 | 卡在哪 | 复现出来的原因 |
+|:---|:---|:---|
+| pylint-4604 | S4 一条都收集不到 | 测试模块 `from pylint.constants import IS_PYPY`，这个名字是 gold patch 加的；base 上整个文件 import 不了。官方 harness 只在打完 gold 后跑 P2P，我们的 S4 要 P2P 在 base 上先过 —— 语义差异，不是环境问题 |
+| xarray-6744 | 3 条 dask 变体 P2P 在 base 上 FAILED | 官方说它们改前就过，我们环境里 dask 2022.8.1 下改前就挂（center 那个 bug 对 dask 也生效）；官方镜像里的 dask 版本不同 |
+| matplotlib-20859 | `test_warn_big_data_best_loc` 在 base 上 FAILED | 按耗时发警告的用例，机器快慢决定过不过；第一轮它是打完 gold 才挂（GOLD_REGRESSION），第二轮改成 base 上挂 —— 就是不稳 |
+| matplotlib-24149 | pandas 相关 P2P 全 ERROR | conda 给的 pandas 2.3 要 numpy ≥ 1.26，官方 pip 钉的是 numpy 1.25.2；yml 里 `pandas!=0.25.0` 没封顶 |
+| sphinx-8475 | `test_build_linkcheck` 3 条 FAILED | linkcheck 要联网，沙箱断网（C-31）—— 和 requests 被整仓排除是同一个原因 |
+| sphinx-9461 | `test_uninitialized_attributes` 在 base 上 FAILED | 未查到底；autodoc 对 3.11 类型注解的行为差异可能性大 |
+
+**Oracle / Noop 门禁（AC 4 / 5）—— 2026-09-16 19:07 过了。** 旧名单的 5 道 sphinx 行清掉后冻快照
+42 道（清单哈希 `270b811d…`），Oracle 实验 #133 **42/42 = 100%**，Noop 实验 #134 **0/42 = 0%**，
+84 个作业并行 8 跑了 7 分钟（只跑 F2P ∪ P2P）。已发布 `swebench-verified-subset@v1`
+（指纹 `datasets/manifests/swebench-verified-subset@v1.json`，dirty=true —— 门禁是在未提交的工作区上跑的，
+指纹里如实记着）。这就是 MET-01 要的那句话：**判定引擎对 42 道官方题的判决和官方一致。**
+
+`psf__requests-2317` 那一趟（S1–S4，5 秒）是这条链路的第一份证据：官方镜像 + 声明的 141 条用例，
+报告完整、8 条 F2P 在 base 上全部 FAILED、用例 ID 一条不漏地对上了 —— 它被排除是因为 P2P 要联网，
+不是链路不通。

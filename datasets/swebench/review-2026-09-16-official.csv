@@ -1,0 +1,2 @@
+task_id,pr,validation_state,difficulty,f2p_count,p2p_count,issue_title,fail_to_pass,review,verdict,reason
+pallets__flask-5014,5014,REVIEW_REQUIRED,easy,1,59,Require a non-empty name for Blueprints,tests/test_blueprints.py::test_empty_name_not_allowed,issue_body 只有 195 字，少于 200，可能信息不足以让 AI 定位问题,ACCEPT,SWE-bench Verified 已人工核过题面；短是官方原文，按 2026-09-16 的既定政策收

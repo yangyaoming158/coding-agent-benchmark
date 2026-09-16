@@ -253,6 +253,30 @@ def test_s5_reads_the_baseline_instead_of_rerunning(golden: Any, tmp_path: Path)
         assert not [arg for arg in spec.command if "::" in arg]
 
 
+def test_declared_scope_runs_only_f2p_and_p2p(golden: Any, tmp_path: Path) -> None:
+    """`suite_scope=declared`（E1-T7）：三轮都只跑题目声明的用例，证据里记下这一点。
+
+    给 P2P 已经由官方定好的题用（SWE-bench 导入）—— 它们不需要从全量报告里派生候选池，
+    而全量套件动辄几十分钟。
+    """
+    request = make_request(golden, tmp_path, suite_scope="declared")
+    result, containers = run_pipeline(request, HEALTHY)
+
+    assert result.state is TaskValidationState.VALID
+    declared = set(request.plan.fail_to_pass) | set(request.plan.pass_to_pass)
+    for spec in containers.calls:
+        # 命令行尾巴上就是 F2P ∪ P2P 的用例 ID，一条不多一条不少
+        assert {arg for arg in spec.command if "::" in arg} == declared
+    assert result.evidence["task"]["suite_scope"] == "declared"
+    assert any("声明的" in s.detail for s in result.steps if s.step == "S4")
+
+
+def test_full_scope_is_the_default_and_recorded(golden: Any, tmp_path: Path) -> None:
+    result, _ = run_pipeline(make_request(golden, tmp_path), HEALTHY)
+    assert result.evidence["task"]["suite_scope"] == "full"
+    assert result.evidence["schema_version"] == "1.1"
+
+
 def test_baseline_evidence_has_full_case_list(golden: Any, tmp_path: Path) -> None:
     """VALID 时要写下"用例清单 + 耗时基线 + 镜像 digest"（§7.3 最后一行）。"""
     result, _ = run_pipeline(make_request(golden, tmp_path), HEALTHY)

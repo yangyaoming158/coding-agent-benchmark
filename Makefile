@@ -7,6 +7,8 @@ SHELL := /bin/bash
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
         promote-probe promote-assemble promote-review promote-report \
         dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
+        swebench-fetch swebench-sample swebench-warm swebench-pull swebench-fetch-blobs swebench-load swebench-build \
+        swebench-mirror swebench-import swebench-validate swebench-report \
         worker enqueue queue stress-sweep stress-hold stress-oom \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
@@ -197,6 +199,47 @@ promote-review:      ## 导出人工终审对照表（CSV）
 
 promote-report:      ## 漏斗报表：每一层剩多少、掉队的为什么
 	$(UV) python -m cli.promote report --save
+
+# ── E1-T7：SWE-bench Verified 官方题导入（校准集，slug 单独是 swebench-verified-subset）──
+# 顺序是 fetch → sample → pull（慢，38.9 GB，可反复续跑）→ mirror → import → validate → report，
+# 之后走下面 E1-T6 那套：make dataset-stage DATASET=swebench-verified-subset 等等。
+SWEBENCH_SEED := 20260915
+SWEBENCH_N := 50
+SWEBENCH_ARGS := --seed $(SWEBENCH_SEED) --n $(SWEBENCH_N)
+SWEBENCH_JOBS := 2
+
+swebench-fetch:      ## 拉官方数据集 500 行到 var/cache/swebench/（要网络，不花钱）
+	$(UV) python -m cli.swebench fetch
+
+swebench-sample:     ## 固定种子分层抽样，名单写进 datasets/swebench/（离线）
+	$(UV) python -m cli.swebench sample $(SWEBENCH_ARGS)
+
+swebench-warm:       ## 预热镜像站：每层碰几秒让它先去 Docker Hub 缓存（直连镜像站，不走代理）
+	$(UV) python -m cli.swebench warm $(SWEBENCH_ARGS)
+
+swebench-pull:       ## 拉抽中题的官方镜像并探测（要网络 + Docker，断了重跑接着拉）
+	$(UV) python -m cli.swebench pull $(SWEBENCH_ARGS)
+
+swebench-fetch-blobs: ## 用 Windows 的 curl.exe 把镜像的层下到 D 盘（WSL 到宿主那一跳太慢时用）
+	$(UV) python -m cli.swebench fetch-blobs $(SWEBENCH_ARGS)
+
+swebench-load:       ## 把 D 盘上的层拼成 OCI 布局 docker load 进来，再探测登记
+	$(UV) python -m cli.swebench load $(SWEBENCH_ARGS)
+
+swebench-build:      ## 按官方配方本机建镜像（依赖走清华源；JOBS 并行数）
+	$(UV) python -m cli.swebench build $(SWEBENCH_ARGS) --jobs $(SWEBENCH_JOBS)
+
+swebench-mirror:     ## 按 base_commit 浅拉 git 镜像（要网络）
+	$(UV) python -m cli.swebench mirror $(SWEBENCH_ARGS)
+
+swebench-import:     ## 组装题目 + 环境规格入库（只收镜像已拉到的）
+	$(UV) python -m cli.swebench import $(SWEBENCH_ARGS)
+
+swebench-validate:   ## 八步验证，只跑声明的用例（要 Docker）
+	$(UV) python -m cli.validate run --dataset swebench-verified-subset --scope declared
+
+swebench-report:     ## 导入漏斗（AC 8），--save 落 datasets/swebench/
+	$(UV) python -m cli.swebench report $(SWEBENCH_ARGS) --save
 
 # ── E1-T6：数据集版本化与发布 ──────────────────────────────
 # 顺序是 stage → gate → worker（跑门禁）→ publish。DATASET 和 SLUG 可以覆盖：

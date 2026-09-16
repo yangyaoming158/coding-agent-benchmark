@@ -78,7 +78,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from app.domain.enums import (
     InfraOutcome,
@@ -112,7 +112,8 @@ logger = get_logger(__name__)
 PIPELINE_VERSION = "1.0"
 
 #: 证据文档的结构版本。字段增删时加这个号，读证据的代码据此分支。
-EVIDENCE_SCHEMA_VERSION = "1.0"
+#: 1.1（2026-09-15，E1-T7）：`task` 块加了 `suite_scope`，记这次验证跑的是全量还是声明的用例。
+EVIDENCE_SCHEMA_VERSION = "1.1"
 
 #: gold 侧默认跑几遍。至少 2 遍才谈得上"复跑查不稳定用例"（§7.3 S8）。
 DEFAULT_REPEAT = 2
@@ -185,6 +186,14 @@ class ValidationRequest:
     previous_state: TaskValidationState | None = None
     #: gold 侧跑几遍。小于 2 就跳过 S8 的不稳定用例检查。
     repeat: int = DEFAULT_REPEAT
+    #: S4 / S7 / S8 跑全量套件还是只跑题目声明的用例（F2P ∪ P2P）。
+    #:
+    #: `full` 是 §7.3 的默认：P2P 候选池就从全量报告里来（§7.2(6)），挖掘题必须走它。
+    #: `declared` 是给 **P2P 已经给定** 的题准备的 —— SWE-bench 官方题的 P2P 是官方定的
+    #: （E1-T7，§8.6），不需要候选池；而 astropy / scikit-learn 的全量套件要跑几十分钟，
+    #: 三轮下来一道题就是一小时。只跑声明的用例和正式评测跑的集合一样（C-17），
+    #: 对"这道题判得对不对"这个问题没有损失；证据里会如实记下用的是哪一种。
+    suite_scope: Literal["full", "declared"] = "full"
 
     @property
     def task_id(self) -> str:
@@ -510,8 +519,9 @@ class _Pipeline:
             workspace_dir=workspace_dir,
             image=self.request.image,
             # 空序列 = 跑全量。§7.3 的 S4 要的就是全量基线，
-            # 只跑 F2P ∪ P2P 子集拿不到 P2P 候选池，也看不见套件里别的用例
-            test_ids=(),
+            # 只跑 F2P ∪ P2P 子集拿不到 P2P 候选池，也看不见套件里别的用例。
+            # None = 让执行器用 plan.test_ids（F2P ∪ P2P），只有 suite_scope=declared 才走这条
+            test_ids=() if self.request.suite_scope == "full" else None,
             run_id=f"validate-{self.request.task_id}",
             client=self.client,
             run_container=self.run_container,
@@ -558,8 +568,9 @@ class _Pipeline:
             raise _Stop(review=f"{label} 的测试报告不完整：{integrity.report_problem}")
 
         if record:
+            scope = "全量" if self.request.suite_scope == "full" else "声明的"
             self._record(
-                step, name, True, f"全量 {len(outcome.report.cases)} 条用例，报告完整", started
+                step, name, True, f"{scope} {len(outcome.report.cases)} 条用例，报告完整", started
             )
         return outcome
 
@@ -913,6 +924,7 @@ def _build_evidence(
             "pass_to_pass": list(pipeline.plan.pass_to_pass),
             "test_command": pipeline.plan.test_command,
             "test_timeout_s": pipeline.plan.test_timeout_s,
+            "suite_scope": request.suite_scope,
         },
         # 各步自己攒下的证据（workspace / image / baseline / after_gold / flaky）
         # 平铺到顶层，读证据的人不用先猜它们藏在哪个子对象里
