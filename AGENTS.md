@@ -562,37 +562,57 @@ git clone --bare --shallow-since="2.5 years ago" https://github.com/xorbitsai/in
 ```bash
 # 官方数据集 500 行（走 HF 的 JSON 分页接口，不装 pyarrow；有缓存就不重拉）
 make swebench-fetch
-# 固定种子分层抽样。名单在 datasets/swebench/sample-seed20260915-n50.json，重算必须逐字相同：
+# 固定种子分层抽样。2026-09-16 晚起默认抽 75（Makefile 的 SWEBENCH_N），名单在
+# datasets/swebench/sample-seed20260915-n75.json，重算必须逐字相同；n50 那份是 v1 的证据，也留着，
+# 75 的前 50 道和它逐字相同（层内顺序固定，加题不换种子）
 make swebench-sample && cd backend && uv run python -m cli.swebench sample --check
+# 官方配方导出（要联网装 swebench 包，uv 有缓存）。改了抽样数要重导，build-specs.json 会跟着变：
+uv run --with "swebench==3.0.15" --isolated python scripts/export_swebench_specs.py
 # git 镜像：按 base_commit 浅拉，不 clone 全史（astropy / matplotlib 全史几百 MB 还常被代理掐断）
 make swebench-mirror
 # 环境镜像。官方镜像（`make swebench-pull`）在这台机器上拉不动：50 个去重 38.9 GB，过代理
-# 0.2–6 MB/s 还整条卡死，一夜拉到 2 个。**主路是按官方配方本机建**（2026-09-16 起，47 道这么来的）：
+# 0.2–6 MB/s 还整条卡死，一夜拉到 2 个。**主路是按官方配方本机建**（2026-09-16 起，72 道这么来的）：
 # 配方原文在 datasets/swebench/build-specs.json（`scripts/export_swebench_specs.py` 从 swebench 包导出），
-# 下载全走清华源，改动只有 03-benchmark-spec.md §8.6 七点六那五处。
+# 下载全走清华源，改动只有 03-benchmark-spec.md §8.6 七点六那五处加九那两处（FreeType 预先放进
+# matplotlib 的下载缓存、没有 setup.py 的仓库把 pip 按回 24）。
 # 并行数：不用 conda 的题 2 个没问题；matplotlib 的 3 个 conda 环境各吃 5 GB 内存，11 GB 的机器只能 1 个。
+# 建之前 `docker images | grep -c bench-env:swebench` 看一眼：2026-09-16 晚是 76 个（名单里 72 道本机建的
+# + 重抽前多建的 4 道 sphinx；另 2 道 flask-5014 / pylint-6386 用的是官方镜像 swebench/sweb.eval.…），
+# 全在的话这一步几秒就过。
 make swebench-build                # 先建能并行的
 make swebench-build SWEBENCH_JOBS=1   # 再补 conda 那几个（已建好的会跳过）
 # 无人值守：等 build 退出后自动串 build(补跑) → import → validate → 终审表 → 导回 → 漏斗：
 #   nohup scripts/swebench_build_then_validate.sh > var/swebench-logs/chain.log 2>&1 &
-# 入库：environment_specs 一题一行（镜像就是按题发的），digest 和 READY 一起写，不用 cli.images build
+# 入库：environment_specs 一题一行（镜像就是按题发的），digest 和 READY 一起写，不用 cli.images build。
+# 它会顺手套上 datasets/swebench/p2p-overrides.json（逐题剔掉执行器选不中的 P2P，3 道题 4 条 id），
+# 清单写错一个字就报错不入库
 make swebench-import
-# 八步验证只跑声明的用例（官方 P2P 已经给定，不需要全量候选池；全量套件一道题要一小时）
+# 八步验证只跑声明的用例（官方 P2P 已经给定，不需要全量候选池；全量套件一道题要一小时）。
+# ⚠ 这条按 --dataset 选题，**重灌（全部 DISCOVERED）时才这么跑**。平时只补几道新题要用
+#   cd backend && uv run python -m cli.validate run --task <id> --task <id> --scope declared
+# 否则已终审否掉的题会被重验回 REVIEW_REQUIRED，人工结论被盖掉（2026-09-16 晚差点踩到）
 make swebench-validate
-# 终审从 CSV 导回，不导它们会一直停在 REVIEW_REQUIRED：flask-5014 按"题面短"政策收（下面一份），6 道人工 0 收 6 否（再下面一份）
+# 终审从 CSV 导回，不导它们会一直停在 REVIEW_REQUIRED：flask-5014 按"题面短"政策收（第一份），
+# 6 道人工 0 收 6 否（第二份），抽到 75 之后的 7 道人工 0 收 7 否（第三份）；官方题没有候选行，
+# 终审理由只在这三份 CSV 里，库里不存
 cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-official.csv
 cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-final-official.csv
-# 之后走 E1-T6 那套，DATASET / SLUG 都要指过来：
+cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-n75-official.csv
+# 之后走 E1-T6 那套，DATASET / SLUG 都要指过来。已发布 v1（42 道）和 v2（59 道），重灌后 stage 出来的
+# 摘要应该是 v2 的 4f5b44b88b46…：
 make dataset-stage DATASET=swebench-verified-subset
 make dataset-gate SLUG=swebench-verified-subset && make worker
 make dataset-publish SLUG=swebench-verified-subset
-make swebench-report               # 漏斗，--save 落 datasets/swebench/
+make swebench-report               # 漏斗，--save 落 datasets/swebench/（会按日期覆盖同名文件，留旧的要先改名）
 ```
 
 **终审政策（2026-09-16 定）**：官方题只因"题面 < 200 字"停在 REVIEW_REQUIRED 的一律收
 （`cli.swebench review-csv` 自动填 ACCEPT，理由写明是官方原文）；其他原因的留给人填。
 **题目定义变了要重验**：`cli.swebench import` 重跑不会把已验的题打回 DISCOVERED，
-所以改了 `pre_test_command` / 用例清洗规则之后，要自己 `cli.validate run --task` 重跑受影响的题。
+所以改了 `pre_test_command` / 用例清洗规则 / `p2p-overrides.json` 之后，要自己 `cli.validate run --task`
+重跑受影响的题。**改官方题的定义只有一条口子**：`datasets/swebench/p2p-overrides.json`（2026-09-16 晚加的，
+规矩在 `app/benchmark/swebench_overrides.py`）—— 只许剔 P2P、不许碰 F2P，每条带理由和日期，
+剔过的题打 `swebench-p2p-override` 标签。
 
 **官方镜像只能用在测试阶段。** 镜像里 `/testbed/.git` 是完整 clone，`git log --all` 翻得到修复；
 Agent 阶段用的是 `bench-agent` 镜像、只挂我们物化的工作区，碰不到它。谁要是把 Agent 放进官方镜像跑，
