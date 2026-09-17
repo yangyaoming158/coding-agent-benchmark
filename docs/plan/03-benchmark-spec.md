@@ -1944,3 +1944,114 @@ apt / miniconda / conda / pip 源换清华；`git clone` GitHub 换成解开本�
 `psf__requests-2317` 那一趟（S1–S4，5 秒）是这条链路的第一份证据：官方镜像 + 声明的 141 条用例，
 报告完整、8 条 F2P 在 base 上全部 FAILED、用例 ID 一条不漏地对上了 —— 它被排除是因为 P2P 要联网，
 不是链路不通。
+
+#### 九、同种子抽到 75（2026-09-16 晚）：官方题 59 道 VALID，MET-05 到 100
+
+**为什么**：八那一轮结束时官方 42 + 自建 41 = 83，离 MET-05 的 100 差 17。四里说过层内顺序是固定的，
+加题不用换种子，所以直接 `cli.swebench sample --n 75`：**前 50 道和 `sample-seed20260915-n50.json`
+逐字相同**（池摘要同为 `7973719e3a9e…`），只多出 25 道。已验的 42 道一道没动；`DEFAULT_SAMPLE_SIZE`
+和 Makefile 的 `SWEBENCH_N` 改成 75，n50 那份名单留在仓库里，它是 v1 的证据。
+
+| 仓库 | 池 | 配额 50 → 75 | 新题 | 新题 VALID |
+|:---|---:|:---:|---:|---:|
+| astropy/astropy | 22 | 6 → 9 | 3 | 2 |
+| matplotlib/matplotlib | 31 | 8 → 13 | 5 | 1 |
+| mwaskom/seaborn | 2 | 2 → 2 | 0 | — |
+| pallets/flask | 1 | 1 → 1 | 0 | — |
+| pydata/xarray | 19 | 6 → 8 | 2 | 2 |
+| pylint-dev/pylint | 9 | 3 → 5 | 2 | 2 |
+| pytest-dev/pytest | 18 | 5 → 8 | 3 | 3 |
+| scikit-learn/scikit-learn | 31 | 8 → 13 | 5 | 5 |
+| sphinx-doc/sphinx | 40 | 11 → 16 | 5 | 2 |
+
+**环境层只多了 3 个，不是 7 个。** 开工前按 `version` 数的是 7 个新环境（astropy 4.3、pylint 2.10、
+pytest 5.4 / 6.0、sphinx 3.3 / 3.5 / 7.1），实际导出 `build-specs.json` 后是 20 → 23：官方的 env key
+是**安装脚本的哈希**，脚本一样的版本共用一层 —— astropy 4.3 和 5.0 / 5.1 一层，sphinx 3.x 到 7.x 全在
+一层里（16 道题一个 env）。真正新建的只有 pylint 2.10、pytest 5.4、pytest 6.0，各约 100 秒，都不是
+`conda env create` 的环境，没有 conda 求解那一步。`export_swebench_specs.py` 加了 `--n`，
+`test_swebench_recipes.py` 的断言改成 75 / 23。
+
+**instance 镜像 25 道建了 24 道**（约 55 分钟，`SWEBENCH_JOBS=1`）：sphinx-8120 是 16 日下午重抽前建过的，
+直接复用；astropy-8707 仍然建不出（七点六末尾那个 `astropy_helpers` 的原因）。第一遍 21 成 3 败，
+3 败又是两个"官方镜像那一代 vs 今天"的坑，接在七点六的五条后面：
+
+6. **matplotlib 的 `setup.py` 编译时自己去下 FreeType 2.6.1**（sourceforge / savannah，走代理）。
+   之前 9 道 matplotlib 是运气好；这次 20826 卡了 17 分钟没动、26113 三个地址全失败。
+   它下载前先查 `~/.cache/matplotlib/<sha256>`，命中就不联网，所以把源码包（2.3 MB，sha256
+   `0a3c7dfbda6d…`，和 `setupext.py` 里写的一致，3.4–3.7 每个提交都是这个值）`COPY` 到那个位置，
+   脚本一字不改。缓存在 `var/cache/swebench/freetype-2.6.1.tar.gz`，`ensure_freetype()` 校验 sha256。
+   重建后两道各 2.5 分钟。
+7. **仓库没有 `setup.py` 的，`pip install -e .` 之前把 pip 按回 24。** pylint-7277 的 base 只有
+   `pyproject.toml` + `setup.cfg`，声明 `setuptools~=62.6`，没有 PEP 660 的 `build_editable`。
+   官方那一代的 pip 24 会退回 `setup.py develop`（用 setup.cfg 顶上），pip 25 删了这条退路，
+   26 直接报 "missing the 'build_editable' hook"。先在容器里验过 pip 24.3.1 装得上
+   （`pylint from /testbed/pylint/__init__.py`），再改配方：`build_instance` 用 `git cat-file -e`
+   看 base_commit 有没有 `setup.py`，没有才在 `conda activate testbed` 后面插一行 `pip install 'pip<25'`。
+   样本里没有 `setup.py` 的 5 道（seaborn ×2、flask、sphinx-11445 用 flit，本来就支持 PEP 660）
+   之前建好的不重建。
+
+**八步验证（只验 25 道新题，`cli.validate run --task …`）**：第一遍 14 VALID / 10 REVIEW_REQUIRED /
+1 INVALID，6 分钟。**不要用 `make swebench-validate` 补新题**：它按 `--dataset` 选题，会把 42 道
+VALID 和 6 道人工否掉的题一起重验，人工结论被盖掉。
+
+10 道 REVIEW 里有 3 道是"S4 一条都没跑"，逐道在容器里复现，根因是**同一类**：官方 P2P 名单里混着
+执行器按名字选不中的 id，pytest 遇到一条选不中就整场退出（exit 4），一条用例都不跑；官方 harness 是
+整文件跑再解析日志，碰不到这个。三种样子，没有一条纯字符串规则能全认出来：
+
+| 题 | 坏 id | 为什么选不中 |
+|:---|:---|:---|
+| pytest-7324 | `test_valid_idents[:::]`、`[a:::c]` | 参数里带 `::`，pytest 5.4 的命令行按 `::` 切 nodeid（45 条收集到 43 条、0 条运行）|
+| pytest-7521 | `test_capsysbinary.py::test_hello` | pytester 子会话里的 id，顶层没这个文件（官方日志解析串进来的，和 `[100%]` 同类；collected 0 items）|
+| pylint-7277 | `test_stdin[/mymodule.py]` | 参数是绝对路径且被截过，本环境里真实 id 是 `test_stdin[/workspace/tests/mymodule.py-mymodule-…]`，任何环境都对不上 |
+
+八里留下的那句"改官方题的定义要有逐题覆盖机制"就在这里落地：`datasets/swebench/p2p-overrides.json`
+（题 → 剔掉的 P2P id + 理由 + 日期）+ `app/benchmark/swebench_overrides.py`。规矩三条：**只许剔 P2P、
+不许碰 F2P**（F2P 是"修好了"的定义）；要剔的 id 必须真在官方 P2P 里，写错一个字直接报错；剔过的题打
+`swebench-p2p-override` 标签，报告里分得开。单测拿仓库里那份清单对着官方数据逐条核。三道剔掉 2 / 1 / 1 条
+P2P 后重验，全部 VALID。
+
+剩下 7 道 REVIEW_REQUIRED 都是"P2P 在 base 上就挂"（`review-2026-09-16-n75-official.csv`，
+0 道能按"题面短"政策自动收）。每道的原因在验证证据里，按上一轮的口径分类：
+
+| 题 | 挂的 P2P | 像哪一类 |
+|:---|:---|:---|
+| matplotlib-20488 | `test_https_imread_smoketest` | 要联网（C-31），和 sphinx-8475 一样是结构性的 |
+| sphinx-8269 | `test_build_linkcheck` 3 条 | 同上 |
+| matplotlib-24026、26113 | `test_bar_pandas*` 全 ERROR | 和 24149 一样：conda 给的 pandas 2.3 对 numpy 1.25 |
+| matplotlib-22871 | `test_auto_date_locator_intmult_tz`、`test_date2num_dst_pandas` | 依赖版本（pandas / tz） |
+| astropy-13033 | `timeseries/tests/test_sampled.py::test_fold` | 未查到底 |
+| sphinx-8120 | `tests/test_intl.py::test_text_docfields` | 未查到底，gettext / docutils 版本可能性大 |
+
+**16 日深夜人工终审：0 收 7 否**，同 16 日晚那 6 道的口径 —— 要联网的、依赖版本的、根因没查到底的，
+都不拿 `p2p-overrides.json` 硬剔（"这条 P2P 该不该剔"是题目定义的取舍，留到查清根因再议）。
+理由逐条写在同一份 CSV 里，已用 `cli.promote import-review` 导回，库里官方题 **59 VALID / 15 INVALID /
+0 REVIEW_REQUIRED**。注意官方题没有候选行，`import-review` 记不进 `raw_payload.final_review`，
+终审理由只存在这份 CSV 里 —— 它必须跟着进仓库，重灌时从它导回（§12 的重灌规程已列）。
+
+另有 1 道 INVALID：sphinx-8721，`test_viewcode_epub_default` 在 base 上就 PASSED（`F2P_NOT_FAILING`），
+不是环境问题。
+
+**漏斗（75 道）**，原件 `datasets/swebench/import-report-2026-09-16-n75.md`（50 道那份不动）：
+
+| 层 | 数量 | 说明 |
+|:---|---:|:---|
+| 抽样后 | 75 | 种子 20260915，同一池（173） |
+| 环境镜像备好 | 74 | 2 道官方镜像 + 72 道本机建；建不出：astropy-8707 |
+| git 镜像备好 | 75 | |
+| 入库 | 74 | |
+| 八步验证：VALID | **59** | 42 + 17；其中 3 道剔过 P2P |
+| 八步验证：REVIEW_REQUIRED | 0 | 上表 7 道，16 日深夜人工 0 收 7 否，已导回 |
+| 八步验证：INVALID | 15 | 人工否的 6 + 7 + COMMIT_MISSING 1（astropy-7606）+ F2P_NOT_FAILING 1（sphinx-8721） |
+
+**Oracle / Noop 门禁 —— 2026-09-16 22:54 过了。** 冻快照 v2 59 道（清单哈希 `4f5b44b88b46…`），
+Oracle 实验 #135 **59/59 = 100%**，Noop 实验 #136 **0/59 = 0%**，118 个作业 0 平台故障、
+0 次 `container_sigkilled_without_oom_flag`，6 分钟跑完。已发布 `swebench-verified-subset@v2`
+（指纹 `datasets/manifests/swebench-verified-subset@v2.json`，dirty=true，同 v1 的原因）；
+**v1 不动**（42 道，`270b811d…`，`benchmark-dev@v1` 的 `300746559b84…` 也没变）。
+
+**MET-05 对账**：官方 59 + `benchmark-dev` 41 = **100**，刚好到线，**余量 0**：7 道 REVIEW 全否了，
+官方题这一轮的终数就是 59。**底线的第二句"自建中文题 ≥40"没达标**：库里 VALID 里 `issue_language=zh`
+的只有 benchmark-dev 2 道（另 2 道中英混）+ golden-v1 4 道，最多 8 道；官方 59 道全是英文，一道帮不上。
+按 §4.1 的条款在报告里如实说明，附 §8.8 那张"中文 Python 项目全是 AI 基建、测试要下模型"的漏斗；
+E1-T8（Go）2026-09-16 降为 P2，缺口按 §8.5 Plan B 人工构造中文 Golden 题顶。
+成活率 25 道新题 17 道（68%），比预估的 84% 低，差在 matplotlib（5 道只活 1 道，pandas 那个坑占 2 道）。

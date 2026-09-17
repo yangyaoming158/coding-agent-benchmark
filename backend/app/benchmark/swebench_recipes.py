@@ -24,6 +24,17 @@ conda 那部分（`conda create python=3.x`、少数几个 `conda env create`）
    不再 `wget`。
 4. 其余一行不动。`sed` 改 setup.py、`apt-get install texlive`、`pip install -e .` 全按官方来。
 
+2026-09-16 晚抽到 75 道后又补了两条（§8.6 七点六第 6、7 条），都是"官方镜像那一代"和"今天"的差距：
+
+5. **matplotlib 的 FreeType 源码包预先放进它自己的下载缓存。** `setup.py` 会去 sourceforge /
+   savannah 下 `freetype-2.6.1.tar.gz`（和 qhull 一样是官方脚本之外、构建时才发生的下载），
+   走代理一次卡死 17 分钟、一次直接失败。它下载前先看 `~/.cache/matplotlib/<sha256>`，
+   命中就不联网，所以把包 `COPY` 到那个位置就行，脚本一字不改。
+6. **仓库没有 `setup.py` 的，构建前把 pip 按回 24。** pylint 2.15 只有 `pyproject.toml` +
+   `setup.cfg`，声明的 `setuptools~=62.6` 没有 PEP 660 的 `build_editable`；官方那一代的
+   pip 24 会退回 `setup.py develop`（用 setup.cfg 顶上），pip 25 把这条退路删了，26 直接报错。
+   只对没有 `setup.py` 的仓库加这一行（有 setup.py 的走另一条路，pip 26 还认），已建好的镜像不重建。
+
 改写全是纯字符串函数，测试里不起 docker 就能验。
 """
 
@@ -206,9 +217,31 @@ git -c user.name=bench -c user.email=bench@localhost commit -q -m base"""
 QHULL_TARBALL = "qhull-2020-src-8.0.2.tgz"
 QHULL_URL = f"http://www.qhull.org/download/{QHULL_TARBALL}"
 
+#: matplotlib 的 `setup.py` 构建时自己去下的 FreeType（测试基线图是用 2.6.1 渲染的，不能换系统的）。
+#: 它下载前先查 `~/.cache/matplotlib/<sha256>`，命中就不联网 —— 我们把包放到这个位置。
+#: sha256 是 `setupext.py` 里 `_freetype_hashes['2.6.1']`，样本里 3.4–3.7 每个提交都是这个值。
+FREETYPE_TARBALL = "freetype-2.6.1.tar.gz"
+FREETYPE_SHA256 = "0a3c7dfbda6da1e8fce29232e8e96d987ababbbf71ebc8c75659e4132c367014"
+FREETYPE_URLS = (
+    f"https://download.savannah.gnu.org/releases/freetype/freetype-old/{FREETYPE_TARBALL}",
+    f"https://download.savannah.gnu.org/releases/freetype/{FREETYPE_TARBALL}",
+    f"https://downloads.sourceforge.net/project/freetype/freetype2/2.6.1/{FREETYPE_TARBALL}",
+)
+FREETYPE_CACHE_PATH = f"/root/.cache/matplotlib/{FREETYPE_SHA256}"
+_MATPLOTLIB_CLONE = "https://github.com/matplotlib/matplotlib /testbed"
 
-def rewrite_repo_script(official: str) -> str:
-    """官方 `setup_repo.sh` → 不联 GitHub 的版本。"""
+#: 没有 `setup.py` 的仓库，`pip install -e .` 之前把 pip 按回官方那一代（见模块文档第 6 条）。
+LEGACY_EDITABLE_PIP = "pip<25"
+_CONDA_ACTIVATE = re.compile(r"^conda activate testbed$", re.MULTILINE)
+_LEGACY_PIP_LINE = f"python -m pip install '{LEGACY_EDITABLE_PIP}'"
+
+
+def rewrite_repo_script(official: str, *, legacy_pip: bool = False) -> str:
+    """官方 `setup_repo.sh` → 不联 GitHub 的版本。
+
+    `legacy_pip=True`（仓库没有 `setup.py`）时，在第一句 `conda activate testbed` 之后把 pip
+    按回 24，让 pyproject-only 仓库的 editable 安装还能走 `setup.py develop` 那条退路。
+    """
     if not _GIT_CLONE.search(official):
         raise RecipeError(
             "官方 setup_repo.sh 里没找到 `git clone -o origin https://github.com/... /testbed`"
@@ -223,6 +256,14 @@ def rewrite_repo_script(official: str) -> str:
     text = _NO_USE_PEP517.sub("", text)
     text = _GIT_RESET.sub("", text, count=1)
     text = _GIT_REMOTE_REMOVE.sub("", text, count=1)
+    if legacy_pip:
+        if not _CONDA_ACTIVATE.search(text):
+            raise RecipeError(
+                "官方 setup_repo.sh 里没找到 `conda activate testbed`，pip 按回的位置定不了"
+            )
+        text = _CONDA_ACTIVATE.sub(
+            lambda _: f"conda activate testbed\n{_LEGACY_PIP_LINE}", text, count=1
+        )
     if "QHULL_URL" in text:
         if not _QHULL_WGET.search(text):
             raise RecipeError("脚本里有 QHULL_URL 但没找到预期的 wget 行，改写方式要重新看")
@@ -235,7 +276,14 @@ def needs_qhull(official_repo_script: str) -> bool:
     return "QHULL_URL" in official_repo_script
 
 
-def instance_dockerfile(env_image_key: str, *, version: str, with_qhull: bool) -> str:
+def needs_freetype(official_repo_script: str) -> bool:
+    """matplotlib 的题都要：`setup.py` 编译时下 FreeType 2.6.1（不分版本，3.4–3.7 都是）。"""
+    return _MATPLOTLIB_CLONE in official_repo_script
+
+
+def instance_dockerfile(
+    env_image_key: str, *, version: str, with_qhull: bool, with_freetype: bool = False
+) -> str:
     """instance 的 Dockerfile 自己写，不改官方那份：官方的只有 COPY 一个脚本，我们多两样东西。
 
     `SETUPTOOLS_SCM_PRETEND_VERSION`：官方镜像里 `/testbed` 带 git tag，setuptools_scm 能算出
@@ -250,6 +298,9 @@ def instance_dockerfile(env_image_key: str, *, version: str, with_qhull: bool) -
     ]
     if with_qhull:
         lines.append(f"COPY ./{QHULL_TARBALL} /root/{QHULL_TARBALL}")
+    if with_freetype:
+        # 放进 matplotlib 自己的下载缓存，setup.py 见到就不联网了
+        lines.append(f"COPY ./{FREETYPE_TARBALL} {FREETYPE_CACHE_PATH}")
     lines += [
         f"ENV SETUPTOOLS_SCM_PRETEND_VERSION={version}",
         "RUN sed -i -e 's/\\r$//' /root/setup_repo.sh",
@@ -262,15 +313,23 @@ def instance_dockerfile(env_image_key: str, *, version: str, with_qhull: bool) -
     return "\n".join(lines)
 
 
-def build_context_files(specs: BuildSpecs, instance_id: str, *, version: str) -> dict[str, str]:
-    """一道题的 instance 构建上下文里要写的文本文件：`{文件名: 内容}`。`repo.tar` 和 qhull 另放。"""
+def build_context_files(
+    specs: BuildSpecs, instance_id: str, *, version: str, legacy_pip: bool = False
+) -> dict[str, str]:
+    """一道题的 instance 构建上下文里要写的文本文件：`{文件名: 内容}`。
+
+    `repo.tar`、qhull、FreeType 三个二进制另放。`legacy_pip` 由调用方看仓库有没有 `setup.py` 决定。
+    """
     spec = specs.instances[instance_id]
     script = spec["install_repo_script"]
     return {
         "Dockerfile": instance_dockerfile(
-            spec["env_image_key"], version=version, with_qhull=needs_qhull(script)
+            spec["env_image_key"],
+            version=version,
+            with_qhull=needs_qhull(script),
+            with_freetype=needs_freetype(script),
         ),
-        "setup_repo.sh": rewrite_repo_script(script),
+        "setup_repo.sh": rewrite_repo_script(script, legacy_pip=legacy_pip),
     }
 
 
@@ -309,12 +368,20 @@ def summarize(specs: BuildSpecs) -> dict[str, Any]:
         "need_qhull": sorted(
             i for i, s in specs.instances.items() if needs_qhull(s["install_repo_script"])
         ),
+        "need_freetype": sorted(
+            i for i, s in specs.instances.items() if needs_freetype(s["install_repo_script"])
+        ),
     }
 
 
 __all__ = [
     "BASE_TAG",
     "CONDARC",
+    "FREETYPE_CACHE_PATH",
+    "FREETYPE_SHA256",
+    "FREETYPE_TARBALL",
+    "FREETYPE_URLS",
+    "LEGACY_EDITABLE_PIP",
     "MIRROR_HOSTS",
     "QHULL_TARBALL",
     "QHULL_URL",
@@ -327,6 +394,7 @@ __all__ = [
     "instance_dockerfile",
     "instance_tag",
     "load_build_specs",
+    "needs_freetype",
     "needs_qhull",
     "rewrite_base_dockerfile",
     "rewrite_env_dockerfile",

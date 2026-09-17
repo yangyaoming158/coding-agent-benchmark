@@ -1,7 +1,7 @@
 """官方构建脚本的改写规则（E1-T7，`app.benchmark.swebench_recipes`）。
 
 不起 docker。既用手工拼的最小脚本验每条规则，也把仓库里那份真实的
-`datasets/swebench/build-specs.json` 整个过一遍，保证 50 道题都改写得出来。
+`datasets/swebench/build-specs.json` 整个过一遍，保证 75 道题都改写得出来。
 """
 
 from __future__ import annotations
@@ -12,6 +12,9 @@ import pytest
 
 from app.benchmark.swebench_recipes import (
     BASE_TAG,
+    FREETYPE_CACHE_PATH,
+    FREETYPE_SHA256,
+    FREETYPE_TARBALL,
     QHULL_TARBALL,
     RecipeError,
     base_context_files,
@@ -21,6 +24,7 @@ from app.benchmark.swebench_recipes import (
     instance_dockerfile,
     instance_tag,
     load_build_specs,
+    needs_freetype,
     needs_qhull,
     rewrite_base_dockerfile,
     rewrite_env_dockerfile,
@@ -129,6 +133,35 @@ def test_repo_script_refuses_unexpected_input() -> None:
         rewrite_repo_script(REPO.replace("git clone -o origin", "git clone"))
 
 
+def test_repo_script_pins_pip_back_only_for_setup_py_less_repos() -> None:
+    """pylint 2.15 只有 pyproject.toml + setup.cfg，pip 26 装不了 editable；按回 24 才走得通。"""
+    text = rewrite_repo_script(REPO, legacy_pip=True)
+    lines = text.splitlines()
+    activate = lines.index("conda activate testbed")
+    assert lines[activate + 1] == "python -m pip install 'pip<25'"
+    assert text.index("pip install 'pip<25'") < text.index("python -m pip install -e .")
+    # 默认（仓库有 setup.py）一个字都不加
+    assert "pip<25" not in rewrite_repo_script(REPO)
+    with pytest.raises(RecipeError):
+        rewrite_repo_script(
+            REPO.replace("conda activate testbed", "conda activate other"), legacy_pip=True
+        )
+
+
+def test_matplotlib_freetype_goes_into_its_download_cache() -> None:
+    """matplotlib 的 setup.py 下 FreeType 前先看 ~/.cache/matplotlib/<sha256>，放对位置就不联网。"""
+    mpl = REPO.replace("pallets/flask", "matplotlib/matplotlib")
+    assert needs_freetype(mpl) and not needs_freetype(REPO)
+    text = instance_dockerfile("x.y:latest", version="3.7", with_qhull=False, with_freetype=True)
+    assert f"COPY ./{FREETYPE_TARBALL} /root/.cache/matplotlib/{FREETYPE_SHA256}" in text
+    assert FREETYPE_CACHE_PATH.endswith(FREETYPE_SHA256)
+    assert "freetype" not in instance_dockerfile("x.y:latest", version="1", with_qhull=False)
+    # 脚本本身一字不改：FreeType 的处理全在 Dockerfile 的 COPY 上
+    assert rewrite_repo_script(mpl) == rewrite_repo_script(REPO).replace(
+        "pallets/flask", "matplotlib/matplotlib"
+    )
+
+
 def test_env_script_adds_nodefaults_to_conda_forge_only_yml() -> None:
     official = (
         "cat <<'EOF' > environment.yml\nname: testbed\nchannels:\n  - conda-forge\n"
@@ -163,10 +196,14 @@ def test_instance_dockerfile_pins_version_and_copies_inputs() -> None:
 
 @pytest.mark.skipif(not SPECS_FILE.exists(), reason="仓库里没有 build-specs.json")
 def test_every_sampled_instance_rewrites_cleanly() -> None:
-    """真实的 50 道：三层都改写得出来，一条 RecipeError 都不能有。"""
+    """真实的 75 道：三层都改写得出来，一条 RecipeError 都不能有。
+
+    env 的个数比"版本数"少：官方的 env key 是安装脚本的哈希，脚本一样的版本共用一层
+    （astropy 4.3 / 5.0 / 5.1 一层，sphinx 3.x–7.x 一层），所以 50 → 75 只多了 3 个 env。
+    """
     specs = load_build_specs(SPECS_FILE)
     summary = summarize(specs)
-    assert summary["instances"] == 50 and summary["envs"] == 20
+    assert summary["instances"] == 75 and summary["envs"] == 23
     assert "repo.anaconda.com" not in base_context_files(specs)["Dockerfile"]
     for key in specs.envs:
         files = env_context_files(specs, key)
@@ -178,4 +215,17 @@ def test_every_sampled_instance_rewrites_cleanly() -> None:
         assert "github.com" not in files["setup_repo.sh"]
         assert "wget" not in files["setup_repo.sh"]
         assert "--no-use-pep517" not in files["setup_repo.sh"]
+        assert "pip<25" not in files["setup_repo.sh"]
+        assert (FREETYPE_TARBALL in files["Dockerfile"]) == instance_id.startswith("matplotlib")
+        # 没有 setup.py 的仓库（pylint-7277）调用方会传 legacy_pip=True，每一道题的脚本都得接得住
+        assert (
+            "pip<25"
+            in build_context_files(specs, instance_id, version="1.0", legacy_pip=True)[
+                "setup_repo.sh"
+            ]
+        )
     assert all(i.startswith("matplotlib") for i in summary["need_qhull"])
+    assert summary["need_freetype"] == sorted(
+        i for i in specs.instances if i.startswith("matplotlib")
+    )
+    assert len(summary["need_freetype"]) == 13
