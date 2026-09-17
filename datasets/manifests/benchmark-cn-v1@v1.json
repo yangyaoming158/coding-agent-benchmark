@@ -1,0 +1,194 @@
+{
+  "dataset_sha256": "sha256:b6b560cc3e02858c05c1fce05135d542aa1330027f31532eeb8b372bc8005c34",
+  "dirty": true,
+  "gate": {
+    "checked_at": "2026-09-17T10:10:43.841968+00:00",
+    "noop": {
+      "evaluation_run_id": 140,
+      "resolve_rate": 0.0,
+      "resolved_count": 0,
+      "total_tasks": 41
+    },
+    "oracle": {
+      "evaluation_run_id": 139,
+      "resolve_rate": 1.0,
+      "resolved_count": 41,
+      "total_tasks": 41
+    },
+    "protocol_clause": "C-50",
+    "snapshot_digest": "sha256:1701c943ff5bafff0c284869e934cd3182fbd5e3a58e5e3f146d4043125779e6"
+  },
+  "harness_git_sha": "31115e8e0438642a7781d9cf50c71d29c7e55e4b",
+  "published_at": "2026-09-17T10:10:43.841941+00:00",
+  "slug": "benchmark-cn-v1",
+  "source_dataset_id": "benchmark-dev",
+  "task_count": 41,
+  "task_hashes_sha256": "sha256:1701c943ff5bafff0c284869e934cd3182fbd5e3a58e5e3f146d4043125779e6",
+  "tasks": [
+    {
+      "content_hash": "4a4bf2097523cca8a24514c4a2f517046e86fe14ae97ed8a2cb3e7ca30d6158e",
+      "task_id": "pallets__click-2271"
+    },
+    {
+      "content_hash": "68b40b49b2662bd995f060b8dfe9d833469603cf49e522f33664f540d4054b7f",
+      "task_id": "pallets__click-2365"
+    },
+    {
+      "content_hash": "240795ddb4817cc986a65010c5f234d62b818fe5bfdd079450e06ef707e9980d",
+      "task_id": "pallets__click-2397"
+    },
+    {
+      "content_hash": "db1d07021182e9f49e185796fc8d19cbbd05a369c8f2e947aea7f76502bc3b8a",
+      "task_id": "pallets__click-2696"
+    },
+    {
+      "content_hash": "d725104a871180995ebb0f2e5a93c99516a924b6f235500080df0d8fe93da033",
+      "task_id": "pallets__click-2775"
+    },
+    {
+      "content_hash": "fb0aaff6b35f8921e444201dcd459dae33838bdc179d1f42bdcc405e90c49f5f",
+      "task_id": "pallets__click-2788"
+    },
+    {
+      "content_hash": "58b539bf6b31ef132d3715c98acd4a334684da9243a392a6c9347ce918fb04f0",
+      "task_id": "pallets__click-2818"
+    },
+    {
+      "content_hash": "0893c0792f0b0f70276482aa09c7e1bf9319dff499d6b2024fab139e8fe10485",
+      "task_id": "pallets__click-2840"
+    },
+    {
+      "content_hash": "1e86a1bf91e8d930faef20ee556627620059f1a9fcbc37c22d448aa7ca862b44",
+      "task_id": "pallets__click-2933"
+    },
+    {
+      "content_hash": "79e4d2122d5190dcb50ae2e3eb5acc43791641d15654071ef9f81331c05de9c0",
+      "task_id": "pallets__click-3058"
+    },
+    {
+      "content_hash": "57509ce82b9e00410365db1817034c006c2384b8830b54430aa47224c73a3e9e",
+      "task_id": "pallets__click-3068"
+    },
+    {
+      "content_hash": "6ee435ec6e550c3626cfb6b7e40d1b32c9a2b9a0cfaab00fa97b1a338fcb4dac",
+      "task_id": "pallets__click-3079"
+    },
+    {
+      "content_hash": "76528a907e4260ad0eb5e0a04707e7008f6a4c8947c00640b9d605f206745f0a",
+      "task_id": "pallets__click-3126"
+    },
+    {
+      "content_hash": "7908ba8ca98091fdbbbc77122794630770d756ed0320de72ed58539b2706f7b3",
+      "task_id": "pallets__click-3152"
+    },
+    {
+      "content_hash": "75223f94b95fee6285c8a9a64c4bd2bd46cd6b3c396acab5442af7d68b21747e",
+      "task_id": "pallets__click-3224"
+    },
+    {
+      "content_hash": "8eed921b97d06269740ade523a9b2580f65c30c13e846b59781d8cb65afe1937",
+      "task_id": "pallets__click-3225"
+    },
+    {
+      "content_hash": "1738e21746fb60e8feedd8dffe2dc4699b929ca5eb61f1ad6279c04436e7bf14",
+      "task_id": "pallets__click-3244"
+    },
+    {
+      "content_hash": "375d49f90d6ba18367a8f93ea2863d08a066548eb2d6128ccbf8f77d04541280",
+      "task_id": "pallets__click-3256"
+    },
+    {
+      "content_hash": "23d4aa957d1bc90b99ae5dcee2c38f2d6dd8b6fe63ee77f90b8e4dbd9e659366",
+      "task_id": "pallets__click-3363"
+    },
+    {
+      "content_hash": "fe0606695a5abebeff5345c04e5ffa702729dbb941237e09ccd4603185a874e6",
+      "task_id": "pallets__click-3434"
+    },
+    {
+      "content_hash": "2635147308417c8d973124f541fd67652f178420c848e9d62131d2cda42a2b6d",
+      "task_id": "pallets__click-3466"
+    },
+    {
+      "content_hash": "ac3564b1ae52cb21c4d88605449041d57a557ea0c1c65f14882f020d2b56cdb5",
+      "task_id": "pallets__click-3482"
+    },
+    {
+      "content_hash": "bcd6ae136b31b22cac022400e24a0decec19bbb205f8da0473b89733a56c2a85",
+      "task_id": "pallets__click-3484"
+    },
+    {
+      "content_hash": "00dfa8ff986f2872cc8fc84211b4ed4f1ba17977f0bda72ad20014b1313163ca",
+      "task_id": "pallets__click-3507"
+    },
+    {
+      "content_hash": "2588483ed84fa912bfac934202432f7cfa2e0ec5875252fe1b52e2927b3b0c07",
+      "task_id": "pallets__click-3533"
+    },
+    {
+      "content_hash": "ba06052d8fdc489292b1697e4caf5896733738e09d46449267a620d3209eb66a",
+      "task_id": "pallets__click-3578"
+    },
+    {
+      "content_hash": "b3657b1a7e49c1b7b02306c5650df28cf1df949f12fd3979728c0b88bb702c80",
+      "task_id": "pallets__click-3642"
+    },
+    {
+      "content_hash": "f15aa069be9e89c8923f7e609ecbea2f58d94050b56fb61500fba1dfc7d14b46",
+      "task_id": "pallets__click-3653"
+    },
+    {
+      "content_hash": "b774ba5255d122c0ccb4f28da54c91eea0f146b83eab05b7678f7b49d7dfa66a",
+      "task_id": "pallets__click-3678"
+    },
+    {
+      "content_hash": "32747b45a2ed1b1dfefb47679248c61a457ce9e6dcd0f4e6a7c0988ecb5dac7c",
+      "task_id": "pallets__click-3769"
+    },
+    {
+      "content_hash": "eb3e9e7b78bbc9dcee9bdf8855d38ebfc69bc046218b1c2f830899602d948896",
+      "task_id": "pallets__click-3781"
+    },
+    {
+      "content_hash": "684624f129db7087ded01aacff1519349baa9f37bb9373119cfcf98e3397bce9",
+      "task_id": "pallets__click-3818"
+    },
+    {
+      "content_hash": "5bafeb449833a872f7e97e33c15d87ecf19ed547b092ea056e0b3790c5e08689",
+      "task_id": "pallets__click-3858"
+    },
+    {
+      "content_hash": "5f217d6b85d8b826e1daca491f8d5eefb98ef5a40f4f88c4549a68808da9cf0c",
+      "task_id": "tortoise__tortoise-orm-2081"
+    },
+    {
+      "content_hash": "42cce9c8a0c9ba152e8e3e68050c0c62165a2d6a506e3b02e9b6a00dd5536ff3",
+      "task_id": "tortoise__tortoise-orm-2125"
+    },
+    {
+      "content_hash": "8dc5ed5b734499dc27cccf4ca2c2a33d8fa4e98c5fbd5c41f90a111574b321fc",
+      "task_id": "tortoise__tortoise-orm-2128"
+    },
+    {
+      "content_hash": "4a80ac805d05510654eb9ea849cec99131e6b47cacf1e5fed7818729208e6eea",
+      "task_id": "tortoise__tortoise-orm-2129"
+    },
+    {
+      "content_hash": "5f46c4d62f16b93134b82c996a438a4fbc3e3ec6f164d5115eb5339410e4a91b",
+      "task_id": "tortoise__tortoise-orm-2145"
+    },
+    {
+      "content_hash": "f5d3f4d353c45ec51c4c12ee0fd35200944af4a7f3347d47744d95360c5a588d",
+      "task_id": "tortoise__tortoise-orm-2236"
+    },
+    {
+      "content_hash": "70fa1b94978950a324d3632a9e57af64a8999ad9ef0ecec7f9bfd19ebb1ae8e3",
+      "task_id": "tortoise__tortoise-orm-2255"
+    },
+    {
+      "content_hash": "46bb92dd1a83741af401192d6ed05e6f054cc4a3643bf45a2a3fc74d2f88b4e4",
+      "task_id": "tortoise__tortoise-orm-2269"
+    }
+  ],
+  "version": "v1"
+}

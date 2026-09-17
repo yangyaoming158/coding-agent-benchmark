@@ -1421,7 +1421,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   也正因为这条边界，AC 第 7 条没做（跑一次评测就得先建一行 `benchmark_sets`）。
   新增 30 个测试（25 个纯函数、5 个落库）。落地方式和十处实现决策记在
   `03-benchmark-spec.md` §8.11。
-### E8-T3 L2 `benchmark-cn-v1` 60–100 题 · **P1 · C:XL · E:4d（跨天，含机时）· 🐳**
+### E8-T3 L2 `benchmark-cn-v1` 60–100 题 ✅ 已于 2026-09-17 收口（**实际 41 道**，AC 6 的 ≥60 未达标，如实标）· **P1 · C:XL · E:4d（跨天，含机时）· 🐳**
 - **Goal**：把定档仓库里剩下 7 个的候选挖出来、筛出来、推成题，冻出最终实验用的主数据集
 - **Req**：MET-05 · **Deps**：E8-T2, E1-T6 · **Modules**：`benchmark/{mining,cleaning,assembly}`
 - **Output**：`benchmark-cn-v1` 数据集 ≥60 道 VALID；漏斗报表
@@ -1555,8 +1555,38 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   按这批 57% 的终审通过率补不齐 19 道 —— 缺口怎么补另议（E1-T7 官方题、loguru 11 条、E1-T8 Go）。
   **2026-09-16 收口**：E1-T7 抽到 75 把总数补齐（官方 59 + 自建 41 = 100），E1-T8 降为 P2；
   "自建中文题 ≥40"这句按 §4.1 如实说明（见 `03-benchmark-spec.md` §8.6 九的 MET-05 对账）。
+- **2026-09-17 发布 `benchmark-cn-v1@v1`，41 道，这张卡到此为止**。AC 逐条对账：
+  AC 1–4 ✅（第一段）；AC 5 ✅（tortoise 拿到 digest；xorbitsai 判不可用、sqlfluff 暂缓，都在时间盒内）；
+  **AC 6 ❌ 41 < 60**，缺口按 §4.1 备用方案由官方题顶（官方 59 + 自建 41 = 100，MET-05 到线）；
+  AC 7 ✅（41 道全部过终审，四份 CSV）；AC 8 ✅（漏斗在 `03-benchmark-spec.md` §8.12，
+  分仓库的表在 `datasets/quality/quality-2026-09-17.md` 第六节）；AC 9 ✅（`benchmark-dev@v1`
+  `sha256:300746559b84…` 未变，`dataset verify` 零漂移）；AC 10 ✅（中文 4 道，10%，如实标）。
+  **门禁第一轮拦下 8 道 tortoise 题（Oracle 33/41），根因不是题坏，是验证和评测跑测试的顺序不一样**：
+  `tests/cli/test_cli.py::test_init_creates_migrations_package` 只在"它是本进程第一个 import `cli_app` 的用例"时
+  才过 —— 八步验证跑全量套件（文件顺序，它排第一），正式评测只跑 F2P ∪ P2P（P2P 字母序，六条
+  `test_downgrade_*` / `test_heads_*` / `test_history_*` 排它前面），每次必挂。容器里复现三遍
+  （单跑过 / 文件顺序过 / 字母序挂）后按 E1-T6 剔 pager 那一套处置：
+  `assembly.ORDER_DEPENDENT_TEST_FUNCTIONS` 整族剔、14 道 tortoise 题 `assemble --redo` 重组装
+  （每道 P2P −1，`validation_state` 不动）、重新 stage（摘要 `c0425289…` → `1701c943…`）、
+  **第二轮门禁一次过：Oracle #139 41/41、Noop #140 0/41、0 平台故障、0 次
+  `container_sigkilled_without_oom_flag`**。细账在 `03-benchmark-spec.md` §8.12。
+  指纹 `datasets/manifests/benchmark-cn-v1@v1.json`（dirty=true，同前三版的原因：门禁在未提交的
+  工作区上跑）。`benchmark-dev@v1` 和 `swebench-verified-subset@v1/@v2` 一行没动。
 ### E8-T4 校准集 50 题 · **P1 · C:M · E:1d · 🌐🐳**
-### E8-T5 数据集质量报告（来源构成/语言分布/难度分布/漏斗数据） · **P1 · C:S · E:0.5d**
+### E8-T5 数据集质量报告（来源构成/语言分布/难度分布/漏斗数据） ✅ 已于 2026-09-17 完成 · **P1 · C:S · E:0.5d**
+- **AC**（卡片原本只有标题，2026-09-17 开工前定的）：
+  1. 报告只数**发布版里的题**（`benchmark_set_items`），不数库里全部 VALID —— MET-05 数的是可评测的题
+  2. 四节都有：来源构成（按仓库、标国产）、语言分布（zh / mixed / en）、难度分布、F2P / P2P 规模
+  3. 漏斗两条：自建题按仓库逐层（候选 → 预筛 → 候选 F2P → 探测 → 入库 → VALID → 终审 → 进集），
+     官方题复用 `cli.swebench report` 的那张
+  4. 库里 VALID 但不在任何发布版里的中文题（Golden 4 道）单独交代，不混进合计
+  5. Markdown + JSON 两份落 `datasets/quality/`，进版本库
+- **实际交付**（2026-09-17）：`backend/cli/quality.py` + `make quality-report`，
+  报告 `datasets/quality/quality-2026-09-17.{md,json}`，9 条单测。结论：
+  **100 道 = 官方 59（9 仓库）+ 自建 41（click 33 + tortoise 8）；中文 4 道（zh 2 + mixed 2，4%），
+  国产仓库 0；难度 easy 46 / medium 43 / hard 11；自建题 P2P 中位 1554 条、官方 59 条。**
+  自建漏斗里 6 个仓库进集 0 道，原因各不同（xorbitsai 测试要下模型、sqlfluff 补丁不带测试函数、
+  其余没建镜像），第一次把它们并排放进一张表。
 
 ## E9 — Performance & Reliability
 

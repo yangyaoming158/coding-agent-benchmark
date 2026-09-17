@@ -438,6 +438,14 @@ C-20a 禁止的是另一件事：**已发布题目**在正式评测时超时一�
   `TEST_TOO_SLOW` —— 本机容器起来加跑完七条用例还不到 1 秒。
   改成"`test_command` 睡 30 秒、预算 5 秒"，结果就只取决于这两个数。
 
+### 补记（2026-09-17，E8-T3）：验证跑全量、评测跑子集，顺序不同
+
+上面"验证复用 `execute_tests`，验过了就保证正式评测判得对"漏了一层：**用例子集和顺序**。
+S4/S8 跑全量套件（文件顺序），正式评测只跑 F2P ∪ P2P（P2P 字母序）。tortoise 的
+`test_init_creates_migrations_package` 只在"它是本进程第一个 import `cli_app` 的用例"时过，
+文件顺序里它排第一、字母序里排第七 —— 八步验证 8 道全 VALID，Oracle 门禁 8 道全挂。
+处置和根治的取舍在 §8.12 二、三；这一节的判定规则没改。
+
 ## 7.11 数据集版本化与发布落地实录（2026-09-10，E1-T6）
 
 > **本节是追加的实现记录。** 它给 §7.4 的最后一句话定了一个读法（第五节），
@@ -2050,8 +2058,126 @@ Oracle 实验 #135 **59/59 = 100%**，Noop 实验 #136 **0/59 = 0%**，118 个�
 **v1 不动**（42 道，`270b811d…`，`benchmark-dev@v1` 的 `300746559b84…` 也没变）。
 
 **MET-05 对账**：官方 59 + `benchmark-dev` 41 = **100**，刚好到线，**余量 0**：7 道 REVIEW 全否了，
-官方题这一轮的终数就是 59。**底线的第二句"自建中文题 ≥40"没达标**：库里 VALID 里 `issue_language=zh`
+官方题这一轮的终数就是 59。（**2026-09-17 补**：那 41 道当时只有 22 道在发布版里，另 19 道不在任何快照中；
+现已冻成 `benchmark-cn-v1@v1` 发布，Oracle 41/41、Noop 0/41，两份发布版合计 100 道可评测的题，见 §8.12。）**底线的第二句"自建中文题 ≥40"没达标**：库里 VALID 里 `issue_language=zh`
 的只有 benchmark-dev 2 道（另 2 道中英混）+ golden-v1 4 道，最多 8 道；官方 59 道全是英文，一道帮不上。
 按 §4.1 的条款在报告里如实说明，附 §8.8 那张"中文 Python 项目全是 AI 基建、测试要下模型"的漏斗；
 E1-T8（Go）2026-09-16 降为 P2，缺口按 §8.5 Plan B 人工构造中文 Golden 题顶。
 成活率 25 道新题 17 道（68%），比预估的 84% 低，差在 matplotlib（5 道只活 1 道，pandas 那个坑占 2 道）。
+
+## 8.12 `benchmark-cn-v1@v1` 发布与数据集质量报告落地实录（2026-09-17，E8-T3 收口 + E8-T5）
+
+> 工具：`python -m cli.dataset {stage,gate,publish}`（E1-T6 那套，`DATASET=benchmark-dev SLUG=benchmark-cn-v1`）
+> + `python -m cli.quality report`（新，`make quality-report`）。报告原件 `datasets/quality/quality-2026-09-17.{md,json}`。
+
+### 一、为什么要单独发这一版
+
+MET-05 数的是**可评测的题**，`make enqueue` 和 `cli.experiment start` 只从 `benchmark_set_items` 取题。
+9 月 16 日对账时说的"自建 41"里，只有 22 道在 `benchmark-dev@v1` 里，click 后审收下的 11 道和 tortoise 的
+8 道**不在任何发布版里** —— 最终实验（E10-T4）一道都选不出来。所以把 `benchmark-dev` 下全部 41 道 VALID
+冻成一版新的 set，slug 用规划里一直叫的 `benchmark-cn-v1`（E8-T3 Output、ADR、M5、README 都是这个名字），
+`source_dataset_id` 记 `benchmark-dev`，题的 `dataset_id` 不改。**`benchmark-dev@v1` 不动**（22 道，
+`sha256:300746559b84…`，发布后 `dataset verify` 零漂移）。
+
+### 二、门禁第一轮拦下 8 道 tortoise 题，拦得对，但原因和 E1-T6 那次不一样
+
+    oracle  实验 #137  33/41 = 80.5%（要求 100%）  COMPLETED
+    noop    实验 #138  0/41  = 0.0%（要求 0%）    COMPLETED
+    → 拒绝发布：tortoise__tortoise-orm-2081、2125、2128、2129、2145、2236、2255、2269
+
+8 道全是 tortoise，click 33 道全过；8 道**挂的是同一条 P2P**，F2P 全过，P2P 只差这一条：
+`tests/cli/test_cli.py::test_init_creates_migrations_package`，耗时 3 毫秒，
+`AssertionError: assert False, where False = exists()` —— 断言 `tmp_path/cli_app/migrations` 存在，它不存在。
+
+**不是竞态，不是环境，是执行顺序。** 这条用例往 `tmp_path` 写一个 `cli_app` 包、把 `tmp_path` 加进
+`sys.path`、再让 CLI `import cli_app.models` 并在包旁边建 `migrations/`。同文件里其他用例动手前都
+`sys.modules.pop("cli_app", None)`，**唯独它没有**（它在文件里排第一，作者默认没人在它前面）。
+只要前面任何一条用例已经 import 过另一个 `tmp_path` 下的 `cli_app`，Python 直接用缓存的模块，
+`migrations/` 就建到那个旧目录里去了。
+
+为什么八步验证过了、门禁挂了：
+
+| | 跑什么 | 顺序 | 这条用例 |
+|:---|:---|:---|:---|
+| 八步验证 S4 / S8（`--scope full`） | 全量套件 | pytest 收集顺序 = 文件顺序 | `test_cli.py` 里第一条，`cli_app` 还没被谁 import 过 → **过** |
+| 正式评测（执行器） | F2P ∪ P2P | 按存进题目的顺序，P2P 是 `select_p2p()` `sorted()` 过的**字母序** | `test_downgrade_*` ×4、`test_heads_*`、`test_history_*` 六条排它前面 → **必挂** |
+
+容器里复现三遍，结论稳定：只跑它 → 过；整个文件按文件顺序 → 16 过；按题目里的字母序喂 16 条 →
+只挂它一条。8/8 道题在门禁里的表现一致，不是概率事件。
+
+**这是验证流水线的一个真空档，记下来。** §7.10 说验证复用 `execute_tests`，"验过了就保证正式评测判得对"，
+这话在**用例子集和顺序**这一层不成立：验证跑全量、评测跑子集，两边顺序不同。C-50 门禁正是为此设的，
+它也确实拦住了。但它只在发布前拦一次，而这类用例进了 P2P 之后每次正式评测都会把正确补丁判成
+`UNRESOLVED`（和 §7.11 九说的 pager 用例同一个后果，只是这个是 100% 而不是 0.16%）。
+根治要么让验证也按题目顺序跑一遍声明的子集（多起一次容器），要么让 P2P 按套件收集顺序存
+（会改所有已发布题的 `content_hash`）—— 两条都没动，留给 E9-T5 复验那张卡一起议。
+
+### 三、处置：照 E1-T6 剔 pager 的办法，多加一类排除理由
+
+`assembly.py` 加了 `ORDER_DEPENDENT_TEST_FUNCTIONS`（按函数名精确匹配，和 `FLAKY_TEST_FUNCTIONS` 并列），
+两处过滤（`select_p2p()`、`assemble()`）改走同一个判据 `unfit_for_p2p()`，以后再加一类理由只改一处。
+没有把它塞进 `FLAKY_TEST_FUNCTIONS`：它不飘，名字说"飘"就是撒谎，三周后有人看到会去查根本不存在的竞态。
+
+```
+cli.promote assemble --redo --repo tortoise/tortoise-orm    # 14 道（8 VALID + 6 INVALID）
+  每道 P2P −1，p2p_sampling.total_pool 跟着 −1，validation_state 不动，content_hash 全变
+make dataset-stage DATASET=benchmark-dev SLUG=benchmark-cn-v1
+  刷新草稿 v1，摘要 c04252899f60… → 1701c943ff5b…，第一轮门禁作废
+make dataset-gate SLUG=benchmark-cn-v1 ALLOW_DIRTY=1 && make worker
+    oracle  实验 #139  41/41 = 100.0%  COMPLETED   墙钟 74 秒
+    noop    实验 #140  0/41  = 0.0%    COMPLETED
+    平台故障 0，container_sigkilled_without_oom_flag 0 次
+make dataset-publish SLUG=benchmark-cn-v1 ALLOW_DIRTY=1
+  ✅ 已发布 benchmark-cn-v1@v1，41 道
+```
+
+没有重跑八步验证：改动只是从 P2P 里去掉一条，剩下每一条在原验证证据里都已在基线和 gold 上过了两遍，
+门禁是发布级的证据（§7.11 十二同样没重验）。`dirty=true` 同前三版的原因：门禁在未提交的工作区上跑
+（`assembly.py` 的改动就是这次的）。
+
+| | |
+|:---|---:|
+| 快照 | 41 道（click 33 + tortoise 8），排除 `INVALID` 24 |
+| F2P / P2P 合计 | 120 / 56795（剔掉 8 条依赖顺序的用例后）|
+| 快照摘要 | `sha256:1701c943ff5b…` |
+| 导出文件 | 4538 KB，`sha256:b6b560cc3e02…` |
+| Oracle 一轮墙钟 | 74 秒 |
+
+### 四、质量报告（E8-T5）：只数发布版里的题
+
+`cli/quality.py` 按 `benchmark_sets → benchmark_set_items → benchmark_tasks` 这条链数，
+库里 VALID 但没冻进发布版的题不算 —— 算进去就是 §一说的那个虚报。四张表 + 两条漏斗，
+数字全部来自库，2026-09-17 的结果：
+
+| | `benchmark-cn-v1@v1` | `swebench-verified-subset@v2` | 合计 |
+|:---|---:|---:|---:|
+| 题数 | 41 | 59 | **100** |
+| 仓库 | click 33、tortoise 8 | 9 个（sklearn 13、sphinx 11、pytest 8、matplotlib 7、xarray 7、astropy 6、pylint 4、seaborn 2、flask 1）| 11 |
+| 国产仓库 | 0 | 0 | 0 |
+| 中文（zh + mixed） | 2 + 2 = 4（10%） | 0 | **4（4%）** |
+| 难度 easy / medium / hard | 3 / 31 / 7 | 43 / 12 / 4 | 46 / 43 / 11 |
+| F2P 合计 / 中位 | 120 / 2 | 89 / 1 | |
+| P2P 合计 / 中位 | 56795 / 1554 | 10167 / 59 | |
+| `test_timeout_s` | 480 | 1800 | |
+
+**MET-05 底线第二句"自建中文题 ≥40"的最终账**：发布版里中文 4 道；库里另有 Golden 4 道全中文
+（`golden-v1`，L0，不在发布版里，不算可评测的题）。9 月 16 日说的"最多 8 道"就是 4 + 4。
+按 §4.1 如实标，缺口的原因是 §8.8 那张表：中文 Python 项目全是 AI 基建，测试要下模型权重，
+沙箱断网跑不了。
+
+**自建题漏斗按仓库**（8 个定档仓库第一次并排放进一张表，原件在报告第六节）：
+
+| 仓库 | 候选 | 预筛 PASS / REVIEW | 抽得出候选 F2P | 探测 OK | 入库 | VALID | 终审 收 / 否 | 进集 |
+|:---|---:|:---|---:|---:|---:|---:|:---|---:|
+| pallets/click | 80 | 53 / 14 | 59 | 51 | 51 | 33 | 33 / 18 | **33** |
+| tortoise/tortoise-orm | 55 | 33 / 13 | 42 | 14 | 14 | 8 | 8 / 6 | **8** |
+| sqlfluff/sqlfluff | 676 | 65 / 587 | 65 | 0 | 0 | 0 | — | 0 |
+| sgl-project/sglang | 214 | 111 / 55 | 127 | 0 | 0 | 0 | — | 0 |
+| xorbitsai/inference | 75 | 43 / 21 | 51 | 1 | 0 | 0 | — | 0 |
+| hiyouga/LlamaFactory | 32 | 16 / 12 | 19 | 0 | 0 | 0 | — | 0 |
+| Delgan/loguru | 20 | 10 / 5 | 11 | 0 | 0 | 0 | — | 0 |
+| InternLM/lmdeploy | 17 | 10 / 3 | 11 | 0 | 0 | 0 | — | 0 |
+
+进集 0 的六个仓库原因各不同：xorbitsai 探过 17 条只过 1 条、测试要下模型（§E8-T3 卡②）；
+sqlfluff 全量套件 10 分钟、内存撞上限（②）；sglang / LlamaFactory / loguru / lmdeploy 没建镜像、没探过。
+官方题那条漏斗（500 → 173 → 75 → 74 → 59）和 §8.6 九一致，报告里原样复用 `cli.swebench report` 的表。

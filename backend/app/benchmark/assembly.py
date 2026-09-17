@@ -462,6 +462,41 @@ def is_flaky(test_id: str) -> bool:
     return function_name_of(test_id) in FLAKY_TEST_FUNCTIONS
 
 
+#: 已知**依赖执行顺序**、一律不许进 `pass_to_pass` 的用例，同样按"测试函数名"匹配。
+#:
+#: 和上面"会飘"的那批不是一回事：这些用例每次跑结果都是确定的，但结果取决于
+#: **它前面跑了谁**。而验证和正式评测跑的顺序不一样 —— 验证流水线 S4/S8 跑的是
+#: 全量套件（文件顺序），正式评测的执行器只跑 F2P ∪ P2P 这个子集（P2P 按字母序，
+#: 见 `select_p2p()` 的 `sorted`）。同一条用例在文件里排第一、在字母序里排第七，
+#: 八步验证过了，Oracle 门禁照样挂，而且是**每次必挂**（2026-09-17，E8-T3 实测）。
+ORDER_DEPENDENT_TEST_FUNCTIONS: frozenset[str] = frozenset(
+    {
+        # tortoise-orm：`tests/cli/test_cli.py::test_init_creates_migrations_package`
+        # 往 tmp_path 写一个 `cli_app` 包，再让 CLI 去 import 它并在包里建 migrations 目录。
+        # 同文件其他用例动手前都先 `sys.modules.pop("cli_app")`，唯独它没有 ——
+        # 只要前面任何一条用例已经 import 过另一个 tmp_path 下的 `cli_app`，
+        # migrations 就建到那边去了，断言 `migrations_path.exists()` 挂掉。
+        # 字母序里 `test_downgrade_*` / `test_heads_*` / `test_history_*` 六条排在它前面。
+        # 门禁实测 8/8 道 tortoise 题全挂它；容器里复现：单跑过、文件顺序过、字母序挂。
+        "test_init_creates_migrations_package",
+    }
+)
+
+
+def is_order_dependent(test_id: str) -> bool:
+    """这条用例属不属于已知依赖执行顺序的那几个。"""
+    return function_name_of(test_id) in ORDER_DEPENDENT_TEST_FUNCTIONS
+
+
+def unfit_for_p2p(test_id: str) -> bool:
+    """这条用例能不能当回归护栏：会飘的、依赖顺序的都不能。
+
+    两处过滤（`select_p2p()` 和 `assemble()`）都要走这一个判据，
+    加一类新的排除理由时只改这里，不用两边各改一遍。
+    """
+    return is_flaky(test_id) or is_order_dependent(test_id)
+
+
 def same_module_cases(cases: Iterable[str], gold_patch: str) -> set[str]:
     """和 `gold_patch` 改动文件同模块的用例（§7.7 抽样策略的第一半）。
 
@@ -493,7 +528,7 @@ def select_p2p(
     """按 §7.2(6) 和 §7.7 选出 `pass_to_pass`。
 
     候选池 = **基线通过 ∩ 打完 gold 仍然通过**，再减去 F2P、减去喂不回给 pytest 的
-    （`round_trippable`）、减去已知会飘的（`is_flaky`）。
+    （`round_trippable`）、减去已知会飘的和依赖执行顺序的（`unfit_for_p2p`）。
 
     交集这一步不能省。只用基线那一半的话，凡是 gold 顺带改了行为的用例都会在
     验证流水线的 S8 被记成 `GOLD_REGRESSION` —— **整道好题被丢掉，而且理由是错的**：
@@ -506,9 +541,9 @@ def select_p2p(
     both = baseline & gold
     # 两道过滤，理由不同但处置一样：进不了 P2P，且要记下来滤了几条。
     #   round_trippable  —— 这条 ID 喂回给 pytest 它不认（§8.11 第五节）
-    #   is_flaky         —— 这条用例本身会飘，当不了回归护栏
-    unusable = sorted(c for c in both if not round_trippable(c) or is_flaky(c))
-    pool = sorted(c for c in both if round_trippable(c) and not is_flaky(c))
+    #   unfit_for_p2p    —— 这条用例本身会飘、或者依赖执行顺序，当不了回归护栏
+    unusable = sorted(c for c in both if not round_trippable(c) or unfit_for_p2p(c))
+    pool = sorted(c for c in both if round_trippable(c) and not unfit_for_p2p(c))
 
     if suite_seconds <= FULL_SUITE_BUDGET_S:
         # 套件跑得起全量，就不抽样 —— 护栏越全越好（§7.7 第一条）
@@ -567,8 +602,9 @@ def assemble(
     # 加完过滤重跑 assemble，"更新 22"，而 1123 条 pager 用例一条没少。
     #
     # "一条会飘的用例不许当回归护栏"是**题目的性质**，不是某一条派生路径的性质，
-    # 所以判据要放在产出 TaskDefinition 的这一步。
-    p2p = [case for case in pass_to_pass if not is_flaky(case)]
+    # 所以判据要放在产出 TaskDefinition 的这一步。依赖执行顺序的用例同理
+    # （2026-09-17 第二次踩到：tortoise 那 8 道题的 P2P 就是从缓存来的）。
+    p2p = [case for case in pass_to_pass if not unfit_for_p2p(case)]
     dropped_flaky = len(pass_to_pass) - len(p2p)
     if dropped_flaky and p2p_sampling is not None and p2p_sampling.strategy == "full":
         # `full` 的定义就是"候选池全收"，池子小了这个数要跟着小，

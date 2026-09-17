@@ -1,0 +1,491 @@
+{
+  "generated_at": "2026-09-17T10:16:37.669431+00:00",
+  "sets": [
+    {
+      "slug": "benchmark-cn-v1",
+      "version": "v1",
+      "status": "PUBLISHED",
+      "source_dataset_id": "benchmark-dev",
+      "published_at": "2026-09-17T10:10:43.841941+00:00",
+      "snapshot_digest": "sha256:1701c943ff5bafff0c284869e934cd3182fbd5e3a58e5e3f146d4043125779e6",
+      "gate": {
+        "noop": {
+          "total_tasks": 41,
+          "resolve_rate": 0.0,
+          "resolved_count": 0,
+          "evaluation_run_id": 140
+        },
+        "oracle": {
+          "total_tasks": 41,
+          "resolve_rate": 1.0,
+          "resolved_count": 41,
+          "evaluation_run_id": 139
+        },
+        "checked_at": "2026-09-17T10:10:43.841968+00:00",
+        "protocol_clause": "C-50",
+        "snapshot_digest": "sha256:1701c943ff5bafff0c284869e934cd3182fbd5e3a58e5e3f146d4043125779e6"
+      },
+      "task_count": 41,
+      "repos": {
+        "pallets/click": 33,
+        "tortoise/tortoise-orm": 8
+      },
+      "domestic_count": 0,
+      "languages": {
+        "en": 37,
+        "mixed": 2,
+        "zh": 2
+      },
+      "difficulty": {
+        "medium": 31,
+        "hard": 7,
+        "easy": 3
+      },
+      "f2p": {
+        "total": 120,
+        "median": 2.0,
+        "min": 1,
+        "max": 15
+      },
+      "p2p": {
+        "total": 56795,
+        "median": 1554.0,
+        "min": 581,
+        "max": 1994
+      },
+      "timeouts": {
+        "agent_timeout_s": {
+          "720": 41
+        },
+        "test_timeout_s": {
+          "480": 41
+        }
+      },
+      "task_ids": [
+        "pallets__click-2271",
+        "pallets__click-2365",
+        "pallets__click-2397",
+        "pallets__click-2696",
+        "pallets__click-2775",
+        "pallets__click-2788",
+        "pallets__click-2818",
+        "pallets__click-2840",
+        "pallets__click-2933",
+        "pallets__click-3058",
+        "pallets__click-3068",
+        "pallets__click-3079",
+        "pallets__click-3126",
+        "pallets__click-3152",
+        "pallets__click-3224",
+        "pallets__click-3225",
+        "pallets__click-3244",
+        "pallets__click-3256",
+        "pallets__click-3363",
+        "pallets__click-3434",
+        "pallets__click-3466",
+        "pallets__click-3482",
+        "pallets__click-3484",
+        "pallets__click-3507",
+        "pallets__click-3533",
+        "pallets__click-3578",
+        "pallets__click-3642",
+        "pallets__click-3653",
+        "pallets__click-3678",
+        "pallets__click-3769",
+        "pallets__click-3781",
+        "pallets__click-3818",
+        "pallets__click-3858",
+        "tortoise__tortoise-orm-2081",
+        "tortoise__tortoise-orm-2125",
+        "tortoise__tortoise-orm-2128",
+        "tortoise__tortoise-orm-2129",
+        "tortoise__tortoise-orm-2145",
+        "tortoise__tortoise-orm-2236",
+        "tortoise__tortoise-orm-2255",
+        "tortoise__tortoise-orm-2269"
+      ]
+    },
+    {
+      "slug": "swebench-verified-subset",
+      "version": "v2",
+      "status": "PUBLISHED",
+      "source_dataset_id": "swebench-verified-subset",
+      "published_at": "2026-09-16T14:55:19.504868+00:00",
+      "snapshot_digest": "sha256:4f5b44b88b46efe3b1b7466ad39164562a8fdcff10e92b63cda4dac6bec10fcf",
+      "gate": {
+        "noop": {
+          "total_tasks": 59,
+          "resolve_rate": 0.0,
+          "resolved_count": 0,
+          "evaluation_run_id": 136
+        },
+        "oracle": {
+          "total_tasks": 59,
+          "resolve_rate": 1.0,
+          "resolved_count": 59,
+          "evaluation_run_id": 135
+        },
+        "checked_at": "2026-09-16T14:55:19.504874+00:00",
+        "protocol_clause": "C-50",
+        "snapshot_digest": "sha256:4f5b44b88b46efe3b1b7466ad39164562a8fdcff10e92b63cda4dac6bec10fcf"
+      },
+      "task_count": 59,
+      "repos": {
+        "scikit-learn/scikit-learn": 13,
+        "sphinx-doc/sphinx": 11,
+        "pytest-dev/pytest": 8,
+        "matplotlib/matplotlib": 7,
+        "pydata/xarray": 7,
+        "astropy/astropy": 6,
+        "pylint-dev/pylint": 4,
+        "mwaskom/seaborn": 2,
+        "pallets/flask": 1
+      },
+      "domestic_count": 0,
+      "languages": {
+        "en": 59
+      },
+      "difficulty": {
+        "easy": 43,
+        "medium": 12,
+        "hard": 4
+      },
+      "f2p": {
+        "total": 89,
+        "median": 1.0,
+        "min": 1,
+        "max": 12
+      },
+      "p2p": {
+        "total": 10167,
+        "median": 59.0,
+        "min": 3,
+        "max": 1693
+      },
+      "timeouts": {
+        "agent_timeout_s": {
+          "720": 59
+        },
+        "test_timeout_s": {
+          "1800": 59
+        }
+      },
+      "task_ids": [
+        "astropy__astropy-13453",
+        "astropy__astropy-14096",
+        "astropy__astropy-14309",
+        "astropy__astropy-14365",
+        "astropy__astropy-14369",
+        "astropy__astropy-14508",
+        "matplotlib__matplotlib-20826",
+        "matplotlib__matplotlib-23476",
+        "matplotlib__matplotlib-24570",
+        "matplotlib__matplotlib-24870",
+        "matplotlib__matplotlib-25311",
+        "matplotlib__matplotlib-25960",
+        "matplotlib__matplotlib-26342",
+        "mwaskom__seaborn-3069",
+        "mwaskom__seaborn-3187",
+        "pallets__flask-5014",
+        "pydata__xarray-3095",
+        "pydata__xarray-4075",
+        "pydata__xarray-4094",
+        "pydata__xarray-4687",
+        "pydata__xarray-6992",
+        "pydata__xarray-7233",
+        "pydata__xarray-7393",
+        "pylint-dev__pylint-4970",
+        "pylint-dev__pylint-6386",
+        "pylint-dev__pylint-6903",
+        "pylint-dev__pylint-7277",
+        "pytest-dev__pytest-5787",
+        "pytest-dev__pytest-5809",
+        "pytest-dev__pytest-5840",
+        "pytest-dev__pytest-6197",
+        "pytest-dev__pytest-7324",
+        "pytest-dev__pytest-7521",
+        "pytest-dev__pytest-7571",
+        "pytest-dev__pytest-7982",
+        "scikit-learn__scikit-learn-10297",
+        "scikit-learn__scikit-learn-10844",
+        "scikit-learn__scikit-learn-11310",
+        "scikit-learn__scikit-learn-12973",
+        "scikit-learn__scikit-learn-13124",
+        "scikit-learn__scikit-learn-13142",
+        "scikit-learn__scikit-learn-13328",
+        "scikit-learn__scikit-learn-14087",
+        "scikit-learn__scikit-learn-14496",
+        "scikit-learn__scikit-learn-14983",
+        "scikit-learn__scikit-learn-15100",
+        "scikit-learn__scikit-learn-25102",
+        "scikit-learn__scikit-learn-26323",
+        "sphinx-doc__sphinx-10449",
+        "sphinx-doc__sphinx-10673",
+        "sphinx-doc__sphinx-11445",
+        "sphinx-doc__sphinx-7757",
+        "sphinx-doc__sphinx-7889",
+        "sphinx-doc__sphinx-8638",
+        "sphinx-doc__sphinx-9230",
+        "sphinx-doc__sphinx-9281",
+        "sphinx-doc__sphinx-9320",
+        "sphinx-doc__sphinx-9367",
+        "sphinx-doc__sphinx-9698"
+      ]
+    }
+  ],
+  "totals": {
+    "task_count": 100,
+    "languages": {
+      "en": 96,
+      "mixed": 2,
+      "zh": 2
+    },
+    "chinese_count": 4,
+    "difficulty": {
+      "easy": 46,
+      "medium": 43,
+      "hard": 11
+    },
+    "domestic_count": 0
+  },
+  "unpublished_chinese": {
+    "golden-v1": 4
+  },
+  "mined_funnel": {
+    "source_dataset_id": "benchmark-dev",
+    "repos": [
+      {
+        "repo": "pallets/click",
+        "candidates": 80,
+        "prescreen": {
+          "PASS": 53,
+          "REVIEW": 14,
+          "REJECT": 13
+        },
+        "promotable": 67,
+        "with_f2p_candidate": 59,
+        "probe": {
+          "OK": 51,
+          "F2P_NOT_FAILING": 5,
+          "ASSEMBLY_FAILED": 3
+        },
+        "tasks": {
+          "VALID": 33,
+          "INVALID": 18
+        },
+        "final_review": {
+          "ACCEPT": 33,
+          "REJECT": 18
+        },
+        "in_set": 33
+      },
+      {
+        "repo": "tortoise/tortoise-orm",
+        "candidates": 55,
+        "prescreen": {
+          "PASS": 33,
+          "REVIEW": 13,
+          "REJECT": 9
+        },
+        "promotable": 46,
+        "with_f2p_candidate": 42,
+        "probe": {
+          "未探测": 17,
+          "OK": 14,
+          "F2P_NOT_FAILING": 7,
+          "ENV_NOT_RUNNABLE": 4
+        },
+        "tasks": {
+          "VALID": 8,
+          "INVALID": 6
+        },
+        "final_review": {
+          "ACCEPT": 8,
+          "REJECT": 6
+        },
+        "in_set": 8
+      },
+      {
+        "repo": "sqlfluff/sqlfluff",
+        "candidates": 676,
+        "prescreen": {
+          "REVIEW": 587,
+          "PASS": 65,
+          "REJECT": 21,
+          "—": 3
+        },
+        "promotable": 652,
+        "with_f2p_candidate": 65,
+        "probe": {
+          "未探测": 60,
+          "ENV_NOT_RUNNABLE": 2,
+          "NO_VERDICT": 2,
+          "TEST_TOO_SLOW": 1
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      },
+      {
+        "repo": "sgl-project/sglang",
+        "candidates": 214,
+        "prescreen": {
+          "PASS": 111,
+          "REVIEW": 55,
+          "REJECT": 48
+        },
+        "promotable": 166,
+        "with_f2p_candidate": 127,
+        "probe": {
+          "未探测": 127
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      },
+      {
+        "repo": "xorbitsai/inference",
+        "candidates": 75,
+        "prescreen": {
+          "PASS": 43,
+          "REVIEW": 21,
+          "REJECT": 10,
+          "—": 1
+        },
+        "promotable": 64,
+        "with_f2p_candidate": 51,
+        "probe": {
+          "未探测": 34,
+          "F2P_NOT_FAILING": 12,
+          "REVIEW_REQUIRED": 3,
+          "ASSEMBLY_FAILED": 1,
+          "OK": 1
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      },
+      {
+        "repo": "hiyouga/LlamaFactory",
+        "candidates": 32,
+        "prescreen": {
+          "PASS": 16,
+          "REVIEW": 12,
+          "REJECT": 4
+        },
+        "promotable": 28,
+        "with_f2p_candidate": 19,
+        "probe": {
+          "未探测": 19
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      },
+      {
+        "repo": "Delgan/loguru",
+        "candidates": 20,
+        "prescreen": {
+          "PASS": 10,
+          "REVIEW": 5,
+          "REJECT": 5
+        },
+        "promotable": 15,
+        "with_f2p_candidate": 11,
+        "probe": {
+          "未探测": 11
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      },
+      {
+        "repo": "InternLM/lmdeploy",
+        "candidates": 17,
+        "prescreen": {
+          "PASS": 10,
+          "REJECT": 4,
+          "REVIEW": 3
+        },
+        "promotable": 13,
+        "with_f2p_candidate": 11,
+        "probe": {
+          "未探测": 11
+        },
+        "tasks": {},
+        "final_review": {},
+        "in_set": 0
+      }
+    ]
+  },
+  "official_funnel": {
+    "official_total": 500,
+    "offline": {
+      "OK": 173,
+      "REPO_NOT_PYTEST": 314,
+      "ISSUE_LEAKS_FIX": 8,
+      "GOLD_TOUCHES_PROTECTED": 1,
+      "TEST_PATCH_NON_TEST_PATH": 2,
+      "NO_F2P": 2
+    },
+    "pool": 173,
+    "sampled": 75,
+    "image_pulled": 74,
+    "mirror_ready": 75,
+    "imported": 74,
+    "validation": {
+      "VALID": 59,
+      "INVALID(COMMIT_MISSING)": 1,
+      "INVALID": 13,
+      "INVALID(F2P_NOT_FAILING)": 1
+    },
+    "valid": 59,
+    "per_repo": {
+      "astropy/astropy": {
+        "pool": 22,
+        "sampled": 9,
+        "valid": 6
+      },
+      "matplotlib/matplotlib": {
+        "pool": 31,
+        "sampled": 13,
+        "valid": 7
+      },
+      "mwaskom/seaborn": {
+        "pool": 2,
+        "sampled": 2,
+        "valid": 2
+      },
+      "pallets/flask": {
+        "pool": 1,
+        "sampled": 1,
+        "valid": 1
+      },
+      "pydata/xarray": {
+        "pool": 19,
+        "sampled": 8,
+        "valid": 7
+      },
+      "pylint-dev/pylint": {
+        "pool": 9,
+        "sampled": 5,
+        "valid": 4
+      },
+      "pytest-dev/pytest": {
+        "pool": 18,
+        "sampled": 8,
+        "valid": 8
+      },
+      "scikit-learn/scikit-learn": {
+        "pool": 31,
+        "sampled": 13,
+        "valid": 13
+      },
+      "sphinx-doc/sphinx": {
+        "pool": 40,
+        "sampled": 16,
+        "valid": 11
+      }
+    }
+  }
+}

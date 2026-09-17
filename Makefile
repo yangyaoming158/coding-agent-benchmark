@@ -6,7 +6,7 @@ SHELL := /bin/bash
         db-up db-down db-reset db-psql db-test migrate migrate-down migrate-check seed \
         seed-tasks validate-tasks survey survey-measure mine mine-report prescreen prescreen-clean prescreen-report \
         promote-probe promote-assemble promote-review promote-report \
-        dataset-stage dataset-gate dataset-publish dataset-show dataset-verify \
+        dataset-stage dataset-gate dataset-publish dataset-show dataset-verify quality-report \
         swebench-fetch swebench-sample swebench-warm swebench-pull swebench-fetch-blobs swebench-load swebench-build \
         swebench-mirror swebench-import swebench-validate swebench-report \
         worker enqueue queue stress-sweep stress-hold stress-oom \
@@ -261,6 +261,12 @@ dataset-show:        ## 看有哪些数据集版本
 
 dataset-verify:      ## 拿已发布版本的快照比对现在的题库，报漂移（纯查询）
 	$(UV) python -m cli.dataset verify --slug $(SLUG)
+
+# ── E8-T5：数据集质量报告 ───────────────────────────────────
+# 默认看 benchmark-cn-v1 + swebench-verified-subset 的最新已发布版；只数发布版里的题。
+#   make quality-report QUALITY_ARGS="--set benchmark-cn-v1@v1"
+quality-report:      ## 来源 / 语言 / 难度 / 漏斗，--save 落 datasets/quality/
+	$(UV) python -m cli.quality report $(QUALITY_ARGS) --save
 
 # ── E9-T2：并发压测 ────────────────────────────────────────
 # 三条子命令：sweep 跑真实负载扫并发、hold 看满载容器把宿主压到哪、
