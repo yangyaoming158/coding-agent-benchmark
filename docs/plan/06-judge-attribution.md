@@ -386,6 +386,9 @@ N1 和 F8 的判据直接取协议 C-18 的 `INFRA_TO_AGENT_MAPPING`：
 
 **根因在适配器的错误映射（E3-T4 / E3-T5），不在归因层** —— 归因层拿到什么
 `infra_outcome` 就按什么判，这是对的。本卡不改，已单开 **E3-T9（#96）**。
+**E3-T9 已于 2026-09-17 收口**：新的同类运行会落 `AGENT_AUTH_ERROR` / `SANDBOX_ERROR`，
+把这 95 条的真实日志按新判据重判一遍是 87 / 8 / 0，和上表逐一对上；历史行和它们的
+F8 归因结果都不改（旧结果不重算，只注明差异），#119–#122、#131 五个实验都带 `leaderboard_excluded_reason`。
 
 复现时会踩的坑：报错文本是**折行的**（`"Insufficient \nBalance"`），
 直接 grep `Insufficient Balance` 会漏掉 43 次，得先把空白拉平再找。

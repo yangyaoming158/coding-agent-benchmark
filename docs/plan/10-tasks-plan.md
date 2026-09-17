@@ -784,7 +784,7 @@
 - **AC**：能对官方子集完成 replay 并输出逐实例一致率
 - **P1 · C:S · E:0.5d**
 
-### E3-T9 适配器错误映射修正（外部服务失败不该算 AI 的） · **P0 · C:S · E:0.5d**（#96）
+### E3-T9 适配器错误映射修正（外部服务失败不该算 AI 的） · **P0 · C:S · E:0.5d**（#96）✅ 已于 2026-09-17 完成
 - **Goal**：让适配器把"调不通大模型"分开落账 —— 外部服务的问题落
   `AGENT_AUTH_ERROR`，平台自己杀的容器落 `SANDBOX_ERROR`，只有 AI 自己的
   工具/预算问题才留在 `AGENT_RUNTIME_ERROR`
@@ -812,6 +812,38 @@
   5. 不动协议、不加迁移
 - **一个复现时会踩的坑**：报错文本是**折行的**（`"Insufficient \nBalance"`），
   直接 grep `Insufficient Balance` 会漏掉 43 次，得先把空白拉平再找
+- **实施记录（2026-09-17，分支 `fix/E3-T9-adapter-error-mapping`）**。开工先查库：这张卡
+  **一半在 9 月 12 日就修掉了** —— 余额不足和 401/402 那条（`cli_text.py` 的 `AUTH_MARKERS`，
+  §18.6 第九节），#119–#122 四个实验也已经打了 `leaderboard_excluded_reason`。剩下的这次做完：
+  1. **限流 / 供应商 5xx / 连不上 → 新错误码 `external_service_error` → `AGENT_AUTH_ERROR`**
+     （归属 EXTERNAL、计入平台故障率、重试 3 次）。码和 `auth_failed` 分开，事后翻记录分得清
+     "Key 配错了"和"对面挂了"。**判据每一条都带锚，不认裸词**：本机 1931 份真实 agent 日志里
+     52 份含 "429"、3 份含 "overloaded"，全是 AI 在讨论代码；而 HTTP 短语挤掉空白就是异常类名
+     （`500 Internal Server Error` → `internalservererror`），一条失败的测试输出就能误判。所以只认
+     `litellm.RateLimitError` 这种带前缀的类名（在 aider 镜像里逐个核过）、Claude Code stream-json 里
+     `"text":"API Error: 429 …"` / `"result":"API Error: 5xx …"` 这种整字段形态（照 9 月 12 日那 44 次 402
+     的真实样子）、和 openai SDK 的 `Error code: 503 - {`。**1931 份真实日志上跑一遍：0 命中**。
+  2. **容器零输出 + 退出码 137（没 OOM 标记、不是我们超时杀的）→ 新错误码 `sandbox_killed` →
+     `SANDBOX_ERROR`**（归属 PLATFORM、计入、重试 2 次）。和 `container_sigkilled_without_oom_flag`
+     同一组事实，只多要一条"没输出"：有输出的 137 可能是 dockerd 漏收的 OOM，按 C-06/C-07 不能用退出码
+     判，维持原判。
+  3. **判据集中一处**：`cli_text.shared_failure()`。两个真实适配器的 `_error_for()` 各自判完 OOM /
+     超时 / "这次算不算失败"之后都调它，`AUTH_FAILED` 的判断也从两个适配器里挪了进去。
+     E3-T7 接国产 CLI 时照抄这个顺序就行。
+  4. **历史数据一个字不改**（AC 4）。把库里 95 条 `AGENT_RUNTIME_ERROR` 的真实日志按新判据重判一遍
+     （只读）：**87 条 → `auth_failed`、8 条 → `sandbox_killed`、0 条留在 `runtime_error`**，和 E6-T1
+     翻日志数出来的 87 / 8 逐一对上。#131（那 8 次的实验）补打了 `leaderboard_excluded_reason`；
+     它本来就因参赛者停用不上榜，打这条注是让"为什么"有处可查。
+  5. **不动协议、不加迁移**（AC 5）：`AgentError.code` 在 Runner 协议里是自由字符串，两个新码只加在
+     `app/runner/protocol.py` 的规范清单和 `task_run._AGENT_ERROR_TO_INFRA` 那张表里，和 E3-T4 加
+     `oom_killed` 是同一条路。`infra_outcome` 枚举、C-18 映射表都没碰。
+  - 测试 `tests/unit/test_failure_blame.py` 52 条：真实余额不足原文喂进两个适配器的 `_error_for()` 一路
+    断言到 `AGENT_AUTH_ERROR`；限流 / 5xx / 零输出 137 各自到位；OOM 和超时的顺序不变；AI 自己崩的
+    （有输出、退出 1、`KeyError: 'rate limit'`）还是 `runtime_error`；映射表覆盖全部六个规范码。
+    `make check` 1971 passed。
+  - **没做的**：`litellm.Timeout`（类名不带 Error 后缀）现在连"模型侧失败"都不算，aider 退 0 后会被记成
+    正常空补丁；这次没动 `LITELLM_ERROR_RE`，另记。E6-T1 对那 95 条的归因结果（F8）没重算，
+    理由同历史数据不改。
 
 ---
 

@@ -87,8 +87,10 @@ from app.runner.protocol import (
     AGENT_TRAJECTORY_FILENAME,
     AUTH_FAILED,
     DEADLINE_EXCEEDED,
+    EXTERNAL_SERVICE_ERROR,
     OOM_KILLED,
     RUNTIME_ERROR,
+    SANDBOX_KILLED,
     AgentRunner,
     AgentRunResult,
     AgentTaskInput,
@@ -558,6 +560,10 @@ _AGENT_ERROR_TO_INFRA: dict[str, InfraOutcome] = {
     AUTH_FAILED: InfraOutcome.AGENT_AUTH_ERROR,
     RUNTIME_ERROR: InfraOutcome.AGENT_RUNTIME_ERROR,
     OOM_KILLED: InfraOutcome.OOM_KILLED,
+    # E3-T9：限流 / 供应商 5xx / 连不上，和鉴权失败记同一笔账（归属 EXTERNAL，计入平台故障率）；
+    # 容器没输出就被 SIGKILL 是平台自己的锅（§18.7 的孤儿回收误杀），不是被测 AI 崩了
+    EXTERNAL_SERVICE_ERROR: InfraOutcome.AGENT_AUTH_ERROR,
+    SANDBOX_KILLED: InfraOutcome.SANDBOX_ERROR,
 }
 
 

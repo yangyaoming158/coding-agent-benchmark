@@ -63,14 +63,13 @@ from typing import Any
 
 from app.domain.enums import CostSource
 from app.infrastructure.logging import get_logger
-from app.runner.adapters.cli_text import failure_excerpt, looks_like_auth_failure
+from app.runner.adapters.cli_text import failure_excerpt, shared_failure
 from app.runner.adapters.prompt import build_task_prompt
 from app.runner.patch import capture_workspace_diff
 from app.runner.protocol import (
     AGENT_STDERR_FILENAME,
     AGENT_STDOUT_FILENAME,
     AGENT_TRAJECTORY_FILENAME,
-    AUTH_FAILED,
     DEADLINE_EXCEEDED,
     OOM_KILLED,
     RUNTIME_ERROR,
@@ -767,6 +766,10 @@ def _error_for(container: ContainerResult, result: Mapping[str, Any] | None) -> 
     反过来，**`result` 事件缺席要当故障**。正常跑完一定有这一行；没有它说明
     CLI 崩在了半路（或者 `--output-format` 没生效），这时哪怕退出码是 0，
     也不能把"工作区没改动"记成"AI 没修好"。
+
+    判定为失败之后，"该记在谁头上"的共同部分（容器被平台杀了、鉴权 / 余额、限流 / 5xx）
+    交给 `cli_text.shared_failure()`，和 aider 用的是同一份判据（E3-T9）。
+    这里只管 Claude Code 特有的：`result` 事件在不在、`subtype` 说了什么。
     """
     if container.oom_killed:
         return AgentError(code=OOM_KILLED, message="Agent 容器内存超限被杀")
@@ -778,10 +781,10 @@ def _error_for(container: ContainerResult, result: Mapping[str, Any] | None) -> 
     if result is not None and not result.get("is_error") and container.exit_code == 0:
         return None
 
+    blamed = shared_failure(container)
+    if blamed is not None:
+        return blamed
     excerpt = failure_excerpt(container)
-    text = container.stdout + "\n" + container.stderr
-    if looks_like_auth_failure(text):
-        return AgentError(code=AUTH_FAILED, message=f"疑似鉴权失败：{excerpt}")
     if result is None:
         return AgentError(
             code=RUNTIME_ERROR,

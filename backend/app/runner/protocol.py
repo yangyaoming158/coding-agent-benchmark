@@ -331,6 +331,17 @@ RUNTIME_ERROR = "runtime_error"
 #: 不能并进 `runtime_error`：按 C-18，OOM 要降配重试，运行时错误不降配，
 #: 混在一起的话，一道内存吃紧的题会用同样的配置重试到耗尽预算。
 OOM_KILLED = "oom_killed"
+#: E3-T9 加的两个。在此之前"调不通大模型"和"容器被平台自己杀了"都只能报 `runtime_error`，
+#: 按 C-18 记在被测 AI 头上、不计入平台故障率 —— 于是余额耗尽那一轮 88 次全灭的实验
+#: 以 `infra_failures=0 / resolved=0/22` 收场，C-26 的 5% 门槛查不出任何异常（§18.6 第九节）。
+#:
+#: `external_service_error`：外部服务不让我们用 —— 限流、供应商 5xx、连不上。和 `auth_failed`
+#: 落同一个 `AGENT_AUTH_ERROR`（归属 EXTERNAL、计入平台故障率、重试 3 次），码分开只是为了
+#: 事后翻记录时分得清"Key 配错了"和"对面挂了"。
+#: `sandbox_killed`：容器一个字节都没输出就被 SIGKILL，docker 没标 OOM、也不是我们超时杀的 ——
+#: 这是 §18.7 记的孤儿回收误杀的样子，落 `SANDBOX_ERROR`（归属 PLATFORM）。
+EXTERNAL_SERVICE_ERROR = "external_service_error"
+SANDBOX_KILLED = "sandbox_killed"
 
 #: 适配器可以往 `AgentConfig.artifact_dir` 里写的三个文件名。
 #:
