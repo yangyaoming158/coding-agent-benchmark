@@ -173,6 +173,15 @@ CI 里有持续校验（`backend/tests/unit/test_protocol_consistency.py`），�
 目前的处置只是**告警**（日志事件 `container_sigkilled_without_oom_flag`），
 判定没改 —— 改判定要动协议 C-06/C-07 这两条冻结件。
 
+**唯一的例外是"一个字节都没输出就被 137"**（E3-T9，2026-09-17）：那不是漏收的 OOM，是容器还没开口
+就被平台自己杀了（第二个 Worker 的孤儿回收，§18.7），记 `SANDBOX_ERROR`。有输出的 137 维持原判。
+
+**写新适配器时，"这次失败该记在谁头上"不要自己判。** 判完 OOM / 超时 / "算不算失败"之后调
+`app/runner/adapters/cli_text.shared_failure()`，鉴权、余额、限流、5xx、容器被杀都在那一处；
+散成各写一套，加一条规则就要改几个地方，漏一个就是几十次评测记成"AI 自己崩了"（#96 就是这么来的）。
+往判据里加东西时**只认带锚的形态**（`litellm.XxxError`、`"text":"API Error: …"`），不认裸词 ——
+AI 的对话里什么词都有，1931 份真实日志里 52 份含 "429"，没有一次是真的限流。
+
 ### 5.5 测试用例 ID 必须归一化
 
 `tests/test_a.py::test_x` 和 `./tests/test_a.py::test_x` 是同一个用例，但字符串不相等。匹配不上就会被当成"用例不存在"，进而判定为失败。

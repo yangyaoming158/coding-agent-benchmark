@@ -58,6 +58,7 @@ from app.runner.adapters.cli_text import (
     AUTH_MARKERS,
     failure_excerpt,
     looks_like_auth_failure,
+    shared_failure,
     squash,
     unwrap,
 )
@@ -67,7 +68,6 @@ from app.runner.protocol import (
     AGENT_STDERR_FILENAME,
     AGENT_STDOUT_FILENAME,
     AGENT_TRAJECTORY_FILENAME,
-    AUTH_FAILED,
     DEADLINE_EXCEEDED,
     OOM_KILLED,
     RUNTIME_ERROR,
@@ -495,6 +495,10 @@ def _error_for(container: ContainerResult) -> AgentError | None:
     反过来，退出码 0 且没有模型侧报错时，空补丁**就是**正常结果："AI 没改出东西"
     是它自己的问题，对应 UNRESOLVED，不是平台故障。在这里报错的话，一次正常的
     "没修好"会触发重试，白花钱还把归因引向错误的方向。
+
+    判定为失败之后，"该记在谁头上"的共同部分（容器被平台杀了、鉴权 / 余额、限流 / 5xx）
+    交给 `cli_text.shared_failure()`，这里只负责 aider 特有的两件事：
+    OOM / 超时的顺序，和"退 0 也可能是失败"。（E3-T9：判据集中一处，不在适配器里各写一套。）
     """
     if container.oom_killed:
         return AgentError(code=OOM_KILLED, message="Agent 容器内存超限被杀")
@@ -504,11 +508,12 @@ def _error_for(container: ContainerResult) -> AgentError | None:
     text = container.stdout + "\n" + container.stderr
     if container.exit_code == 0 and not has_model_side_failure(text):
         return None
-    excerpt = failure_excerpt(container)
-    if looks_like_auth_failure(text):
-        return AgentError(code=AUTH_FAILED, message=f"疑似鉴权失败：{excerpt}")
+    blamed = shared_failure(container)
+    if blamed is not None:
+        return blamed
     return AgentError(
-        code=RUNTIME_ERROR, message=f"aider 失败（退出码 {container.exit_code}）：{excerpt}"
+        code=RUNTIME_ERROR,
+        message=f"aider 失败（退出码 {container.exit_code}）：{failure_excerpt(container)}",
     )
 
 

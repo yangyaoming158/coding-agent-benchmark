@@ -1178,6 +1178,10 @@ claude-code 全部 44 次都报 `unavailable` —— 这是 E3-T5 定的规矩�
 余额不足严格讲是计费问题不是凭据问题，单开一个 `AGENT_BILLING_ERROR` 更准确，
 但那要动协议的 `infra_outcome` 枚举（冻结件），得走 §9 的变更流程，另提提案。
 
+**另一半 2026-09-17 在 E3-T9（#96）补上**：限流 / 供应商 5xx / 连不上 → `external_service_error`
+→ `AGENT_AUTH_ERROR`；容器零输出 + 137 → `sandbox_killed` → `SANDBOX_ERROR`（§18.7 二之补那 8 次的样子）。
+判据集中在 `cli_text.shared_failure()`，两个适配器都走它；细账在 E3-T9 的卡。
+
 > ⚠️ **库里的实验 #119–#122 那四行 `resolved=0/22` 是这个 bug 的产物，不是测量结果。**
 >
 > 那是余额耗尽那一轮，88 次运行一次模型都没调到。它们在库里的样子是
