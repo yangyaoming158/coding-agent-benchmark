@@ -188,6 +188,13 @@ AI 的对话里什么词都有，1931 份真实日志里 52 份含 "429"，没�
 
 这类 bug 不会报错，只会让解决率莫名其妙地偏低，非常难查。必须有专门的单元测试覆盖至少 6 种 ID 写法。
 
+**验证过了不等于评测时一定过。** 八步验证跑的是全量套件（文件顺序），正式评测只跑 F2P ∪ P2P
+（P2P 字母序）。一条只在"它先跑"时才过的用例，验证全绿、Oracle 门禁必挂（2026-09-17，tortoise 8 道
+全栽在 `test_init_creates_migrations_package` 上，细账在 `03-benchmark-spec.md` §8.12）。
+这类用例和会飘的用例一样不许进 P2P：`assembly.ORDER_DEPENDENT_TEST_FUNCTIONS` /
+`FLAKY_TEST_FUNCTIONS`，按函数名精确匹配，两处过滤都走 `unfit_for_p2p()`。
+C-50 门禁就是为这种事设的，**不要为了过门禁去改判定**。
+
 ---
 
 ## 6. 什么叫"这个任务做完了"
@@ -473,6 +480,15 @@ cd backend && uv run python -m cli.promote park-unreviewed \
 make dataset-stage                 # benchmark-dev → 一版 DRAFT
 make dataset-gate && make worker   # Oracle / Noop 门禁，22 × 2 次评测
 make dataset-publish               # 门禁过了才发布
+# ⚠ 上面三步重灌出来的是 benchmark-dev@v1（22 道，摘要 300746559b84…）。**最终实验用的是另一版**：
+# benchmark-cn-v1@v1（2026-09-17 发布，benchmark-dev 下全部 41 道 VALID，摘要 1701c943ff5b…）。
+# 它的题 dataset_id 仍是 benchmark-dev，只是 slug 不同，所以 DATASET 不变、SLUG 要指过去：
+make dataset-stage DATASET=benchmark-dev SLUG=benchmark-cn-v1
+make dataset-gate SLUG=benchmark-cn-v1 && make worker     # 41 × 2 次评测，约 3 分钟
+make dataset-publish SLUG=benchmark-cn-v1
+# 摘要对不上 1701c943ff5b… 的话，先查 tortoise 那 8 道的 P2P 里还有没有
+# test_init_creates_migrations_package —— 它依赖执行顺序（03 §8.12 二），
+# `assembly.ORDER_DEPENDENT_TEST_FUNCTIONS` 在组装时剔掉，重灌走 promote-assemble 会自动生效
 ```
 
 **工作区不干净时，建实验的那几步会被拒**（协议 C-27，E5-T4 落的）。

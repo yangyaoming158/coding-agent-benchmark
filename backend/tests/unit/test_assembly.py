@@ -33,12 +33,14 @@ from app.benchmark.assembly import (
     expand_candidate,
     function_name_of,
     is_flaky,
+    is_order_dependent,
     load_candidate,
     patch_size,
     round_trippable,
     same_module_cases,
     select_f2p,
     select_p2p,
+    unfit_for_p2p,
 )
 from app.benchmark.schema import P2PSampling
 from app.domain.enums import IssueLanguage, TaskDifficulty, TaskValidationState
@@ -490,6 +492,72 @@ def test_assemble_drops_flaky_even_from_a_cached_list() -> None:
     )
     assert list(task.pass_to_pass) == ["tests/test_a.py::test_ok"]
     # `full` 的定义是"候选池全收"，池子小了这个数要跟着小
+    assert task.p2p_sampling is not None
+    assert task.p2p_sampling.total_pool == 1
+
+
+# ── 依赖执行顺序的用例（E8-T3，2026-09-17）──────────────────────
+
+
+def test_is_order_dependent_matches_the_tortoise_cli_init_case() -> None:
+    """tortoise 的 `test_init_creates_migrations_package`：文件顺序里它排第一所以验证能过，
+    字母序里六条 `test_downgrade_*` / `test_heads_*` / `test_history_*` 排它前面，
+    正式评测每次必挂。"""
+    assert is_order_dependent("tests/cli/test_cli.py::test_init_creates_migrations_package")
+    assert unfit_for_p2p("tests/cli/test_cli.py::test_init_creates_migrations_package")
+
+
+def test_is_order_dependent_does_not_match_its_siblings() -> None:
+    """同文件里别的用例都自己 `sys.modules.pop("cli_app")`，不能被误伤。"""
+    for case in (
+        "tests/cli/test_cli.py::test_init_top_level_migrations_package",
+        "tests/cli/test_cli.py::test_makemigrations_writes_file",
+        "tests/cli/test_cli.py::test_downgrade_accepts_dotted_target",
+    ):
+        assert not is_order_dependent(case), case
+        assert not unfit_for_p2p(case), case
+
+
+def test_unfit_for_p2p_covers_both_kinds() -> None:
+    """两类排除理由走同一个判据，`select_p2p()` 和 `assemble()` 都只认它。"""
+    assert unfit_for_p2p("tests/test_utils.py::test_echo_via_pager[test5-less]")
+    assert not unfit_for_p2p("tests/test_a.py::test_ok")
+
+
+def test_select_p2p_drops_order_dependent_cases() -> None:
+    cases = [
+        "tests/test_a.py::test_ok",
+        "tests/cli/test_cli.py::test_init_creates_migrations_package",
+    ]
+    result = select_p2p(
+        baseline_passing=cases,
+        gold_passing=cases,
+        fail_to_pass=[],
+        suite_seconds=1.0,
+        gold_patch="diff --git a/src/x.py b/src/x.py\n",
+    )
+    assert result.ids == ("tests/test_a.py::test_ok",)
+    assert result.dropped_unusable == (
+        "tests/cli/test_cli.py::test_init_creates_migrations_package",
+    )
+    assert result.sampling.total_pool == 1
+
+
+def test_assemble_drops_order_dependent_even_from_a_cached_list() -> None:
+    """和不稳定用例一样要在 `assemble()` 兜底：tortoise 那 8 道题的 P2P 是探测轮
+    缓存下来的清单，重新组装时不走 `select_p2p()`。"""
+    task = assemble(
+        a_candidate(),
+        environment_from_recipe(parse_recipe(RECIPE)),
+        dataset_id="test-dev",
+        fail_to_pass=["tests/test_x.py::test_new"],
+        pass_to_pass=[
+            "tests/test_a.py::test_ok",
+            "tests/cli/test_cli.py::test_init_creates_migrations_package",
+        ],
+        p2p_sampling=P2PSampling(strategy="full", seed=None, total_pool=2),
+    )
+    assert list(task.pass_to_pass) == ["tests/test_a.py::test_ok"]
     assert task.p2p_sampling is not None
     assert task.p2p_sampling.total_pool == 1
 
