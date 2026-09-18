@@ -204,7 +204,7 @@ promote-report:      ## 漏斗报表：每一层剩多少、掉队的为什么
 # 顺序是 fetch → sample → pull（慢，38.9 GB，可反复续跑）→ mirror → import → validate → report，
 # 之后走下面 E1-T6 那套：make dataset-stage DATASET=swebench-verified-subset 等等。
 SWEBENCH_SEED := 20260915
-SWEBENCH_N := 75
+SWEBENCH_N := 100
 SWEBENCH_ARGS := --seed $(SWEBENCH_SEED) --n $(SWEBENCH_N)
 SWEBENCH_JOBS := 2
 

@@ -587,9 +587,9 @@ git clone --bare --shallow-since="2.5 years ago" https://github.com/xorbitsai/in
 ```bash
 # 官方数据集 500 行（走 HF 的 JSON 分页接口，不装 pyarrow；有缓存就不重拉）
 make swebench-fetch
-# 固定种子分层抽样。2026-09-16 晚起默认抽 75（Makefile 的 SWEBENCH_N），名单在
-# datasets/swebench/sample-seed20260915-n75.json，重算必须逐字相同；n50 那份是 v1 的证据，也留着，
-# 75 的前 50 道和它逐字相同（层内顺序固定，加题不换种子）
+# 固定种子分层抽样。2026-09-18 起默认抽 100（Makefile 的 SWEBENCH_N），名单在
+# datasets/swebench/sample-seed20260915-n100.json，重算必须逐字相同；n50 / n75 是旧版本的证据，保留。
+# 原 n75 的 75 道全部保留、相对顺序不变；新题按仓库插入，不是数组前 75 个位置相同。
 make swebench-sample && cd backend && uv run python -m cli.swebench sample --check
 # 官方配方导出（要联网装 swebench 包，uv 有缓存）。改了抽样数要重导，build-specs.json 会跟着变：
 uv run --with "swebench==3.0.15" --isolated python scripts/export_swebench_specs.py
@@ -618,13 +618,14 @@ make swebench-import
 # 否则已终审否掉的题会被重验回 REVIEW_REQUIRED，人工结论被盖掉（2026-09-16 晚差点踩到）
 make swebench-validate
 # 终审从 CSV 导回，不导它们会一直停在 REVIEW_REQUIRED：flask-5014 按"题面短"政策收（第一份），
-# 6 道人工 0 收 6 否（第二份），抽到 75 之后的 7 道人工 0 收 7 否（第三份）；官方题没有候选行，
-# 终审理由只在这三份 CSV 里，库里不存
+# 6 道人工 0 收 6 否（第二份），n75 的 7 道人工 0 收 7 否（第三份），n100 的 7 道人工 1 收 6 否
+# （第四份，收 sphinx-9711）；官方题没有候选行，终审理由只在这四份 CSV 里，库里不存
 cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-official.csv
 cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-final-official.csv
 cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-16-n75-official.csv
-# 之后走 E1-T6 那套，DATASET / SLUG 都要指过来。已发布 v1（42 道）和 v2（59 道），重灌后 stage 出来的
-# 摘要应该是 v2 的 4f5b44b88b46…：
+cd backend && uv run python -m cli.promote import-review ../datasets/swebench/review-2026-09-18-n100-official.csv
+# 之后走 E1-T6 那套，DATASET / SLUG 都要指过来。已发布 v1（42 道）、v2（59 道）、v3（75 道）；
+# 重灌后 stage 出来的清单摘要应该是 v3 的 6003a0519a52…（98 入库，75 VALID / 23 INVALID）。
 make dataset-stage DATASET=swebench-verified-subset
 make dataset-gate SLUG=swebench-verified-subset && make worker
 make dataset-publish SLUG=swebench-verified-subset
