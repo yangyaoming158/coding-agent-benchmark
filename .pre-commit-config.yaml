@@ -12,7 +12,8 @@ repos:
       # 真实工具的输出了 —— 而"别手写 XML"正是这批 fixture 存在的理由。
       # 改完要能用 `python -m tests.fixtures.reports._record --check` 重新录出来。
       - id: trailing-whitespace
-        exclude: &recorded_reports ^backend/tests/fixtures/reports/.*\.(xml|txt)$
+        # 中文题面 CSV 是已发布数据的重灌原件，单元格空白和换行参与哈希，不能自动清理。
+        exclude: &recorded_reports ^(backend/tests/fixtures/reports/.*\.(xml|txt)|datasets/benchmark-dev/localize-2026-09-18\.csv)$
       - id: end-of-file-fixer
         exclude: *recorded_reports
       - id: check-yaml

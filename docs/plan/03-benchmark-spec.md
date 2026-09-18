@@ -1694,6 +1694,39 @@ E1-T6 按它挑题，再连同 `content_hash` 一起冻进 `benchmark_set_items`
 - 平台 UI、报告、任务集元数据全中文；
 - 若 `zh` 占比不足，Plan B：在 L0/L1 中人工构造更多中文 Issue 任务（这些是我们自己写的，语言可控）。
 
+### Plan B 落地实录（2026-09-18，E8-T3 追加）
+
+**结论**：`benchmark-cn-v1@v2` 已发布，41 道题面全部是中文（40 道改写 + tortoise-2255 原生中文），
+门禁 Oracle #141 41/41、Noop #142 0/41、0 平台故障、0 次 `container_sigkilled_without_oom_flag`。
+v1 一行没动。
+
+**做了什么**：`cli/localize.py`。`draft` 把 VALID 的自建题导成对照表（英文原文 + 空的 `zh_title` / `zh_body`），
+`import` 把复核过的中文题面导回库。导入只换 `issue_title` / `issue_body`，`issue_language` 置 `zh`，
+`tags` 加 `issue-rewritten-zh`，`content_hash` 重算；测试补丁、gold 补丁、F2P / P2P、环境、预算一个字不动。
+所以八步验证不用重跑 —— 验证验的是测试和补丁，不是题面 —— `validation_state` 保持原样。
+
+**改写规则**：不是翻译（本节第二条禁止机器翻译，理由是失真）。对着原 issue、F2P 用例名和官方补丁，
+用中文重写一段"像中国用户报 bug"的题面：原文没说的不加（加了等于泄题，
+`docs/review-2026-09-14-parked20.md` 否掉的 8 道就是判据），原文说了的不漏（漏了 F2P 撑不住）。
+
+**谁写的、谁审的（报告必须照这句披露）**：初稿 Claude Opus 5（AI），复核 Codex（AI，逐题写了保留了什么、
+没加什么），用户核对复核表后拍板导入。**没有人逐题改写，"人工"两个字不能用。**
+对照表 `datasets/benchmark-dev/localize-2026-09-18.csv` 进版本库，`drafter` / `reviewer` / `verdict` / `note`
+四列是唯一记录：41 行里 40 ACCEPT、1 REJECT（tortoise-2255 原题就是中文，REJECT 只表示跳过改写，题照常在 v2 里）。
+
+**MET-05 的账怎么变**：语言分布从 v1 的 4/41 中文（10%）变成 v2 的 41/41（100%），两个发布版合计 41/100。
+但这 40 道只算"题面是中文的题"，不算国产项目或中文社区的题（仓库还是 click 和 tortoise），
+质量报告里"其中改写成中文"单独一列（`datasets/quality/quality-2026-09-18.md` 第三节），不许并进"中文"一列不说来源。
+MET-05 降级线"自建中文 ≥40"按题面语言算到线（41），达标线 ≥60 仍未达标 —— 自建题总数就是 41。
+
+**版本和摘要**：v2 快照 `sha256:19a2508ae0e1…`，指纹 `datasets/manifests/benchmark-cn-v1@v2.json`
+（dirty=true，门禁在未提交的工作区上跑，和前几版一样）。v1（`1701c943ff5b…`）不动：
+`dataset verify --version v1` 报"快照摘要一致、内容变了 40 道"，这是预期内的 —— 题面变了 `content_hash` 就变，
+v1 是英文题面的存档，不再等于现在的库。
+
+**重灌**：`promote assemble` 组装出来的永远是候选里的英文原文，重灌要在 `park-unreviewed` 之后、
+`dataset-stage` 之前跑 `cli.localize import`（AGENTS.md §12 已写），不跑的话题面退回英文、摘要和 v2 对不上，而且不报错。
+
 ## 8.6 SWE-bench Verified 子集导入（服务 MET-01）
 - 用官方数据集（HuggingFace `princeton-nlp/SWE-bench_Verified`）的字段直接映射到我们的 Schema：`instance_id→task_id`、`repo`、`base_commit`、`problem_statement→issue_body`、`patch→gold_patch`、`test_patch`、`FAIL_TO_PASS→fail_to_pass`、`PASS_TO_PASS→pass_to_pass`、`environment_setup_commit→environment_id 分桶依据`；
 - 环境优先复用**官方评测镜像**（`swebench/sweb.eval.x86_64.<instance_id>`），拉不动时退回自建 env spec；
@@ -2164,6 +2197,7 @@ make dataset-publish SLUG=benchmark-cn-v1 ALLOW_DIRTY=1
 （`golden-v1`，L0，不在发布版里，不算可评测的题）。9 月 16 日说的"最多 8 道"就是 4 + 4。
 按 §4.1 如实标，缺口的原因是 §8.8 那张表：中文 Python 项目全是 AI 基建，测试要下模型权重，
 沙箱断网跑不了。
+**2026-09-18 更新**：Plan B 落地后 v2 的题面 41/41 是中文（其中 40 道改写），账在 §8.5 的落地实录里；上面这段是 v1 的记录，不改。
 
 **自建题漏斗按仓库**（8 个定档仓库第一次并排放进一张表，原件在报告第六节）：
 

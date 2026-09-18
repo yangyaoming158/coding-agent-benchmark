@@ -1,0 +1,4485 @@
+﻿task_id,issue_language,difficulty,fail_to_pass,issue_title,issue_body,zh_title,zh_body,drafter,reviewer,verdict,note
+pallets__click-2271,en,hard,"tests/test_arguments.py::test_deprecated_required
+tests/test_arguments.py::test_deprecated_usage
+tests/test_arguments.py::test_deprecated_warning[True]
+tests/test_arguments.py::test_deprecated_warning[USE B INSTEAD]
+tests/test_commands.py::test_deprecated_in_help_messages[True-CLI HELP]
+tests/test_commands.py::test_deprecated_in_help_messages[True-None]
+tests/test_commands.py::test_deprecated_in_help_messages[USE OTHER COMMAND INSTEAD-CLI HELP]
+tests/test_commands.py::test_deprecated_in_help_messages[USE OTHER COMMAND INSTEAD-None]
+tests/test_commands.py::test_deprecated_in_invocation[USE OTHER COMMAND INSTEAD]
+tests/test_options.py::test_deprecated_prompt
+tests/test_options.py::test_deprecated_required
+tests/test_options.py::test_deprecated_usage[True]
+tests/test_options.py::test_deprecated_usage[USE B INSTEAD]
+tests/test_options.py::test_deprecated_warning[True]
+tests/test_options.py::test_deprecated_warning[USE B INSTEAD]",Mark parameter as deprecated,"Thanks for this great project!
+Perhaps it's just me who feels that it is rather cumbersome mark a single parameter as deprecated (the closet I found was https://stackoverflow.com/a/50402799). Is there perhaps a more official method to mark a single parameter as deprecated?
+That would somewhat be similar to ［链接已移除］
+
+Possible scenarios:
+- the parameter was renamed (e.g. a previous version was using `--name` as option, but now a dev want's to make sure it's the `--sur-name`.
+- the parameter is not needed anymore
+
+Perhaps as an example consider:
+```
+import click
+
+@click.command()
+@click.option('--count', default=1, help='Number of greetings.')
+@click.option('--name', prompt='Your name',
+              help='The person to greet.')
+def hello(count, name):
+    """"""Simple program that greets NAME for a total of COUNT times.""""""
+    for x in range(count):
+        click.echo(f""Hello {name}!"")
+
+if __name__ == '__main__':
+    hello()
+```
+and I want to rename `--count` to `--greetings-count`.
+However I don't want to remove  `--count`  instantly, instead when users use `--count` prompt a message that they should use the new `--greetings-count`. The usage of `--count` and `--greetings-count` should be forbidden.
+
+Thanks.",希望能把单个参数标记为已弃用（deprecated）,"感谢维护这个项目。
+
+我想把一个命令里的**单个参数**标记为已弃用，但找了一圈没有找到官方的做法，最接近的只有 StackOverflow 上的一个变通方案。想问一下：有没有更正式的方式，能像标记整个命令那样，把某一个参数标记为已弃用？
+
+可能的使用场景：
+
+- 参数改了名（比如以前用 `--name`，现在开发者希望大家改用 `--sur-name`）；
+- 这个参数已经不再需要了。
+
+举个例子：
+
+```
+import click
+
+@click.command()
+@click.option('--count', default=1, help='Number of greetings.')
+@click.option('--name', prompt='Your name',
+              help='The person to greet.')
+def hello(count, name):
+    """"""Simple program that greets NAME for a total of COUNT times.""""""
+    for x in range(count):
+        click.echo(f""Hello {name}!"")
+
+if __name__ == '__main__':
+    hello()
+```
+
+我想把 `--count` 改名成 `--greetings-count`。但我不想立刻把 `--count` 删掉，而是希望用户在使用 `--count` 的时候能看到一条提示，告诉他们应该改用新的 `--greetings-count`。另外，`--count` 和 `--greetings-count` 不应该被允许同时使用。
+
+谢谢。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留单参数弃用、改名提示及新旧参数不能同时使用的原文诉求，未增加具体警告格式或实现要求。
+pallets__click-2365,en,medium,"tests/test_options.py::test_usage_show_choices[bool choices]
+tests/test_options.py::test_usage_show_choices[float choices]
+tests/test_options.py::test_usage_show_choices[int choices]
+tests/test_options.py::test_usage_show_choices[text choices]
+tests/test_options.py::test_usage_show_choices[text/int choices]",`show_choices=False` seems to have no effect,"I noticed when using Typer that even if you pass `show_choices=False`, the choices still get shown in the help. It seems that this is related to Click.
+
+Example:
+```python
+import click
+
+@click.command()
+@click.option('-s', '--string-to-echo', type=click.Choice(['hello', 'world']), show_choices=False)
+def echo(string):
+    click.echo(string)
+
+if __name__ == ""__main__"":
+    echo()
+```
+```
+Usage: ... [OPTIONS]
+
+Options:
+  -s, --string-to-echo [hello|world]
+  --help                          Show this message and exit.
+```
+
+I guess it isn't documented what `show_choices` does for `Option` (if anything) in the non-prompt case, but I expected `show_choices=False` to disable showing the choices in the help.
+
+Environment:
+
+- Python version: 3.9.13
+- Click version: 8.1.3
+",`show_choices=False` 看起来完全不起作用,"我在用 Typer 的时候发现，就算给选项传了 `show_choices=False`，帮助信息里还是会把所有可选值列出来。追下去发现这个行为是 Click 这边的。
+
+复现代码：
+
+```python
+import click
+
+@click.command()
+@click.option('-s', '--string-to-echo', type=click.Choice(['hello', 'world']), show_choices=False)
+def echo(string):
+    click.echo(string)
+
+if __name__ == ""__main__"":
+    echo()
+```
+
+输出的帮助信息：
+
+```
+Usage: ... [OPTIONS]
+
+Options:
+  -s, --string-to-echo [hello|world]
+  --help                          Show this message and exit.
+```
+
+我知道文档里没有写清楚 `show_choices` 对 `Option` 在非 prompt（不是交互式提问）的场景下到底有什么作用（或者根本没作用），但按字面意思，我的预期是 `show_choices=False` 应该让帮助信息里不再显示这些可选值。
+
+环境：
+
+- Python 版本：3.9.13
+- Click 版本：8.1.3",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留非交互场景下 show_choices=False 应隐藏帮助中可选值的要求及复现代码。
+pallets__click-2397,mixed,medium,"tests/test_arguments.py::test_duplicate_names_warning[args_one0-args_two0]
+tests/test_options.py::test_duplicate_names_warning[opts_one0-opts_two0]
+tests/test_options.py::test_duplicate_names_warning[opts_one1-opts_two1]",Issue UserWarning when overriding Parameter name,"When a command is given multiple parameters that use the same name, a UserWarning should be fired to highlight the conflict. Currently, the command will quietly allow one parameter to override the names of another.
+
+(This is a slightly different problem than ［链接已移除］ In that issue, True and False values were given the same names within a single parameter.)
+
+**Example of the issue:**
+
+```python
+@click.command()
+@click.option(""-a"", ""--aardvark"", is_flag=True)
+@click.option(""-a"", ""--avocado"", is_flag=True)
+def cli(aardvark: bool = False, avocado: bool = False):
+    if aardvark:
+        print(""Animal"")
+    if avocado:
+        print(""Fruit"")
+```
+
+In this scenario, the short-name, `-a`, appears ambiguous. A warning would help the user realize the conflict they've introduced.
+
+I'll also provide a pull request for consideration.",多个参数用了同一个名字时，应该抛出 UserWarning,"当一个命令里有多个参数使用了同一个名字时，Click 应该发出一条 `UserWarning`，把这个冲突暴露出来。现在的行为是命令会悄悄地让一个参数覆盖掉另一个参数的名字，什么提示都没有。
+
+（这和另一个已有 issue 里讨论的问题略有不同：那个 issue 说的是在**同一个参数**内部，True 和 False 两个值被赋了同样的名字。）
+
+**问题示例：**
+
+```python
+@click.command()
+@click.option(""-a"", ""--aardvark"", is_flag=True)
+@click.option(""-a"", ""--avocado"", is_flag=True)
+def cli(aardvark: bool = False, avocado: bool = False):
+    if aardvark:
+        print(""Animal"")
+    if avocado:
+        print(""Fruit"")
+```
+
+在这个例子里，短选项 `-a` 显然是有歧义的。如果能给一条警告，用户就能立刻意识到自己引入了冲突。
+
+我也会顺手提一个 PR 供参考。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留重复参数名应发 UserWarning 的要求与短选项冲突示例，未增加警告文案。
+pallets__click-2696,en,medium,tests/test_options.py::test_missing_envvar,show envvar in error hint,"```py
+@click.command()
+@click.option('--a', required=True, envvar=""b"", show_envvar=True)
+def f(a): ...
+f()
+```
+Here I would want the error message to show the env var.",缺少必填选项的报错里希望能带上环境变量名,"我有一个必填选项，值可以从环境变量里读，而且开了 `show_envvar=True`：
+
+```py
+@click.command()
+@click.option('--a', required=True, envvar=""b"", show_envvar=True)
+def f(a): ...
+f()
+```
+
+这样直接运行、既没给 `--a` 也没设环境变量的时候，会报""缺少选项""的错误。我希望这条错误提示里能把对应的环境变量名也显示出来。现在的报错里没有这个信息。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 required、envvar、show_envvar 的组合和报错显示环境变量名的诉求，补充说明可由原示例直接得出。
+pallets__click-2775,en,medium,"tests/test_utils.py::test_echo_via_pager[test5]
+tests/test_utils.py::test_echo_via_pager[test6]
+tests/test_utils.py::test_echo_via_pager[test7]",echo_via_pager with generators leaves terminal in broken state,"# Steps to reproduce
+
+Run the following test case:
+```
+import click
+
+def output_generator():
+    counter = 0
+    while True:
+        yield ""this is a line of output\n""
+        if counter == 1024:
+            click.echo(""kaboom"", err=True)
+            click.get_current_context().exit(0)
+        counter += 1
+
+@click.command
+def kaboom():
+    click.echo_via_pager(output_generator)
+
+if __name__ == ""__main__"":
+    kaboom()
+```
+
+Attempt to use the terminal afterwards
+
+# Expected result
+
+A working terminal.
+
+# Actual behavior
+
+Newlines and output are obscured.  Commands may be entered, but they are not displayed.
+
+# Workaround
+
+Run the `reset` command after the command terminates.
+
+Environment:
+
+Reproducible on OS X and Ubuntu (x86_64):
+
+```
+$ sw_vers
+ProductName:            macOS
+ProductVersion:         14.3.1
+BuildVersion:           23D60
+```
+- Python version: 3.11.2
+- Click version: 8.1.7
+
+```
+# cat /etc/lsb-release
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+DISTRIB_CODENAME=jammy
+DISTRIB_DESCRIPTION=""Ubuntu 22.04.3 LTS""
+```
+- Python version: 3.10.12
+- Click version: 8.1.7
+
+",echo_via_pager 配合生成器使用时，退出后终端会坏掉,"# 复现步骤
+
+运行下面这段代码：
+
+```
+import click
+
+def output_generator():
+    counter = 0
+    while True:
+        yield ""this is a line of output\n""
+        if counter == 1024:
+            click.echo(""kaboom"", err=True)
+            click.get_current_context().exit(0)
+        counter += 1
+
+@click.command
+def kaboom():
+    click.echo_via_pager(output_generator)
+
+if __name__ == ""__main__"":
+    kaboom()
+```
+
+程序退出后继续在这个终端里操作。
+
+# 预期结果
+
+终端正常可用。
+
+# 实际结果
+
+换行和输出都不正常显示。命令能敲进去，但屏幕上看不到敲的内容。
+
+# 临时绕过办法
+
+命令结束之后手动执行一次 `reset`。
+
+环境：
+
+在 macOS 和 Ubuntu（x86_64）上都能复现：
+
+```
+$ sw_vers
+ProductName:            macOS
+ProductVersion:         14.3.1
+BuildVersion:           23D60
+```
+- Python 版本：3.11.2
+- Click 版本：8.1.7
+
+```
+# cat /etc/lsb-release
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=22.04
+DISTRIB_CODENAME=jammy
+DISTRIB_DESCRIPTION=""Ubuntu 22.04.3 LTS""
+```
+- Python 版本：3.10.12
+- Click 版本：8.1.7",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留生成器中退出导致终端异常的完整复现、reset 绕过方式及两套环境信息。
+pallets__click-2788,en,medium,tests/test_arguments.py::test_envvar_flag_value,`flag_value` is not taken into account with `envvar`,"When using the ~~--debug option~~ `DEBUG` environment variable in the sample command, the debug value is not correctly set (`flag_value`). It is expected to be either `logging.DEBUG` or `None`, but it seems to be getting the integer value directly from the environment variable.
+
+Sample:
+
+```python
+import logging
+import os
+import sys
+
+import click
+
+
+# Works as expected
+# sys.argv = ['', '--debug']
+
+# Does not work as expected
+# os.environ['DEBUG'] = '1'
+
+@click.command()
+@click.option('--debug', is_flag=True, flag_value=logging.DEBUG, envvar='DEBUG')
+def sample(debug):
+    click.echo(f""DEBUG: {debug}"")
+    assert debug in [logging.DEBUG, None], f""Invalid debug value: {debug} - expected >{logging.DEBUG}< or None""
+
+
+if __name__ == '__main__':
+    sample()
+
+```
+
+There is no different in using `os.environ` or  `DEBUG=1 python cli.py`.
+
+`DEBUG=8 python cli.py` prints out: `8`
+
+Environment:
+
+- Python version: 3.12.4
+- Click version: 8.1.7
+",通过环境变量设置 flag 选项时，`flag_value` 没有生效,"下面这个示例命令里，通过 `DEBUG` 环境变量来打开 `--debug` 这个 flag 时，`debug` 的值不对（`flag_value` 没起作用）。按预期它应该是 `logging.DEBUG` 或者 `None`，但实际上拿到的是环境变量里的那个整数原值。
+
+示例：
+
+```python
+import logging
+import os
+import sys
+
+import click
+
+
+# Works as expected
+# sys.argv = ['', '--debug']
+
+# Does not work as expected
+# os.environ['DEBUG'] = '1'
+
+@click.command()
+@click.option('--debug', is_flag=True, flag_value=logging.DEBUG, envvar='DEBUG')
+def sample(debug):
+    click.echo(f""DEBUG: {debug}"")
+    assert debug in [logging.DEBUG, None], f""Invalid debug value: {debug} - expected >{logging.DEBUG}< or None""
+
+
+if __name__ == '__main__':
+    sample()
+
+```
+
+在命令行传 `--debug` 是正常的；用 `os.environ` 设置和直接 `DEBUG=1 python cli.py` 运行，结果没有区别，都不对。
+
+`DEBUG=8 python cli.py` 打印出来的是：`8`。
+
+环境：
+
+- Python 版本：3.12.4
+- Click 版本：8.1.7",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留环境变量应激活 flag_value 而非直接传入整数的行为、对照调用和示例。
+pallets__click-2818,en,medium,tests/test_testing.py::test_catch_exceptions_cli_runner,Set the `catch_exceptions` value for the whole runner,"I always pass `catch_exceptions=False` for all my test suites.
+It would be convenient to configure this value once for all in `CLIRunner` for example.
+
+For example, we could add a `CLIRunner.catch_exceptions` parameter, and make `invoke` use that value if not directly passed in parameter of `invoke`. Then I would just have to put the runner in a pytest fixture and that would do the thing for me.
+
+If that is OK, I can open a PR for this.
+
+What do you think?",希望能在 CliRunner 上统一设置 `catch_exceptions`,"我所有的测试套件里都是给 `invoke` 传 `catch_exceptions=False`。如果能在 `CliRunner` 这一层统一配置一次这个值，会方便很多。
+
+比如可以给 `CliRunner` 加一个 `catch_exceptions` 参数：调用 `invoke` 时如果没有显式传 `catch_exceptions`，就用 runner 上配置的这个值。这样我只要把 runner 放进一个 pytest fixture 里，就不用在每次 `invoke` 时都重复传一遍了。
+
+如果大家觉得这个方向可以，我可以提一个 PR。
+
+各位觉得怎么样？",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：完整保留 invoke 显式参数优先、未传时使用 runner 配置的公开接口要求，该优先级是原文需求。
+pallets__click-2840,en,hard,"tests/test_options.py::test_help_option_custom_names_and_class[name_specs0-  -h, --help  Show this message and exit.\n-True]
+tests/test_options.py::test_help_option_custom_names_and_class[name_specs1-  -h      Show this message and exit.\n  --help  Show this message and exit.\n-True]
+tests/test_options.py::test_help_option_custom_names_and_class[name_specs2-  --help  Show this message and exit.\n-True]",Regression: Help option subclassing no longer works with verion 8.1.8 ,"Click 8.18 has a regression wrt. to help with Option subclasses.
+
+This was found in this issue originally:
+- https://github.com/aboutcode-org/scancode-toolkit/issues/4044
+
+This was introduced in this PR by @kdeldycke :wave: :
+- ［链接已移除］
+
+It breaks code that uses option subclasses. 
+
+
+- This code works in 8.1.7 and  8.1.8 with no custom class
+```Python
+import click
+
+@click.command()
+@click.help_option(""-h"", ""--help"")
+def scancode():
+    """"""OK in pkg:pypi/click@8.1.8 and pkg:pypi/click@8.1.7""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+```
+and then with 8.1.7 and 8.1.8:
+```
+$ python  works.py --help
+Usage: works.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+```
+
+
+
+
+- This code works in 8.1.7 and fails in 8.1.8 with a custom class
+```Python
+import click
+
+
+class PluggableCommandLineOption(click.Option):
+    pass
+
+
+@click.command()
+@click.help_option(""-h"", ""--help"", cls=PluggableCommandLineOption)
+def scancode():
+    """"""Regression in pkg:pypi/click@8.1.8""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+```
+
+and then with 8.1.7
+```
+ python  failing.py --help
+Usage: failing.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+
+
+$ python  failing.py -h
+Usage: failing.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+
+```
+
+and then with 8.1.8
+```
+$ python  failing.py -h
+Error: Option '-h' requires an argument.
+
+
+$ python  failing.py --help
+Error: Option '--help' requires an argument.
+
+
+```
+
+
+
+- This code works more or less in 8.1.7 and 8.1.8 with custom class and no ""--help"" option
+```Python
+import click
+
+
+class PluggableCommandLineOption(click.Option):
+    pass
+
+
+@click.command()
+@click.help_option(""-h"", cls=PluggableCommandLineOption)
+def scancode():
+    """"""Regression in pkg:pypi/click@8.1.8""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+
+```
+and then with 8.1.7
+```
+$ python  works2.py -h
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h      Show this message and exit.
+  --help  Show this message and exit.
+```
+
+and then with 8.1.7
+```
+$ python  works2.py --help
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h      Show this message and exit.
+  --help  Show this message and exit
+```
+
+and then with 8.1.8
+```
+$ python  works2.py -h
+Error: Option '-h' requires an argument.
+
+```
+and then with 8.1.8 note the changes in `-h TEXT`
+```
+$ python  works2.py --help
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h TEXT
+  --help   Show this message and exit.
+
+```
+
+
+
+
+
+Environment:
+
+- Python version: 3.9 to 3.11
+- Click version: 8.1.8
+",8.1.8 回归：help 选项用了自定义 Option 子类之后不再工作,"Click 8.1.8 在 help 选项配合 `Option` 子类使用这一点上出现了回归。
+
+这个问题最早是在 scancode-toolkit 项目的一个 issue 里发现的，是 8.1.8 里的一个 PR 引入的。它会让所有使用 Option 子类的代码出问题。
+
+
+- 下面这段不带自定义类的代码，在 8.1.7 和 8.1.8 上都正常：
+```Python
+import click
+
+@click.command()
+@click.help_option(""-h"", ""--help"")
+def scancode():
+    """"""OK in pkg:pypi/click@8.1.8 and pkg:pypi/click@8.1.7""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+```
+8.1.7 和 8.1.8 上的输出：
+```
+$ python  works.py --help
+Usage: works.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+```
+
+
+
+
+- 下面这段带自定义类的代码，在 8.1.7 上正常，在 8.1.8 上失败：
+```Python
+import click
+
+
+class PluggableCommandLineOption(click.Option):
+    pass
+
+
+@click.command()
+@click.help_option(""-h"", ""--help"", cls=PluggableCommandLineOption)
+def scancode():
+    """"""Regression in pkg:pypi/click@8.1.8""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+```
+
+8.1.7 上：
+```
+ python  failing.py --help
+Usage: failing.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+
+
+$ python  failing.py -h
+Usage: failing.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h, --help  Show this message and exit.
+
+```
+
+8.1.8 上：
+```
+$ python  failing.py -h
+Error: Option '-h' requires an argument.
+
+
+$ python  failing.py --help
+Error: Option '--help' requires an argument.
+
+
+```
+
+
+
+- 下面这段用了自定义类、但没有声明 ""--help"" 的代码，在 8.1.7 和 8.1.8 上勉强算能用：
+```Python
+import click
+
+
+class PluggableCommandLineOption(click.Option):
+    pass
+
+
+@click.command()
+@click.help_option(""-h"", cls=PluggableCommandLineOption)
+def scancode():
+    """"""Regression in pkg:pypi/click@8.1.8""""""
+    pass
+
+
+if __name__ == ""__main__"":
+    scancode()
+
+```
+8.1.7 上：
+```
+$ python  works2.py -h
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h      Show this message and exit.
+  --help  Show this message and exit.
+```
+
+同样是 8.1.7：
+```
+$ python  works2.py --help
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h      Show this message and exit.
+  --help  Show this message and exit
+```
+
+8.1.8 上：
+```
+$ python  works2.py -h
+Error: Option '-h' requires an argument.
+
+```
+8.1.8 上，注意 `-h` 变成了 `-h TEXT`：
+```
+$ python  works2.py --help
+Usage: works2.py [OPTIONS]
+
+  Regression in pkg:pypi/click@8.1.8
+
+Options:
+  -h TEXT
+  --help   Show this message and exit.
+
+```
+
+
+
+
+
+环境：
+
+- Python 版本：3.9 到 3.11
+- Click 版本：8.1.8",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 Option 子类相关的三组版本对照与全部代码输出，未指定新的修复方式。
+pallets__click-2933,en,medium,tests/test_testing.py::test_isolation_flushes_unflushed_stderr,Revisiting stderr flush in CLIRunner,"This bug is described in detail at ［链接已移除］ and ［链接已移除］  I've read through those issues and am not convinced the current behavior is accurate or beneficial.
+
+From: ［链接已移除］
+
+> This isn't a bug. When using print in general, you have to flush to be sure all output is sent to stderr. That's one of the reasons Click provides echo instead.
+
+From: ［链接已移除］
+
+> Another way to put it is: you need to explain why your suggested behavior is correct. It's certainly different than current, but that doesn't mean it's more correct.
+
+> What I know is that stdout is flushed, and stderr isn't. I don't know why that's the case, but I do know that this is the behavior I've encountered all over the place, and if I want stderr to show up at a specific time I need to flush manually. This is what click.echo does automatically. If what I know and click's test runner's current behavior is incorrect, then you need to show me sources that explain why. Otherwise, it would just mean we're hiding the actual behavior of the calls you're making.
+
+I believe the current behavior of not flushing stderr is wrong because it results in semantics during testing that aren't present during a normal run of the command.  Take:
+
+```python
+import sys
+
+import click
+from click.testing import CliRunner
+
+
+@click.command()
+def cli():
+    print(""to stdout"")
+    print(""to stderr"", file=sys.stderr)
+
+
+def test_cli():
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(cli, (), catch_exceptions=False)
+
+    assert result.stdout.strip() == ""to stdout""
+    assert result.stderr.strip() == ""to stderr""
+
+
+if __name__ == ""__main__"":
+    cli()
+```
+
+
+If you run this through a normal Python execution, you will __always__ get ""to stdout"" and ""to stderr"" on the console.  If there were times when ""to stderr"" were not printed to the console, it would be a bug in Python.  If I don't care when the output comes through, only that it shows up by the time the process has exited, then I don't need to take any extra steps.
+
+However, if I run the test, its possible the second assert fails even though the first assert will always pass.  Additionally, I'd have to add a `sys.stderr.flush()` at the end of cli() but only to get the tests to pass.  It would never be needed when running the program in a normal Python process.  Furthermore, its basically impossible to add the flush only during testing because of where the flush() is needed in the current code.
+
+From: ［链接已移除］
+
+> You're welcome to use print to stderr, you just have to remember to flush in that case. Stdout is flushed, stderr isn't. That's true regardless of if you're using click.
+
+> If we flush for you during tests, that's hiding the bug, not fixing it.
+
+As I demonstrated in the code above, my program works just fine when ran normally.  There is no bug.  The tests only fail because invoke() is not matching the expected semantics of a normal execution of a click command in a Python process.
+
+It would only be flushing at the end of an invoke, which matches what Python does at the end of program execution.  Therefore, I'm not sure I grok the resistance to adding this flush.  Its not a performance issue.  Its not a correctness issue.  Its not a backwards compatibility issue.  There are three issues now raised because of the unexpected behavior and countless other people have likely ran into it that didn't comment or raise a new issue.  So why not add it?  What's the downside?
+",重新讨论：CliRunner 里 stderr 应不应该 flush,"这个问题在之前的两个 issue 里已经有过详细描述。我把那些讨论都读了一遍，但没有被说服——我不认为现在的行为是正确的，也不觉得它有什么好处。
+
+之前维护者的回复大意是：
+
+> 这不是 bug。用 print 的时候，你本来就得自己 flush 才能保证所有输出都送到了 stderr。这也是 Click 提供 echo 的原因之一。
+
+> 换个说法：你需要解释为什么你建议的行为是正确的。它和现在的行为不一样，但不一样不代表更正确。
+
+> 我知道的是：stdout 会被 flush，stderr 不会。我不知道为什么会这样，但我到处都碰到过这个行为；如果我想让 stderr 在某个特定时间点出现，就得手动 flush。click.echo 会自动帮你做这件事。如果你觉得我说的和 click 测试 runner 现在的行为是错的，那你得给出说明原因的资料。否则，这只是把你调用的那些东西的真实行为藏起来了。
+
+我认为""不 flush stderr""这个行为是错的，因为它导致测试时的语义和命令正常运行时的语义不一样。看这个例子：
+
+```python
+import sys
+
+import click
+from click.testing import CliRunner
+
+
+@click.command()
+def cli():
+    print(""to stdout"")
+    print(""to stderr"", file=sys.stderr)
+
+
+def test_cli():
+    runner = CliRunner(mix_stderr=False)
+    result = runner.invoke(cli, (), catch_exceptions=False)
+
+    assert result.stdout.strip() == ""to stdout""
+    assert result.stderr.strip() == ""to stderr""
+
+
+if __name__ == ""__main__"":
+    cli()
+```
+
+如果用普通的 Python 进程运行它，控制台上**总是**会同时出现 ""to stdout"" 和 ""to stderr""。要是哪次 ""to stderr"" 没打出来，那就是 Python 自己的 bug。如果我不关心输出什么时候出来、只关心进程退出时它已经出来了，那我什么额外的事都不用做。
+
+但如果跑上面这个测试，第二个 assert 有可能失败，尽管第一个 assert 永远会通过。而且为了让测试通过，我得在 cli() 末尾加一句 `sys.stderr.flush()`——这在程序正常运行时根本不需要。更麻烦的是，由于 flush() 需要放的位置的关系，想做到""只在测试时 flush""基本不可能。
+
+之前的回复还说：
+
+> 你当然可以用 print 往 stderr 写，只是那种情况下得记得 flush。stdout 会 flush，stderr 不会。不管用不用 click 都是这样。
+
+> 如果我们在测试时替你 flush，那是把 bug 藏起来，不是修 bug。
+
+正如上面代码演示的，我的程序正常运行时完全没问题，根本没有 bug。测试之所以失败，只是因为 invoke() 的行为和 click 命令在 Python 进程里正常执行时的预期语义对不上。
+
+我提议的只是在一次 invoke 结束时 flush 一下，这和 Python 在程序结束时做的事情是一致的。所以我不太理解为什么对加这个 flush 这么抗拒。它不是性能问题，不是正确性问题，也不是向后兼容问题。因为这个出人意料的行为，已经有三个 issue 被提出来了，没留言、没开新 issue 但踩过坑的人恐怕更多。那为什么不加呢？加了有什么坏处？",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留正常进程与 invoke 的 stderr 输出差异及结束时 flush 的原文诉求，未另加内部结构要求。
+pallets__click-3058,en,medium,"tests/test_context.py::test_with_resource_exception
+tests/test_context.py::test_with_resource_nested_exception",Exception information isn't passed through to context.with_resource managed resources,"When writing a simple tool with a bunch of commands updating a database, I was using a context manager in each command that would begin a transaction, and then commit it on success, or rollback on error.
+
+Initially, I thought I'd be able to avoid some boilerplate on every subcommand by adding the session as a managed resource via ctx.with_resource(context_manager).  However, while this works in the success case, it will also commit the transaction if an unexpected exception occurs, since the exception information doesn't seem to be being passed through to the context manager.
+
+Eg. given the below context manager:
+
+    class TestContextManager:
+        def __enter__(self):
+            print(""ENTER"")
+
+        def __exit__(self, exc_type, exc_val, traceback):
+            print(""EXIT"", exc_type, exc_val, traceback)
+
+Using it in a regular context manager via:
+
+    with TestContextManager():
+        raise Exception()
+
+will correctly print the exc_type, exc_val and traceback parameters when an exception occurs.  But using it via:
+
+    @click.group()
+    @click.pass_context
+    def cli(ctx):
+        ctx.obj = ctx.with_resource(TestContextManager())
+
+These will always be `None`, and so any context manager that needs to act differently on the occurrence of an exception vs success will always treat this as success.  (And likewise, try/except blocks will never trigger in function-style ones using the `@contextmanager` decorator.)
+
+Would it be possible for the exception information to be passed through to managed resources so that context managers that treat success/failure cases differently operate correctly?
+
+Environment:
+
+- Python version: 3.10.9
+- Click version: 8.1.3
+",异常信息没有传给 context.with_resource 托管的资源,"我在写一个小工具，里面有一堆子命令都要更新数据库。每个子命令里我都用一个上下文管理器来开启事务：成功就 commit，出错就 rollback。
+
+一开始我想通过 `ctx.with_resource(context_manager)` 把 session 注册成托管资源，省掉每个子命令里的样板代码。成功的情况下这样做没问题，但如果中途抛了意料之外的异常，它也会把事务 commit 掉——因为异常信息看起来根本没有被传给上下文管理器。
+
+比如下面这个上下文管理器：
+
+    class TestContextManager:
+        def __enter__(self):
+            print(""ENTER"")
+
+        def __exit__(self, exc_type, exc_val, traceback):
+            print(""EXIT"", exc_type, exc_val, traceback)
+
+按常规方式使用：
+
+    with TestContextManager():
+        raise Exception()
+
+出异常时会正确地打印出 exc_type、exc_val 和 traceback 这三个参数。但如果这样用：
+
+    @click.group()
+    @click.pass_context
+    def cli(ctx):
+        ctx.obj = ctx.with_resource(TestContextManager())
+
+这三个参数永远都是 `None`。于是任何需要区分""成功""和""出异常""两种情况的上下文管理器，都会把出异常当成成功来处理。（同理，用 `@contextmanager` 装饰器写成函数形式的上下文管理器，里面的 try/except 也永远不会触发。）
+
+能不能把异常信息传递给托管资源，让那些对成功和失败做不同处理的上下文管理器能正常工作？
+
+环境：
+
+- Python 版本：3.10.9
+- Click 版本：8.1.3",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 with_resource 向上下文管理器传递异常三元组的需求及事务提交与回滚场景。
+pallets__click-3068,mixed,medium,"tests/test_commands.py::test_other_command_invoke_with_defaults[opt_params10-None]
+tests/test_commands.py::test_other_command_invoke_with_defaults[opt_params4-None]",`ctx.invoke` passes `Sentinel` to command,"In a GitHub action that worked in the past I get an error 
+
+```
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/__init__.py:221 in main                                                    │
+│                                                                              │
+│   218                                                                        │
+│   219 def main():  # no cov                                                  │
+│   220 │   try:                                                               │
+│ ❱ 221 │   │   hatch(prog_name='hatch', windows_expand_args=False)            │
+│   222 │   except Exception:  # noqa: BLE001                                  │
+│   223 │   │   import sys                                                     │
+│   224      
+
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/run/__init__.py:147 in run                                                 │
+│                                                                              │
+│   144 │   elif not env_name:                                                 │
+│   145 │   │   env_name = 'system'                                            │
+│   146 │                                                                      │
+│ ❱ 147 │   ctx.invoke(                                                        │
+│   148 │   │   run_command,                                                   │
+│   149 │   │   args=[command, *final_args],                                   │
+│   150 │   │   env_names=[env_name],                                          │
+│                                                                              │
+
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/json/__init__.py:339   │
+│ in loads                                                                     │
+│                                                                              │
+│   336 │   │   │   │   │   │   │   │     s, 0)                                │
+│   337 │   else:                                                              │
+│   338 │   │   if not isinstance(s, (bytes, bytearray)):                      │
+│ ❱ 339 │   │   │   raise TypeError(f'the JSON object must be str, bytes or by │
+│   340 │   │   │   │   │   │   │   f'not {s.__class__.__name__}')             │
+│   341 │   │   s = s.decode(detect_encoding(s), 'surrogatepass')              │
+│   342                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+TypeError: the JSON object must be str, bytes or bytearray, not Sentinel
+Error: Process completed with exit code 1.
+```
+Click is used as part of Hatch as build tool.
+
+I guess it is linked to ［链接已移除］
+",`ctx.invoke` 把 `Sentinel` 传给了被调用的命令,"我有一个 GitHub Action，以前一直是正常的，现在跑起来报错：
+
+```
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/__init__.py:221 in main                                                    │
+│                                                                              │
+│   218                                                                        │
+│   219 def main():  # no cov                                                  │
+│   220 │   try:                                                               │
+│ ❱ 221 │   │   hatch(prog_name='hatch', windows_expand_args=False)            │
+│   222 │   except Exception:  # noqa: BLE001                                  │
+│   223 │   │   import sys                                                     │
+│   224
+
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/site-packages/hatch/cl │
+│ i/run/__init__.py:147 in run                                                 │
+│                                                                              │
+│   144 │   elif not env_name:                                                 │
+│   145 │   │   env_name = 'system'                                            │
+│   146 │                                                                      │
+│ ❱ 147 │   ctx.invoke(                                                        │
+│   148 │   │   run_command,                                                   │
+│   149 │   │   args=[command, *final_args],                                   │
+│   150 │   │   env_names=[env_name],                                          │
+│                                                                              │
+
+│ /opt/hostedtoolcache/Python/3.13.7/x64/lib/python3.13/json/__init__.py:339   │
+│ in loads                                                                     │
+│                                                                              │
+│   336 │   │   │   │   │   │   │   │     s, 0)                                │
+│   337 │   else:                                                              │
+│   338 │   │   if not isinstance(s, (bytes, bytearray)):                      │
+│ ❱ 339 │   │   │   raise TypeError(f'the JSON object must be str, bytes or by │
+│   340 │   │   │   │   │   │   │   f'not {s.__class__.__name__}')             │
+│   341 │   │   s = s.decode(detect_encoding(s), 'surrogatepass')              │
+│   342                                                                        │
+╰──────────────────────────────────────────────────────────────────────────────╯
+TypeError: the JSON object must be str, bytes or bytearray, not Sentinel
+Error: Process completed with exit code 1.
+```
+
+这里 Click 是作为构建工具 Hatch 的一部分在用的。从堆栈看，问题出在 `ctx.invoke(...)` 调用另一个命令这一步，被调用的命令收到的参数值不是正常的 Python 值，而是一个 `Sentinel` 对象。
+
+我猜这和另一个已有的 issue 是相关的。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 Sentinel 泄入命令参数的标题、Hatch 堆栈及原文上下文，新增解释未超出原始证据。
+pallets__click-3079,en,medium,tests/test_defaults.py::test_shared_param_prefers_first_default,`default=True` on feature flags is order-sensitive,"The following code:
+
+```python
+import click
+
+
+@click.command()
+@click.option(""--red"", ""color"", flag_value=""red"")
+@click.option(""--green"", ""color"", flag_value=""green"", default=True)
+@click.option(""--blue"", ""color"", flag_value=""blue"")
+def main(color: str) -> None:
+    print(repr(color))
+
+
+if __name__ == ""__main__"":
+    main()
+```
+
+when run with no arguments using click 8.2.1 outputs `'green'`, which is what I expect.  If click 8.3.0 is used instead, then it outputs `None` — but if the `--green` option is moved above the `--red` option in the script, click 8.3.0 will output `'green'`.
+
+I believe that the script should output `'green'` regardless of the declaration order of the options.
+
+Environment:
+
+- Python version: 3.13.7
+- Click version: 8.2.1 and 8.3.0",feature flag 上的 `default=True` 对选项声明顺序敏感,"下面这段代码：
+
+```python
+import click
+
+
+@click.command()
+@click.option(""--red"", ""color"", flag_value=""red"")
+@click.option(""--green"", ""color"", flag_value=""green"", default=True)
+@click.option(""--blue"", ""color"", flag_value=""blue"")
+def main(color: str) -> None:
+    print(repr(color))
+
+
+if __name__ == ""__main__"":
+    main()
+```
+
+用 click 8.2.1 不带任何参数运行，输出 `'green'`，符合我的预期。换成 click 8.3.0 之后，输出变成了 `None`——但如果把 `--green` 那个选项挪到 `--red` 上面，8.3.0 又会输出 `'green'`。
+
+我认为不管这几个选项按什么顺序声明，这段代码都应该输出 `'green'`。
+
+环境：
+
+- Python 版本：3.13.7
+- Click 版本：8.2.1 和 8.3.0",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留共享 color 参数的 flag 默认值与声明顺序无关的要求及版本对照。
+pallets__click-3126,en,medium,tests/test_shell_completion.py::test_fish_multiline_help_complete,Multi-line help text is not handled correctly in fish,"Multi-line help text (e.g. `help=""\b\nAttachment with explicit mimetype,\n--at image.jpg image/jpeg""`) causes error when doing shell completion in fish.
+
+# How to replicate
+
+From [simonw/llm](https://github.com/simonw/llm/blob/［提交哈希已移除］/llm/cli.py#L365-L373):
+
+```py
+@click.option(
+    ""attachment_types"",
+    ""--at"",
+    ""--attachment-type"",
+    type=(str, str),
+    multiple=True,
+    callback=attachment_types_callback,
+    help=""\b\nAttachment with explicit mimetype,\n--at image.jpg image/jpeg"",
+)
+```
+
+Type `llm --`, then press <kbd>Tab</kbd> to complete, observe the following error output:
+
+```shellsession
+$ llm --
+string split: --at image.jpg image/jpeg: unknown option
+
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 1):
+string split "","" $completion
+^
+in command substitution
+	called on line 5 of file /opt/homebrew/share/fish/vendor_completions.d/llm.fish
+in function '_llm_completion'
+in command substitution
+
+(Type 'help string' for related documentation)
+test: Missing argument at index 3
+= dir
+      ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 7):
+        if test $metadata[1] = ""dir"";
+           ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= file
+       ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 9):
+        else if test $metadata[1] = ""file"";
+                ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= plain
+        ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 11):
+        else if test $metadata[1] = ""plain"";
+                ^
+in function '_llm_completion'
+in command substitution
+string split: --at image.jpg image/jpeg: unknown option
+
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 1):
+string split "","" $completion
+^
+in command substitution
+	called on line 5 of file /opt/homebrew/share/fish/vendor_completions.d/llm.fish
+in function '_llm_completion'
+in command substitution
+
+(Type 'help string' for related documentation)
+test: Missing argument at index 3
+= dir
+      ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 7):
+        if test $metadata[1] = ""dir"";
+           ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= file
+       ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 9):
+        else if test $metadata[1] = ""file"";
+                ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= plain
+        ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 11):
+        else if test $metadata[1] = ""plain"";
+                ^
+in function '_llm_completion'
+in command substitution
+```
+
+# Analysis
+
+Obtaining raw completion from click:
+
+```shellsession
+$ env _LLM_COMPLETE=fish_complete COMP_WORDS='llm --' COMP_CWORD='--' llm
+plain,--system	System prompt to use
+plain,--model	Model to use
+plain,--database	Path to log database
+plain,--query	Use first model matching these strings
+plain,--attachment	Attachment path or URL or -
+plain,--at
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--attachment-type
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--tool	Name of a tool to make available to the model
+plain,--functions	Python code block or file path defining functions to register as tools
+plain,--td	Show full details of tool executions
+plain,--tools-debug	Show full details of tool executions
+plain,--ta	Manually approve every tool execution
+plain,--tools-approve	Manually approve every tool execution
+plain,--cl	How many chained tool responses to allow, default 5, set 0 for unlimited
+plain,--chain-limit	How many chained tool responses to allow, default 5, set 0 for unlimited
+plain,--option	key/value options for the model
+plain,--schema	JSON schema, filepath or ID
+plain,--schema-multi	JSON schema to use for multiple results
+plain,--fragment	Fragment (alias, URL, hash or file path) to add to the prompt
+plain,--sf	Fragment to add to system prompt
+plain,--system-fragment	Fragment to add to system prompt
+plain,--template	Template to use
+plain,--param	Parameters for template
+plain,--no-stream	Do not stream output
+plain,--no-log	Don't log to database
+plain,--log	Log prompt and response to the database
+plain,--continue	Continue the most recent conversation.
+plain,--cid	Continue the conversation with the given ID.
+plain,--conversation	Continue the conversation with the given ID.
+plain,--key	API key to use
+plain,--save	Save prompt with this template name
+plain,--async	Run prompt asynchronously
+plain,--usage	Show token usage
+plain,--extract	Extract first fenced code block
+plain,--xl	Extract last fenced code block
+plain,--extract-last	Extract last fenced code block
+plain,--help	Show this message and exit.
+```
+
+Observe that option with multi-line help text is not escaped/handled:
+
+```
+plain,--at
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--attachment-type
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+```
+
+Which causes unexpected arguments passed to `string split`, causing the error:
+
+https://github.com/pallets/click/blob/［提交哈希已移除］/src/click/shell_completion.py#L183
+
+# Environment
+
+- Python version: 3.13.7
+- Click version: 8.2.1
+- Fish version: 4.0.2",fish 下多行帮助文本没有被正确处理，补全时报错,"选项的帮助文本如果是多行的（例如 `help=""\b\nAttachment with explicit mimetype,\n--at image.jpg image/jpeg""`），在 fish 里做 shell 补全时会报错。
+
+# 复现方法
+
+来自 simonw/llm 项目 `llm/cli.py` 里的一个选项定义：
+
+```py
+@click.option(
+    ""attachment_types"",
+    ""--at"",
+    ""--attachment-type"",
+    type=(str, str),
+    multiple=True,
+    callback=attachment_types_callback,
+    help=""\b\nAttachment with explicit mimetype,\n--at image.jpg image/jpeg"",
+)
+```
+
+输入 `llm --`，然后按 <kbd>Tab</kbd> 触发补全，会看到下面这些报错：
+
+```shellsession
+$ llm --
+string split: --at image.jpg image/jpeg: unknown option
+
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 1):
+string split "","" $completion
+^
+in command substitution
+	called on line 5 of file /opt/homebrew/share/fish/vendor_completions.d/llm.fish
+in function '_llm_completion'
+in command substitution
+
+(Type 'help string' for related documentation)
+test: Missing argument at index 3
+= dir
+      ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 7):
+        if test $metadata[1] = ""dir"";
+           ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= file
+       ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 9):
+        else if test $metadata[1] = ""file"";
+                ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= plain
+        ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 11):
+        else if test $metadata[1] = ""plain"";
+                ^
+in function '_llm_completion'
+in command substitution
+string split: --at image.jpg image/jpeg: unknown option
+
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 1):
+string split "","" $completion
+^
+in command substitution
+	called on line 5 of file /opt/homebrew/share/fish/vendor_completions.d/llm.fish
+in function '_llm_completion'
+in command substitution
+
+(Type 'help string' for related documentation)
+test: Missing argument at index 3
+= dir
+      ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 7):
+        if test $metadata[1] = ""dir"";
+           ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= file
+       ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 9):
+        else if test $metadata[1] = ""file"";
+                ^
+in function '_llm_completion'
+in command substitution
+test: Missing argument at index 3
+= plain
+        ^
+/opt/homebrew/share/fish/vendor_completions.d/llm.fish (line 11):
+        else if test $metadata[1] = ""plain"";
+                ^
+in function '_llm_completion'
+in command substitution
+```
+
+# 分析
+
+直接向 click 要原始的补全结果：
+
+```shellsession
+$ env _LLM_COMPLETE=fish_complete COMP_WORDS='llm --' COMP_CWORD='--' llm
+plain,--system	System prompt to use
+plain,--model	Model to use
+plain,--database	Path to log database
+plain,--query	Use first model matching these strings
+plain,--attachment	Attachment path or URL or -
+plain,--at
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--attachment-type
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--tool	Name of a tool to make available to the model
+plain,--functions	Python code block or file path defining functions to register as tools
+plain,--td	Show full details of tool executions
+plain,--tools-debug	Show full details of tool executions
+plain,--ta	Manually approve every tool execution
+plain,--tools-approve	Manually approve every tool execution
+plain,--cl	How many chained tool responses to allow, default 5, set 0 for unlimited
+plain,--chain-limit	How many chained tool responses to allow, default 5, set 0 for unlimited
+plain,--option	key/value options for the model
+plain,--schema	JSON schema, filepath or ID
+plain,--schema-multi	JSON schema to use for multiple results
+plain,--fragment	Fragment (alias, URL, hash or file path) to add to the prompt
+plain,--sf	Fragment to add to system prompt
+plain,--system-fragment	Fragment to add to system prompt
+plain,--template	Template to use
+plain,--param	Parameters for template
+plain,--no-stream	Do not stream output
+plain,--no-log	Don't log to database
+plain,--log	Log prompt and response to the database
+plain,--continue	Continue the most recent conversation.
+plain,--cid	Continue the conversation with the given ID.
+plain,--conversation	Continue the conversation with the given ID.
+plain,--key	API key to use
+plain,--save	Save prompt with this template name
+plain,--async	Run prompt asynchronously
+plain,--usage	Show token usage
+plain,--extract	Extract first fenced code block
+plain,--xl	Extract last fenced code block
+plain,--extract-last	Extract last fenced code block
+plain,--help	Show this message and exit.
+```
+
+可以看到，带多行帮助文本的选项没有做任何转义或特殊处理：
+
+```
+plain,--at
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+plain,--attachment-type
+Attachment with explicit mimetype,
+--at image.jpg image/jpeg
+```
+
+于是 fish 补全脚本里的 `string split` 收到了预期之外的参数，就报出了上面的错误。相关代码在 `src/click/shell_completion.py` 里 fish 那一段（第 183 行附近）。
+
+# 环境
+
+- Python 版本：3.13.7
+- Click 版本：8.2.1
+- Fish 版本：4.0.2",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 fish 多行帮助补全的复现、原始输出和原文已有分析，未添加测试专属格式要求。
+pallets__click-3152,en,medium,"tests/test_options.py::test_flag_value_on_option_with_zero_or_one_args[int-args4-1\n]
+tests/test_options.py::test_flag_value_on_option_with_zero_or_one_args[str-args1-FlagValue\n]",Bug: Optional value not optional anymore,"### Outline
+
+As stated in [official documentation](https://click.palletsprojects.com/en/stable/options/#optional-value): 
+> Setting `is_flag=False, flag_value=value` tells Click that the option can still be passed a value, but if only the flag is given, the value will be `flag_value`.
+
+Since 8.3.0 this doesn't work anymore, instead `SystemExit` with ""Error: Option '--xyz' requires an argument."" is thrown.
+
+### Replication of bug
+
+Example taken from documentation:
+```python
+@click.command()
+@click.option(""--name"", is_flag=False, flag_value=""Flag"", default=""Default"")
+def hello(name):
+    click.echo(f""Hello, {name}!"")
+```
+
+```shell
+$ hello --name
+Error: Option '--name' requires an argument.
+```
+
+### Expected behavior
+
+The code example above should work as
+```shell
+$ hello --name
+Hello, Flag!
+```
+
+It's not even working in the generated documentation anymore: while [documentation up to Sep, 10th](https://web.archive.org/web/20250910222023/https://click.palletsprojects.com/en/stable/options/#optional-value) shows the expected and correct behavior, [current documentation](https://click.palletsprojects.com/en/stable/options/#optional-value) demonstrates the bug.
+
+- Python version: 3.11
+- Click version: 8.3.0
+",Bug：可选值（optional value）不再是可选的了,"### 问题概述
+
+官方文档（options 一章的 ""Optional Value"" 一节）里写着：
+> 设置 `is_flag=False, flag_value=value` 是告诉 Click：这个选项仍然可以接收一个值，但如果只给了选项本身没给值，那么它的值就是 `flag_value`。
+
+从 8.3.0 开始这个行为失效了，取而代之的是抛出 `SystemExit`，并报 ""Error: Option '--xyz' requires an argument.""。
+
+### 复现
+
+例子直接取自文档：
+```python
+@click.command()
+@click.option(""--name"", is_flag=False, flag_value=""Flag"", default=""Default"")
+def hello(name):
+    click.echo(f""Hello, {name}!"")
+```
+
+```shell
+$ hello --name
+Error: Option '--name' requires an argument.
+```
+
+### 预期行为
+
+上面的例子应该这样工作：
+```shell
+$ hello --name
+Hello, Flag!
+```
+
+现在连自动生成的文档里的示例输出都不对了：9 月 10 日之前的文档存档显示的是预期的、正确的行为，而当前版本的文档展示出来的就是这个 bug。
+
+- Python 版本：3.11
+- Click 版本：8.3.0",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 is_flag=False 配合 flag_value 时可省略选项值的文档约定、报错与预期输出。
+pallets__click-3224,en,medium,"tests/test_defaults.py::test_lookup_default_override_respected
+tests/test_defaults.py::test_lookup_default_returns_hides_sentinel[None-anything-None]
+tests/test_defaults.py::test_lookup_default_returns_hides_sentinel[default_map1-nonexistent-None]
+tests/test_defaults.py::test_lookup_default_returns_hides_sentinel[default_map3-anything-None]",`lookup_default` returns `Sentinel.UNSET` instead of `None`,"Upgrading click to 8.3.0 or 8.3.1 causes a regression in lookup_default
+
+# Reproduce
+
+Change the click dependency in the below reproduce case to 8.2.1 and the assertion does not fail.
+
+Install uv.  Run with `uv run repro_click_unset_regression.py` or simply `repro_click_unset_regression.py'.
+ 
+```python
+#!/usr/bin/env -S uv run
+# /// script
+# dependencies = [""click==8.3.1""]
+# ///
+""""""
+Run with uv installed:
+  repro_click_unset_regression.py
+Expected (pre 8.3.0): lookup_default returns the prefix-level default string or None.
+Actual (8.3.0+): returns Sentinel.UNSET instead of None.
+""""""
+import importlib.metadata
+import sys
+import click
+
+class CustomClickContext(click.Context):
+    def lookup_default(self, name: str, call: bool = False):
+        if call:
+            default = super().lookup_default(name, call=True)  # call: Literal[True]
+        else:
+            default = super().lookup_default(name, call=False)  # call: Literal[False]
+
+        # Original logic (kept to reproduce): treats any non-None (including sentinel) as a real default.
+        if default is not None:
+            return default
+        prefix = name.split(""_"", 1)[0]
+        group = getattr(self, ""default_map"", {}).get(prefix)
+        if group:
+            return group.get(name)
+        return default
+
+def describe(value):
+    cls = value.__class__
+    return {
+        ""repr"": repr(value),
+        ""type"": f""{cls.__module__}.{cls.__qualname__}"",
+        ""has_name_attr"": hasattr(value, ""name""),
+        ""name_attr"": getattr(value, ""name"", None),
+    }
+
+def main():
+    default_map = {""app"": {""email"": ""prefix-param-level@example.com""}}
+    cmd = click.Command(""get-views"")
+    ctx = CustomClickContext(cmd, info_name=None)
+    ctx.default_map = default_map
+
+    val = ctx.lookup_default(""email"", False)
+    info = describe(val)
+    print(f""click version (importlib.metadata): {importlib.metadata.version('click')}"")
+    print(""lookup_default raw:"", info)
+    # This assert fails under ≥ 8.3.0 because val is the internal Sentinel.UNSET object.
+    assert val is None, (
+        f""Regression: got {info['repr']} ({info['type']}) instead of expected builtins.NoneType""
+    )
+
+if __name__ == ""__main__"":
+    try:
+        main()
+    except AssertionError as e:
+        print(""AssertionError:"", e)
+        sys.exit(1)
+
+```
+
+# Expected
+Return None instead of internal Sentinel.UNSET detail.
+
+Environment:
+
+- Python version: 3.14
+- Click version: 8.30, 8.3.1
+",`lookup_default` 返回的是 `Sentinel.UNSET` 而不是 `None`,"把 click 升级到 8.3.0 或 8.3.1 之后，`lookup_default` 出现了回归。
+
+# 复现
+
+把下面复现脚本里的 click 依赖改成 8.2.1，断言就不会失败。
+
+先装好 uv，然后 `uv run repro_click_unset_regression.py`，或者直接运行 `repro_click_unset_regression.py`。
+
+```python
+#!/usr/bin/env -S uv run
+# /// script
+# dependencies = [""click==8.3.1""]
+# ///
+""""""
+Run with uv installed:
+  repro_click_unset_regression.py
+Expected (pre 8.3.0): lookup_default returns the prefix-level default string or None.
+Actual (8.3.0+): returns Sentinel.UNSET instead of None.
+""""""
+import importlib.metadata
+import sys
+import click
+
+class CustomClickContext(click.Context):
+    def lookup_default(self, name: str, call: bool = False):
+        if call:
+            default = super().lookup_default(name, call=True)  # call: Literal[True]
+        else:
+            default = super().lookup_default(name, call=False)  # call: Literal[False]
+
+        # Original logic (kept to reproduce): treats any non-None (including sentinel) as a real default.
+        if default is not None:
+            return default
+        prefix = name.split(""_"", 1)[0]
+        group = getattr(self, ""default_map"", {}).get(prefix)
+        if group:
+            return group.get(name)
+        return default
+
+def describe(value):
+    cls = value.__class__
+    return {
+        ""repr"": repr(value),
+        ""type"": f""{cls.__module__}.{cls.__qualname__}"",
+        ""has_name_attr"": hasattr(value, ""name""),
+        ""name_attr"": getattr(value, ""name"", None),
+    }
+
+def main():
+    default_map = {""app"": {""email"": ""prefix-param-level@example.com""}}
+    cmd = click.Command(""get-views"")
+    ctx = CustomClickContext(cmd, info_name=None)
+    ctx.default_map = default_map
+
+    val = ctx.lookup_default(""email"", False)
+    info = describe(val)
+    print(f""click version (importlib.metadata): {importlib.metadata.version('click')}"")
+    print(""lookup_default raw:"", info)
+    # This assert fails under ≥ 8.3.0 because val is the internal Sentinel.UNSET object.
+    assert val is None, (
+        f""Regression: got {info['repr']} ({info['type']}) instead of expected builtins.NoneType""
+    )
+
+if __name__ == ""__main__"":
+    try:
+        main()
+    except AssertionError as e:
+        print(""AssertionError:"", e)
+        sys.exit(1)
+
+```
+
+# 预期
+
+应该返回 `None`，而不是把内部实现细节 `Sentinel.UNSET` 暴露出来。
+
+环境：
+
+- Python 版本：3.14
+- Click 版本：8.3.0、8.3.1",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 lookup_default 应返回 None 而非 Sentinel.UNSET 的需求、完整脚本及版本对照。
+pallets__click-3225,en,medium,"tests/test_defaults.py::test_default_map_with_callable_flag_value[None-args0-_Marker]
+tests/test_options.py::test_callable_flag_value_get_default_override[opt_params0-True-Class1]
+tests/test_options.py::test_callable_flag_value_get_default_override[opt_params1-True-upper]
+tests/test_options.py::test_callable_flag_value_not_instantiated[opt_params0-args0-Class1]
+tests/test_options.py::test_callable_flag_value_not_instantiated[opt_params2-args2-<class 'test_options.Class1'>]",Using a class as a `flag_value` causes the default to be instantiated in click 8.3.0,"Consider the following code:
+
+```python
+import click
+
+class Foo:
+    pass
+
+class Bar:
+    pass
+
+@click.command()
+@click.option(""--foo"", ""ty"", flag_value=Foo, type=click.UNPROCESSED, default=True)
+@click.option(""--bar"", ""ty"", flag_value=Bar, type=click.UNPROCESSED)
+def main(ty):
+    click.echo(repr(ty))
+
+if __name__ == ""__main__"":
+    main()
+```
+
+When run with no arguments using click 8.3.0, this prints `<__main__.Foo object at 0x10bed92b0>`, indicating that `Foo` has been instantiated, which is not what I want.  When using an older version of click, the script outputs `<class '__main__.Foo'>`, which is what I want.
+
+If the script is passed an explicit `--foo` or `--bar` option, a class is output, indicating that the problem lies with the default handling.
+
+Changing the `default=True` to `default=Foo` does not help.",click 8.3.0 里用类当 `flag_value` 时，默认值会被实例化,"看下面这段代码：
+
+```python
+import click
+
+class Foo:
+    pass
+
+class Bar:
+    pass
+
+@click.command()
+@click.option(""--foo"", ""ty"", flag_value=Foo, type=click.UNPROCESSED, default=True)
+@click.option(""--bar"", ""ty"", flag_value=Bar, type=click.UNPROCESSED)
+def main(ty):
+    click.echo(repr(ty))
+
+if __name__ == ""__main__"":
+    main()
+```
+
+用 click 8.3.0 不带参数运行，打印的是 `<__main__.Foo object at 0x10bed92b0>`——说明 `Foo` 被实例化了，这不是我想要的。用旧版本的 click 运行，输出是 `<class '__main__.Foo'>`，这才是我要的。
+
+如果显式传 `--foo` 或 `--bar`，输出的是类本身，说明问题出在默认值的处理上。
+
+把 `default=True` 改成 `default=Foo` 也没用。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留类作为 flag_value 时默认值应为类本身而非实例的需求与显式传参对照。
+pallets__click-3244,en,hard,tests/test_testing.py::test_faulthandler_enable,"`CliRunner` causes `subprocess.run(..., stdout=sys.stderr)` to raise `UnsupportedOperation`","``` console
+$ tree
+.
+├── Pipfile
+├── Pipfile.lock
+├── sscce.py
+└── test_sscce.py
+
+0 directories, 4 files
+```
+<details>
+<summary>Pipfile(.lock)</summary>
+
+``` toml
+# Pipfile
+[[source]]
+url = ""https://pypi.org/simple""
+verify_ssl = true
+name = ""pypi""
+
+[packages]
+click = {version = ""*""}
+pytest = {version = ""*""}
+
+[dev-packages]
+
+[requires]
+python_version = ""3.8""
+```
+``` json
+{
+    ""_meta"": {
+        ""hash"": {
+            ""sha256"": ""bf73778e75cb7de62f2ca45f686cd2b85cca37b4ab33417a54b77cc8a6ff3f97""
+        },
+        ""pipfile-spec"": 6,
+        ""requires"": {
+            ""python_version"": ""3.8""
+        },
+        ""sources"": [
+            {
+                ""name"": ""pypi"",
+                ""url"": ""https://pypi.org/simple"",
+                ""verify_ssl"": true
+            }
+        ]
+    },
+    ""default"": {
+        ""attrs"": {
+            ""hashes"": [
+                ""sha256:29adc2665447e5191d0e7c568fde78b21f9672d344281d0c6e1ab085429b22b6"",
+                ""sha256:86efa402f67bf2df34f51a335487cf46b1ec130d02b8d39fd248abfd30da551c""
+            ],
+            ""markers"": ""python_version >= '3.5'"",
+            ""version"": ""==22.1.0""
+        },
+        ""click"": {
+            ""hashes"": [
+                ""sha256:7682dc8afb30297001674575ea00d1814d808d6a36af415a82bd481d37ba7b8e"",
+                ""sha256:bb4d8133cb15a609f44e8213d9b391b0809795062913b383c62be0ee95b1db48""
+            ],
+            ""index"": ""pypi"",
+            ""markers"": null,
+            ""version"": ""==8.1.3""
+        },
+        ""exceptiongroup"": {
+            ""hashes"": [
+                ""sha256:542adf9dea4055530d6e1279602fa5cb11dab2395fa650b8674eaec35fc4a828"",
+                ""sha256:bd14967b79cd9bdb54d97323216f8fdf533e278df937aa2a90089e7d6e06e5ec""
+            ],
+            ""markers"": ""python_version < '3.11'"",
+            ""version"": ""==1.0.4""
+        },
+        ""iniconfig"": {
+            ""hashes"": [
+                ""sha256:011e24c64b7f47f6ebd835bb12a743f2fbe9a26d4cecaa7f53bc4f35ee9da8b3"",
+                ""sha256:bc3af051d7d14b2ee5ef9969666def0cd1a000e121eaea580d4a313df4b37f32""
+            ],
+            ""version"": ""==1.1.1""
+        },
+        ""packaging"": {
+            ""hashes"": [
+                ""sha256:dd47c42927d89ab911e606518907cc2d3a1f38bbd026385970643f9c5b8ecfeb"",
+                ""sha256:ef103e05f519cdc783ae24ea4e2e0f508a9c99b2d4969652eed6a2e1ea5bd522""
+            ],
+            ""markers"": ""python_version >= '3.6'"",
+            ""version"": ""==21.3""
+        },
+        ""pluggy"": {
+            ""hashes"": [
+                ""sha256:4224373bacce55f955a878bf9cfa763c1e360858e330072059e10bad68531159"",
+                ""sha256:74134bbf457f031a36d68416e1509f34bd5ccc019f0bcc952c7b909d06b37bd3""
+            ],
+            ""markers"": ""python_version >= '3.6'"",
+            ""version"": ""==1.0.0""
+        },
+        ""pyparsing"": {
+            ""hashes"": [
+                ""sha256:2b020ecf7d21b687f219b71ecad3631f644a47f01403fa1d1036b0c6416d70fb"",
+                ""sha256:5026bae9a10eeaefb61dab2f09052b9f4307d44aee4eda64b309723d8d206bbc""
+            ],
+            ""markers"": ""python_full_version >= '3.6.8'"",
+            ""version"": ""==3.0.9""
+        },
+        ""pytest"": {
+            ""hashes"": [
+                ""sha256:892f933d339f068883b6fd5a459f03d85bfcb355e4981e146d2c7616c21fef71"",
+                ""sha256:c4014eb40e10f11f355ad4e3c2fb2c6c6d1919c73f3b5a433de4708202cade59""
+            ],
+            ""index"": ""pypi"",
+            ""markers"": null,
+            ""version"": ""==7.2.0""
+        },
+        ""tomli"": {
+            ""hashes"": [
+                ""sha256:939de3e7a6161af0c887ef91b7d41a53e7c5a1ca976325f429cb46ea9bc30ecc"",
+                ""sha256:de526c12914f0c550d15924c62d72abc48d6fe7364aa87328337a31007fe8a4f""
+            ],
+            ""markers"": ""python_version < '3.11'"",
+            ""version"": ""==2.0.1""
+        }
+    },
+    ""develop"": {}
+}
+```
+
+</details>
+
+tl;dr: `click==8.1.3` on Ubuntu 20.04.5 LTS
+
+``` python
+""""""sscce.py""""""
+import subprocess
+import sys
+
+import click
+
+
+@click.command
+def main():
+    subprocess.run([""echo"", ""foo""], stdout=sys.stderr)
+
+
+if __name__ == ""__main__"":
+    main()
+```
+``` python
+""""""test_sscce.py""""""
+from click.testing import CliRunner
+
+import sscce
+
+
+def test_main():
+    CliRunner().invoke(sscce.main, [], catch_exceptions=False)
+```
+``` sh
+# pipenv isn't needed unless you want the exact deps I used.
+pipenv install --deploy
+pipenv run pytest test_sscce.py
+```
+```
+============================= test session starts ==============================
+platform linux -- Python 3.8.12, pytest-7.2.0, pluggy-1.0.0
+rootdir: /tmp/tmp.dR7fnRzrtk
+collected 1 item
+
+test_sscce.py F                                                          [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_main ___________________________________
+
+    def test_main():
+>       CliRunner().invoke(sscce.main, [], catch_exceptions=False)
+
+test_sscce.py:8:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/testing.py:408: in invoke
+    return_value = cli.main(args=args or (), prog_name=prog_name, **extra)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:1055: in main
+    rv = self.invoke(ctx)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:1404: in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:760: in invoke
+    return __callback(*args, **kwargs)
+sscce.py:10: in main
+    subprocess.run([""echo"", ""foo""], stdout=sys.stderr)
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:493: in run
+    with Popen(*popenargs, **kwargs) as process:
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:808: in __init__
+    errread, errwrite) = self._get_handles(stdin, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <subprocess.Popen object at 0x7f5d37ccfb80>, stdin = None
+stdout = <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>
+stderr = None
+
+    def _get_handles(self, stdin, stdout, stderr):
+        """"""Construct and return tuple with IO objects:
+        p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite
+        """"""
+        p2cread, p2cwrite = -1, -1
+        c2pread, c2pwrite = -1, -1
+        errread, errwrite = -1, -1
+
+        if stdin is None:
+            pass
+        elif stdin == PIPE:
+            p2cread, p2cwrite = os.pipe()
+        elif stdin == DEVNULL:
+            p2cread = self._get_devnull()
+        elif isinstance(stdin, int):
+            p2cread = stdin
+        else:
+            # Assuming file-like object
+            p2cread = stdin.fileno()
+
+        if stdout is None:
+            pass
+        elif stdout == PIPE:
+            c2pread, c2pwrite = os.pipe()
+        elif stdout == DEVNULL:
+            c2pwrite = self._get_devnull()
+        elif isinstance(stdout, int):
+            c2pwrite = stdout
+        else:
+            # Assuming file-like object
+>           c2pwrite = stdout.fileno()
+E           io.UnsupportedOperation: fileno
+
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:1489: UnsupportedOperation
+=========================== short test summary info ============================
+FAILED test_sscce.py::test_main - io.UnsupportedOperation: fileno
+============================== 1 failed in 0.23s ===============================
+```
+The script works fine when invoked directly:
+``` console
+$ pipenv run python sscce.py > /dev/null
+foo
+```
+
+---
+
+It looks like the output redirection for `CliRunner` doesn't play nicely with Python's `faulthandler` library, as it terminates prematurely with the following backtrace (slightly modified to hide local filesystem details):
+
+```pytb
+Traceback (most recent call last):
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/testing.py"", line 408, in invoke
+    return_value = cli.main(args=args or (), prog_name=prog_name, **extra)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 1078, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 1434, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 783, in invoke
+    return __callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""./test_click.py"", line 12, in main
+    faulthandler.enable()
+io.UnsupportedOperation: fileno
+```
+
+Code for `test_click.py` that replicates the problem:
+
+```python
+import click
+from click.testing import CliRunner
+import faulthandler
+import traceback
+
+@click.command()
+@click.option('--flag', type=bool, default=True)
+def main(flag):
+    print(""Executing main function..."")
+    if flag:
+      print(""Registering faulthandler"")
+      faulthandler.enable()
+    print(""Finished executing main function."")
+
+if __name__ == '__main__':
+    flag_value = True
+    runner = CliRunner()
+    result = runner.invoke(main, [""--flag"", flag_value])
+    print(""Exit code = %d; contents of stdout:\n%s"" % (result.exit_code, result.stdout))
+    if result.exit_code != 0:
+        traceback.print_exception(result.exc_info[1])
+```
+
+The code was then executed by running `python test_click.py`
+
+I assume the problem is that the `CliRunner` redirected stderr doesn't implement some details that are required by the `faulthandler` signal handler registration. Ideally, it should just work; or at least, it should avoid crashing and just do nothing (and perhaps be documented somewhere).
+
+Environment:
+
+- Python version: 3.11.10
+- Click version: 8.1.7
+","`CliRunner` 会让 `subprocess.run(..., stdout=sys.stderr)` 抛出 `UnsupportedOperation`","``` console
+$ tree
+.
+├── Pipfile
+├── Pipfile.lock
+├── sscce.py
+└── test_sscce.py
+
+0 directories, 4 files
+```
+<details>
+<summary>Pipfile(.lock)</summary>
+
+``` toml
+# Pipfile
+[[source]]
+url = ""https://pypi.org/simple""
+verify_ssl = true
+name = ""pypi""
+
+[packages]
+click = {version = ""*""}
+pytest = {version = ""*""}
+
+[dev-packages]
+
+[requires]
+python_version = ""3.8""
+```
+``` json
+{
+    ""_meta"": {
+        ""hash"": {
+            ""sha256"": ""bf73778e75cb7de62f2ca45f686cd2b85cca37b4ab33417a54b77cc8a6ff3f97""
+        },
+        ""pipfile-spec"": 6,
+        ""requires"": {
+            ""python_version"": ""3.8""
+        },
+        ""sources"": [
+            {
+                ""name"": ""pypi"",
+                ""url"": ""https://pypi.org/simple"",
+                ""verify_ssl"": true
+            }
+        ]
+    },
+    ""default"": {
+        ""attrs"": {
+            ""hashes"": [
+                ""sha256:29adc2665447e5191d0e7c568fde78b21f9672d344281d0c6e1ab085429b22b6"",
+                ""sha256:86efa402f67bf2df34f51a335487cf46b1ec130d02b8d39fd248abfd30da551c""
+            ],
+            ""markers"": ""python_version >= '3.5'"",
+            ""version"": ""==22.1.0""
+        },
+        ""click"": {
+            ""hashes"": [
+                ""sha256:7682dc8afb30297001674575ea00d1814d808d6a36af415a82bd481d37ba7b8e"",
+                ""sha256:bb4d8133cb15a609f44e8213d9b391b0809795062913b383c62be0ee95b1db48""
+            ],
+            ""index"": ""pypi"",
+            ""markers"": null,
+            ""version"": ""==8.1.3""
+        },
+        ""exceptiongroup"": {
+            ""hashes"": [
+                ""sha256:542adf9dea4055530d6e1279602fa5cb11dab2395fa650b8674eaec35fc4a828"",
+                ""sha256:bd14967b79cd9bdb54d97323216f8fdf533e278df937aa2a90089e7d6e06e5ec""
+            ],
+            ""markers"": ""python_version < '3.11'"",
+            ""version"": ""==1.0.4""
+        },
+        ""iniconfig"": {
+            ""hashes"": [
+                ""sha256:011e24c64b7f47f6ebd835bb12a743f2fbe9a26d4cecaa7f53bc4f35ee9da8b3"",
+                ""sha256:bc3af051d7d14b2ee5ef9969666def0cd1a000e121eaea580d4a313df4b37f32""
+            ],
+            ""version"": ""==1.1.1""
+        },
+        ""packaging"": {
+            ""hashes"": [
+                ""sha256:dd47c42927d89ab911e606518907cc2d3a1f38bbd026385970643f9c5b8ecfeb"",
+                ""sha256:ef103e05f519cdc783ae24ea4e2e0f508a9c99b2d4969652eed6a2e1ea5bd522""
+            ],
+            ""markers"": ""python_version >= '3.6'"",
+            ""version"": ""==21.3""
+        },
+        ""pluggy"": {
+            ""hashes"": [
+                ""sha256:4224373bacce55f955a878bf9cfa763c1e360858e330072059e10bad68531159"",
+                ""sha256:74134bbf457f031a36d68416e1509f34bd5ccc019f0bcc952c7b909d06b37bd3""
+            ],
+            ""markers"": ""python_version >= '3.6'"",
+            ""version"": ""==1.0.0""
+        },
+        ""pyparsing"": {
+            ""hashes"": [
+                ""sha256:2b020ecf7d21b687f219b71ecad3631f644a47f01403fa1d1036b0c6416d70fb"",
+                ""sha256:5026bae9a10eeaefb61dab2f09052b9f4307d44aee4eda64b309723d8d206bbc""
+            ],
+            ""markers"": ""python_full_version >= '3.6.8'"",
+            ""version"": ""==3.0.9""
+        },
+        ""pytest"": {
+            ""hashes"": [
+                ""sha256:892f933d339f068883b6fd5a459f03d85bfcb355e4981e146d2c7616c21fef71"",
+                ""sha256:c4014eb40e10f11f355ad4e3c2fb2c6c6d1919c73f3b5a433de4708202cade59""
+            ],
+            ""index"": ""pypi"",
+            ""markers"": null,
+            ""version"": ""==7.2.0""
+        },
+        ""tomli"": {
+            ""hashes"": [
+                ""sha256:939de3e7a6161af0c887ef91b7d41a53e7c5a1ca976325f429cb46ea9bc30ecc"",
+                ""sha256:de526c12914f0c550d15924c62d72abc48d6fe7364aa87328337a31007fe8a4f""
+            ],
+            ""markers"": ""python_version < '3.11'"",
+            ""version"": ""==2.0.1""
+        }
+    },
+    ""develop"": {}
+}
+```
+
+</details>
+
+一句话总结：`click==8.1.3`，Ubuntu 20.04.5 LTS。
+
+``` python
+""""""sscce.py""""""
+import subprocess
+import sys
+
+import click
+
+
+@click.command
+def main():
+    subprocess.run([""echo"", ""foo""], stdout=sys.stderr)
+
+
+if __name__ == ""__main__"":
+    main()
+```
+``` python
+""""""test_sscce.py""""""
+from click.testing import CliRunner
+
+import sscce
+
+
+def test_main():
+    CliRunner().invoke(sscce.main, [], catch_exceptions=False)
+```
+``` sh
+# pipenv isn't needed unless you want the exact deps I used.
+pipenv install --deploy
+pipenv run pytest test_sscce.py
+```
+```
+============================= test session starts ==============================
+platform linux -- Python 3.8.12, pytest-7.2.0, pluggy-1.0.0
+rootdir: /tmp/tmp.dR7fnRzrtk
+collected 1 item
+
+test_sscce.py F                                                          [100%]
+
+=================================== FAILURES ===================================
+__________________________________ test_main ___________________________________
+
+    def test_main():
+>       CliRunner().invoke(sscce.main, [], catch_exceptions=False)
+
+test_sscce.py:8:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/testing.py:408: in invoke
+    return_value = cli.main(args=args or (), prog_name=prog_name, **extra)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:1055: in main
+    rv = self.invoke(ctx)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:1404: in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+/ifs/home/dtucker/.local/share/virtualenvs/tmp.dR7fnRzrtk-jIAzfqD4/lib/python3.8/site-packages/click/core.py:760: in invoke
+    return __callback(*args, **kwargs)
+sscce.py:10: in main
+    subprocess.run([""echo"", ""foo""], stdout=sys.stderr)
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:493: in run
+    with Popen(*popenargs, **kwargs) as process:
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:808: in __init__
+    errread, errwrite) = self._get_handles(stdin, stdout, stderr)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <subprocess.Popen object at 0x7f5d37ccfb80>, stdin = None
+stdout = <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>
+stderr = None
+
+    def _get_handles(self, stdin, stdout, stderr):
+        """"""Construct and return tuple with IO objects:
+        p2cread, p2cwrite, c2pread, c2pwrite, errread, errwrite
+        """"""
+        p2cread, p2cwrite = -1, -1
+        c2pread, c2pwrite = -1, -1
+        errread, errwrite = -1, -1
+
+        if stdin is None:
+            pass
+        elif stdin == PIPE:
+            p2cread, p2cwrite = os.pipe()
+        elif stdin == DEVNULL:
+            p2cread = self._get_devnull()
+        elif isinstance(stdin, int):
+            p2cread = stdin
+        else:
+            # Assuming file-like object
+            p2cread = stdin.fileno()
+
+        if stdout is None:
+            pass
+        elif stdout == PIPE:
+            c2pread, c2pwrite = os.pipe()
+        elif stdout == DEVNULL:
+            c2pwrite = self._get_devnull()
+        elif isinstance(stdout, int):
+            c2pwrite = stdout
+        else:
+            # Assuming file-like object
+>           c2pwrite = stdout.fileno()
+E           io.UnsupportedOperation: fileno
+
+/ifs/home/dtucker/.pyenv/versions/3.8.12/lib/python3.8/subprocess.py:1489: UnsupportedOperation
+=========================== short test summary info ============================
+FAILED test_sscce.py::test_main - io.UnsupportedOperation: fileno
+============================== 1 failed in 0.23s ===============================
+```
+直接运行这个脚本是完全正常的：
+``` console
+$ pipenv run python sscce.py > /dev/null
+foo
+```
+
+---
+
+另外，`CliRunner` 的输出重定向和 Python 自带的 `faulthandler` 库也合不来：程序会提前中止，并给出下面的回溯（为了隐藏本地路径细节稍微改了一下）：
+
+```pytb
+Traceback (most recent call last):
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/testing.py"", line 408, in invoke
+    return_value = cli.main(args=args or (), prog_name=prog_name, **extra)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 1078, in main
+    rv = self.invoke(ctx)
+         ^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 1434, in invoke
+    return ctx.invoke(self.callback, **ctx.params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""$CONDA_PREFIX/lib/python3.11/site-packages/click/core.py"", line 783, in invoke
+    return __callback(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""./test_click.py"", line 12, in main
+    faulthandler.enable()
+io.UnsupportedOperation: fileno
+```
+
+复现这个问题的 `test_click.py`：
+
+```python
+import click
+from click.testing import CliRunner
+import faulthandler
+import traceback
+
+@click.command()
+@click.option('--flag', type=bool, default=True)
+def main(flag):
+    print(""Executing main function..."")
+    if flag:
+      print(""Registering faulthandler"")
+      faulthandler.enable()
+    print(""Finished executing main function."")
+
+if __name__ == '__main__':
+    flag_value = True
+    runner = CliRunner()
+    result = runner.invoke(main, [""--flag"", flag_value])
+    print(""Exit code = %d; contents of stdout:\n%s"" % (result.exit_code, result.stdout))
+    if result.exit_code != 0:
+        traceback.print_exception(result.exc_info[1])
+```
+
+运行方式是 `python test_click.py`。
+
+我猜问题在于 `CliRunner` 重定向后的 stderr 没有实现 `faulthandler` 注册信号处理器时需要的某些细节。理想情况下它应该直接能用；退一步说，至少不应该崩溃，而是什么都不做（并且最好在文档里说明一下）。
+
+环境：
+
+- Python 版本：3.11.10
+- Click 版本：8.1.7",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 subprocess 与 faulthandler 两个场景、完整复现及原文允许的退让行为。
+pallets__click-3256,en,medium,"tests/test_termui.py::test_hide_input_error_message[apostrophe-in-value-uses-double-quote-repr]
+tests/test_termui.py::test_hide_input_error_message[builtin-int-masks-repr-value]
+tests/test_termui.py::test_hide_input_error_message[custom-no-value-shows-message]
+tests/test_termui.py::test_hide_input_error_message[custom-raw-value-masked]
+tests/test_termui.py::test_hide_input_error_message[intrange-numeric-substring-falls-back-to-generic]
+tests/test_termui.py::test_hide_input_error_message[mixed-quoted-and-raw-both-masked-at-source]
+tests/test_termui.py::test_hide_input_error_message[mixed-quoted-and-raw-mask-both]
+tests/test_termui.py::test_hide_input_error_message[multi-occurrence-raw-mask-all]
+tests/test_termui.py::test_hide_input_error_message[multi-occurrence-repr-mask-all]
+tests/test_termui.py::test_hide_input_error_message[partial-word-match-falls-back-to-generic]
+tests/test_termui.py::test_hide_input_error_message[raw-value-should-be-masked-not-fallback]
+tests/test_termui.py::test_hide_input_error_message[regex-special-chars-must-be-escaped]
+tests/test_termui.py::test_hide_input_error_message[unicode-value-masked]
+tests/test_termui.py::test_hide_input_error_message[unquoted-custom-message-should-mask-not-fallback]",`@click.Option` with `'hide_input' = True` (used for password) and custom `type` parameter doesn't show custom error message,"I use @click.Option with 'hide_input' = True and custom 'type' parameter for password prompt with raise click.BadParameter (it inheriths class UsageError). And if the password failed the code doesn't show custom error message, but standard message ""Error: The value you entered was invalid""
+
+Standard message comes from termui.py file: ~172 line - 
+```python
+        except UsageError as e:
+            if hide_input:
+                echo(_(""Error: The value you entered was invalid.""), err=err)
+            else:
+                echo(_(""Error: {e.message}"").format(e=e), err=err)  # noqa: B306
+            continue
+```
+Because it checks hide_input parameter and if it True (and it is really True as i hide_input because of the password) it give the error ""Error: The value you entered was invalid"". When hide_input is False - it gives me my custom message.
+
+If i use click.ClickException exception class it give me my error, but stops the promt, so i have to start from the beginning.
+If i make hide_input = False - the password is visible on the screen and i recieve my custom message. But it is wrong for password entry.
+
+Here is the example how to replicate my error. 
+Run the code and enter ""1234"".
+The message i expect ""Error: Your password is week. Use 'Minimum eight characters, at least one letter and one number""
+
+```python
+import click
+import re
+
+class PassRequirement(click.ParamType):
+    """"""Click check class for password""""""
+
+    name = ""Password requirements""
+
+    def convert(self, value, param, ctx):
+        pw_req = ""Minimum eight characters, at least one letter and one number""
+        pw_strength = r""^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$""
+
+        if re.match(pw_strength, value):
+            return value
+
+        self.fail(f""Your password is week. Use {pw_req!r}"", param, ctx)
+
+    def fail(self, message="""", param=None, ctx=None):
+        raise click.BadParameter(message, ctx, param)
+        # raise click.ClickException(message) - # works well, shows my message, but stops the promt, so i have to start the command from the beginning.
+
+PASS_REQUIREMENT = PassRequirement()
+
+@click.command()
+@click.option(""-password"", help=""Password"", prompt=True, confirmation_prompt=True, hide_input=True,
+              type=PASS_REQUIREMENT)
+def pw(password):
+    print(f'PASSWORD: {password}')
+
+
+if __name__ == '__main__':
+    pw()
+
+```
+
+Environment:
+- Python version: 3.12.7
+- Click version: 8.1.7
+",`@click.Option` 同时设置 `hide_input=True`（密码输入）和自定义 `type` 时，不显示自定义错误信息,"我用 @click.Option 做密码提示输入，设置了 'hide_input' = True，并且给了一个自定义的 'type'，校验不通过时抛 click.BadParameter（它继承自 UsageError）。结果密码校验失败时，代码显示的不是我自定义的错误信息，而是标准的那句 ""Error: The value you entered was invalid""。
+
+这句标准信息来自 termui.py 大约第 172 行：
+```python
+        except UsageError as e:
+            if hide_input:
+                echo(_(""Error: The value you entered was invalid.""), err=err)
+            else:
+                echo(_(""Error: {e.message}"").format(e=e), err=err)  # noqa: B306
+            continue
+```
+它检查 hide_input 参数，为 True（我输密码当然要隐藏输入，所以确实是 True）时就报 ""Error: The value you entered was invalid""。hide_input 为 False 时，显示的就是我的自定义信息。
+
+如果改用 click.ClickException 这个异常类，能看到我的错误信息，但提示流程会被中断，我得从头重新开始。
+如果把 hide_input 设成 False，密码会明文显示在屏幕上，虽然能收到自定义信息，但对密码输入来说这是不对的。
+
+下面是复现的例子。运行代码，输入 ""1234""。
+我期望看到的信息是 ""Error: Your password is week. Use 'Minimum eight characters, at least one letter and one number""
+
+```python
+import click
+import re
+
+class PassRequirement(click.ParamType):
+    """"""Click check class for password""""""
+
+    name = ""Password requirements""
+
+    def convert(self, value, param, ctx):
+        pw_req = ""Minimum eight characters, at least one letter and one number""
+        pw_strength = r""^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d]{8,}$""
+
+        if re.match(pw_strength, value):
+            return value
+
+        self.fail(f""Your password is week. Use {pw_req!r}"", param, ctx)
+
+    def fail(self, message="""", param=None, ctx=None):
+        raise click.BadParameter(message, ctx, param)
+        # raise click.ClickException(message) - # works well, shows my message, but stops the promt, so i have to start the command from the beginning.
+
+PASS_REQUIREMENT = PassRequirement()
+
+@click.command()
+@click.option(""-password"", help=""Password"", prompt=True, confirmation_prompt=True, hide_input=True,
+              type=PASS_REQUIREMENT)
+def pw(password):
+    print(f'PASSWORD: {password}')
+
+
+if __name__ == '__main__':
+    pw()
+
+```
+
+环境：
+- Python 版本：3.12.7
+- Click 版本：8.1.7",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留隐藏密码输入时显示自定义校验错误且不中断提示的诉求，源码片段及定位均来自原文。
+pallets__click-3363,en,medium,tests/test_options.py::test_flag_value_not_stringified_for_custom_types,`flag_value` is passed through `ParamType.convert`,"In upgrading from click 7.1.2 to 8.0.1, our click-based CLI started failing with type errors. We have click options whose default values are classes, and as of 8.0.1 they're being converted to strings.
+
+This script is able to reproduce the behavior change:
+
+```python
+import click
+
+class Class1:
+    pass
+
+class Class2:
+    pass
+
+@click.command()
+@click.option(""--cls1"", ""config_cls"", flag_value=Class1, default=True)
+@click.option(""--cls2"", ""config_cls"", flag_value=Class2)
+def test(config_cls):
+    print(config_cls)
+    print(type(config_cls))
+
+if __name__ == ""__main__"":
+    test()
+
+```
+
+Behavior with click 7.1.2:
+```shell-session
+# pip freeze | grep click
+click==7.1.2
+# python test.py
+<class '__main__.Class1'>
+<class 'type'>
+```
+
+Behavior with 8.0.1:
+```shell-session
+# pip freeze | grep click
+click==8.0.1
+# python test.py
+<class '__main__.Class1'>
+<class 'str'>
+```
+
+The type of `config_cls` should be the class we specified, not 'str'.
+
+
+Environment:
+
+- Python version: 3.9
+- Click version: 8.0.1
+",`flag_value` 被送进了 `ParamType.convert`，类被转成了字符串,"我们把 click 从 7.1.2 升到 8.0.1 之后，基于 click 的命令行工具开始报类型错误。我们有一些选项的默认值是类（class），从 8.0.1 起它们被转换成了字符串。
+
+下面这个脚本可以复现这个行为变化：
+
+```python
+import click
+
+class Class1:
+    pass
+
+class Class2:
+    pass
+
+@click.command()
+@click.option(""--cls1"", ""config_cls"", flag_value=Class1, default=True)
+@click.option(""--cls2"", ""config_cls"", flag_value=Class2)
+def test(config_cls):
+    print(config_cls)
+    print(type(config_cls))
+
+if __name__ == ""__main__"":
+    test()
+
+```
+
+click 7.1.2 的行为：
+```shell-session
+# pip freeze | grep click
+click==7.1.2
+# python test.py
+<class '__main__.Class1'>
+<class 'type'>
+```
+
+8.0.1 的行为：
+```shell-session
+# pip freeze | grep click
+click==8.0.1
+# python test.py
+<class '__main__.Class1'>
+<class 'str'>
+```
+
+`config_cls` 的类型应该是我们指定的那个类，而不是 'str'。
+
+
+环境：
+
+- Python 版本：3.9
+- Click 版本：8.0.1",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留升级后 flag_value 中的类被转成字符串的回归及预期类型，未增加转换实现细节。
+pallets__click-3434,en,medium,"tests/test_formatting.py::test_command_write_usage_no_args[empty-options-metavar-no-params]
+tests/test_formatting.py::test_command_write_usage_no_args[none-options-metavar-no-params]
+tests/test_formatting.py::test_help_formatter_write_usage[empty-args-custom-prefix]
+tests/test_formatting.py::test_help_formatter_write_usage[empty-args-default-prefix]
+tests/test_formatting.py::test_help_formatter_write_usage[empty-args-indented]
+tests/test_formatting.py::test_help_formatter_write_usage[empty-args-long-prog]
+tests/test_formatting.py::test_help_formatter_write_usage_without_args_styled_prefix",Empty output from `HelpFormatter.write_usage` for a program without arguments,"If no `args` are passed to `HelpFormatter.write_usage`, the Usage line is not printed.
+
+### Reproduction
+
+```python
+import click
+
+f = click.HelpFormatter()
+f.write_usage(""program"")
+print(f.getvalue())
+```
+<!--
+Describe how to replicate the bug.
+
+Include a minimal reproducible example that demonstrates the bug.
+Include the full traceback if there was an exception.
+-->
+
+### Expected output
+```
+Usage: program
+```
+
+### Actual output
+(an empty line)
+
+### Environment
+
+- Python version: 3.12.3
+- Click version: 8.3.1
+
+### Additional information
+
+We use `click` for a CLI program with interactive mode. We are about to use `click.HelpFormatter` to print help for internal commands, some of which do not accept any arguments (`exit`, for example).",程序不带参数时 `HelpFormatter.write_usage` 输出为空,"调用 `HelpFormatter.write_usage` 时如果不传 `args`，Usage 那一行就不会被打印出来。
+
+### 复现
+
+```python
+import click
+
+f = click.HelpFormatter()
+f.write_usage(""program"")
+print(f.getvalue())
+```
+
+### 预期输出
+```
+Usage: program
+```
+
+### 实际输出
+（一个空行）
+
+### 环境
+
+- Python 版本：3.12.3
+- Click 版本：8.3.1
+
+### 补充说明
+
+我们用 `click` 写了一个带交互模式的命令行程序，正准备用 `click.HelpFormatter` 给内部命令打印帮助，其中有些命令不接受任何参数（比如 `exit`）。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留无 args 时仍应显示 Usage 的要求、复现和交互式内部命令场景。
+pallets__click-3466,en,medium,tests/test_shell_completion.py::test_source_uses_lf_line_endings,zsh completion setup fails with 'parse error near elif',"  When setting up zsh on the back of git for Windows bash shell, zsh throws a parse error when setting up autocomplete.
+                                              
+  Note: using this in a Python venv, but other aspects of the zsh command line are working.
+                                                                                                                                                                                                                           
+  The zsh in use is the msys2 release: https://packages.msys2.org/packages/zsh?repo=msys&variant=x86_64                                                                                                                    
+   
+  ## Minimal Reproduction
+
+  https://github.com/msaipraneeth/click-tuple-param
+                                                                                                                                                                                                                        
+  Enable autocompletion:                                                                                                                                                                                                   
+                                                                                                                                                                                                                           
+  ```bash
+  eval ""$(_TUPLE_PARAM_COMPLETE=zsh_source tuple-param)""                                                                                                                                                                   
+   ```                                        
+  
+```bash
+Error:                                  
+
+  zsh: parse error near `elif'                                                                                                                                                                                             
+```   
+                  
+  The command should register zsh completion without errors.
+
+  Environment:
+
+  - Python version: 3.11
+  - Click version: 8.3.1
+",zsh 补全脚本加载失败：parse error near `elif',"我在 Windows 上，在 Git for Windows 的 bash 之上用 zsh。给命令配置自动补全的时候，zsh 报了一个语法解析错误。
+
+说明：命令是在 Python venv 里用的，zsh 命令行的其他功能都是正常的。
+
+用的 zsh 是 msys2 发布的那个版本（packages.msys2.org 上 msys 仓库的 zsh，x86_64）。
+
+## 最小复现
+
+最小复现在 GitHub 仓库 msaipraneeth/click-tuple-param 里。
+
+启用自动补全：
+
+```bash
+eval ""$(_TUPLE_PARAM_COMPLETE=zsh_source tuple-param)""
+```
+
+报错：
+
+```bash
+Error:
+
+  zsh: parse error near `elif'
+```
+
+预期是这条命令能正常注册 zsh 补全，不报任何错误。
+
+环境：
+
+- 操作系统：Windows，msys2 的 zsh，跑在 Git for Windows 的 bash 里
+- Python 版本：3.11
+- Click 版本：8.3.1",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 Windows/MSYS2 zsh 环境、补全启用命令及 elif 解析错误，仅清理无意义空白。
+pallets__click-3482,en,medium,tests/test_testing.py::test_with_echo_via_pager,"""I/O operation on closed file"" error with CliRunner and echo_via_pager under 8.4","When `echo_via_pager` is used in the command, `CliRunner.invoke` fails with:
+
+> ValueError: I/O operation on closed file.
+
+This started happening with Click 8.4, does not happen with 8.3.3.
+
+Reproducer:
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+Environment:
+
+- OS: Ubuntu 24.04.4, Linux 6.17
+- Python version: 3.13.5
+- Click version: 8.4
+","8.4 下 CliRunner 配合 echo_via_pager 使用时报 ""I/O operation on closed file""","命令里用了 `echo_via_pager` 之后，`CliRunner.invoke` 会失败，报：
+
+> ValueError: I/O operation on closed file.
+
+这个问题从 Click 8.4 开始出现，8.3.3 上没有。
+
+复现代码：
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+回溯：
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+环境：
+
+- 操作系统：Ubuntu 24.04.4，Linux 6.17
+- Python 版本：3.13.5
+- Click 版本：8.4",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 CliRunner 与 echo_via_pager 的关闭文件异常、复现和版本对照。
+pallets__click-3484,en,medium,"tests/test_defaults.py::test_flask_debug_env_not_stomped_by_default_flag
+tests/test_defaults.py::test_parameter_source_during_eager_callback
+tests/test_defaults.py::test_parameter_source_during_paramtype_convert",`get_parameter_source()` returns `None` in 8.4.0,"Starting with 8.4, get_parameter_source() returns None.
+
+Repro:
+
+```python
+import click
+
+class Source(click.ParamType):
+    name = ""source""
+    def convert(self, value, param, ctx):
+        return {'value': value, 'source': ctx.get_parameter_source(param.name)}
+
+@click.command
+@click.option('--default', type=Source(), default='/tmp/file')
+@click.option('--nodefault', type=Source())
+def main(default, nodefault):
+    print(""default:"", default)
+    print(""nodefault:"", nodefault)
+
+if __name__ == '__main__':
+    main()
+```
+
+Output:
+
+```console
+$ pip install click==8.4.0 -q
+$ python source.py                  
+default: {'value': '/tmp/file', 'source': None}
+nodefault: None
+$ python source.py --default cli --nodefault cli
+default: {'value': 'cli', 'source': None}
+nodefault: {'value': 'cli', 'source': None}
+
+$ pip install click==8.3.3 -q                   
+$ python source.py                              
+default: {'value': '/tmp/file', 'source': <ParameterSource.DEFAULT: 5>}
+nodefault: None
+$ python source.py --default cli --nodefault cli
+default: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}
+nodefault: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}
+```
+
+Environment:
+
+- Python version: 3.14.4 (seems to happen on all versions, on both macOS and Linux)
+- Click version: 8.4.0
+",8.4.0 里 `get_parameter_source()` 返回 `None`,"从 8.4 开始，get_parameter_source() 返回的是 None。
+
+复现：
+
+```python
+import click
+
+class Source(click.ParamType):
+    name = ""source""
+    def convert(self, value, param, ctx):
+        return {'value': value, 'source': ctx.get_parameter_source(param.name)}
+
+@click.command
+@click.option('--default', type=Source(), default='/tmp/file')
+@click.option('--nodefault', type=Source())
+def main(default, nodefault):
+    print(""default:"", default)
+    print(""nodefault:"", nodefault)
+
+if __name__ == '__main__':
+    main()
+```
+
+输出：
+
+```console
+$ pip install click==8.4.0 -q
+$ python source.py
+default: {'value': '/tmp/file', 'source': None}
+nodefault: None
+$ python source.py --default cli --nodefault cli
+default: {'value': 'cli', 'source': None}
+nodefault: {'value': 'cli', 'source': None}
+
+$ pip install click==8.3.3 -q
+$ python source.py
+default: {'value': '/tmp/file', 'source': <ParameterSource.DEFAULT: 5>}
+nodefault: None
+$ python source.py --default cli --nodefault cli
+default: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}
+nodefault: {'value': 'cli', 'source': <ParameterSource.COMMANDLINE: 2>}
+```
+
+也就是说，8.3.3 里在 `ParamType.convert` 里调用 `ctx.get_parameter_source(param.name)` 能拿到正确的来源（DEFAULT 或 COMMANDLINE），8.4.0 里同样的代码拿到的全是 `None`。
+
+环境：
+
+- Python 版本：3.14.4（看起来所有版本都有，macOS 和 Linux 上都能复现）
+- Click 版本：8.4.0",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 ParamType.convert 中查询参数来源的复现和 DEFAULT/COMMANDLINE 对照，解释可由原代码直接得出。
+pallets__click-3507,en,medium,"tests/test_commands.py::test_subcommand_metavar_marks_optional[False-True-[COMMAND] [ARGS]...]
+tests/test_commands.py::test_subcommand_metavar_marks_optional[True-True-[COMMAND1] [ARGS]... [COMMAND2 [ARGS]...]...]","With `invoke_without_command` set, commands are not marked as optional","Having
+
+```python
+@click.group(invoke_without_command=True)
+def main():
+    if ctx.invoked_subcommand is not None:
+        return
+    # do something by default
+```
+
+I expect `--help` to output:
+
+```
+Usage: app.py [OPTIONS] [COMMAND] [ARGS]...
+```
+
+But it outputs:
+
+```
+Usage: app.py [OPTIONS] COMMAND [ARGS]...
+```
+
+Environment:
+
+- Python version: 3.11.8
+- Click version: 8.2.0
+",设置了 `invoke_without_command` 时，子命令在用法行里没有被标成可选,"有这样一个 group：
+
+```python
+@click.group(invoke_without_command=True)
+def main():
+    if ctx.invoked_subcommand is not None:
+        return
+    # do something by default
+```
+
+因为设置了 `invoke_without_command=True`，不给子命令也能运行，所以我预期 `--help` 输出的用法行是：
+
+```
+Usage: app.py [OPTIONS] [COMMAND] [ARGS]...
+```
+
+但它实际输出的是：
+
+```
+Usage: app.py [OPTIONS] COMMAND [ARGS]...
+```
+
+也就是 COMMAND 没有加方括号、没有标成可选的。
+
+环境：
+
+- Python 版本：3.11.8
+- Click 版本：8.2.0",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 invoke_without_command=True 时 COMMAND 应标为可选的要求和完整预期用法行。
+pallets__click-3533,en,hard,"tests/test_termui.py::test_echo_via_pager_tty_pager_missing
+tests/test_termui.py::test_get_pager_file_missing_pager_keeps_borrowed_stream_open","""I/O operation on closed file"" error with CliRunner and echo_via_pager under 8.4","When `echo_via_pager` is used in the command, `CliRunner.invoke` fails with:
+
+> ValueError: I/O operation on closed file.
+
+This started happening with Click 8.4, does not happen with 8.3.3.
+
+Reproducer:
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+Traceback:
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+Environment:
+
+- OS: Ubuntu 24.04.4, Linux 6.17
+- Python version: 3.13.5
+- Click version: 8.4
+","8.4 下 CliRunner 配合 echo_via_pager 使用时报 ""I/O operation on closed file""","命令里用了 `echo_via_pager` 之后，`CliRunner.invoke` 会失败，报：
+
+> ValueError: I/O operation on closed file.
+
+这个问题从 Click 8.4 开始出现，8.3.3 上没有。
+
+复现代码：
+```python
+from click import command, echo_via_pager
+from click.testing import CliRunner
+
+@command()
+def cli():
+    echo_via_pager(""Hello, Click!"")
+
+runner = CliRunner()
+runner.invoke(cli)
+```
+
+回溯：
+```
+Traceback (most recent call last):
+  File "".../echo_via_pager.py"", line 11, in <module>
+    runner.invoke(cli)
+    ~~~~~~~~~~~~~^^^^^
+  File "".../.venv/echo-via-pager/lib/python3.13/site-packages/click/testing.py"", line 676, in invoke
+    sys.stdout.flush()
+    ~~~~~~~~~~~~~~~~^^
+ValueError: I/O operation on closed file.
+```
+
+环境：
+
+- 操作系统：Ubuntu 24.04.4，Linux 6.17
+- Python 版本：3.13.5
+- Click 版本：8.4",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,和 pallets__click-3482 是同一个 issue（#3449）的两个 PR，原文逐字相同，中文题面共用一份；Codex 复核：与 #3482 原文相同，中文正文也相同，保留既有同源说明且不据此改变题目归属。
+pallets__click-3578,en,medium,"tests/test_basic.py::test_choice_argument_optional_metavar
+tests/test_basic.py::test_datetime_argument_optional_metavar",Choices.get_metavar makes all choices look optional,"Creating a required parameter with a `Choice` type leads to confusing helpstrings.
+
+From https://en.wikipedia.org/wiki/Command-line_interface#Command_description_syntax 
+
+> Built-in usage help and man pages commonly employ a small syntax to describe the valid command form:
+> * angle brackets for required parameters: `ping <hostname>`
+> * square brackets for optional parameters: `mkdir [-p] <dirname>`
+> * ellipses for repeated items: `cp <source1> [source2...] <dest>`
+> * vertical bars for choice of items: `netstat {-t|-u}`",Choice.get_metavar 让所有可选值看起来都像是可选参数,"用 `Choice` 类型创建一个**必填**参数时，生成出来的帮助信息很容易让人误解。
+
+按 Wikipedia 上""命令行界面""词条里对命令描述语法的说明：
+
+> 内置的用法帮助和 man 手册通常用一套小语法来描述合法的命令形式：
+> * 尖括号表示必填参数：`ping <hostname>`
+> * 方括号表示可选参数：`mkdir [-p] <dirname>`
+> * 省略号表示可重复的项：`cp <source1> [source2...] <dest>`
+> * 竖线表示多选一：`netstat {-t|-u}`
+
+也就是说，方括号在这套约定里的意思是""可选""。而 `Choice` 参数在帮助信息里显示出来的形式和这套约定对不上：一个必填的 Choice 参数，读起来却像是可选的。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留必填 Choice 被显示成可选的歧义及原文引用的语法约定，未指定新的输出模板。
+pallets__click-3642,en,easy,tests/test_types.py::test_path_dash_no_byteswarning,[Python forward compat] click.types.Path.covert: BytesWarning: Comparison between bytes and string,"So I've hit this through pip-tools' `pip-compile` executable some time ago but forgot to report immediately.
+
+I tend to run Python with strictness like `python -I -s -E -bb -Werror -m piptools compile --some --args`. And that's how I've found this warning. I imagine, it's easy to address by changing the check here: https://github.com/pallets/click/blob/c9f7d9d/src/click/types.py#L929C64-L929C75. Perhaps, by converting the data type.
+
+Here's a minimal repro. In needs a modern enough Python for `-bb` IIRC.
+```console
+$ python -Im pip install Click
+$ python -bb -Werror
+Python 3.12.9 (main, Feb 22 2025, 21:46:24) [GCC 14.2.1 20241221] on linux
+Type ""help"", ""copyright"", ""credits"" or ""license"" for more information.
+>>> from click.types import Path
+>>> Path(allow_dash=True).convert('', '', '')
+Traceback (most recent call last):
+  File ""<stdin>"", line 1, in <module>
+  File ""/path/to/venv/lib/python3.12/site-packages/click/types.py"", line 865, in convert
+    is_dash = self.file_okay and self.allow_dash and rv in (b""-"", ""-"")
+                                                     ^^^^^^^^^^^^^^^^^
+BytesWarning: Comparison between bytes and string
+```
+
+Environment:
+
+- Python version: 3.12.9
+- Click version: 8.1.8
+",[Python 前向兼容] click.types.Path.convert：BytesWarning: Comparison between bytes and string,"我之前通过 pip-tools 的 `pip-compile` 命令碰到过这个问题，当时忘了立刻来报。
+
+我习惯用比较严格的方式跑 Python，比如 `python -I -s -E -bb -Werror -m piptools compile --some --args`，就是这样发现这条警告的。我想应该很容易处理，改一下 `src/click/types.py` 里 `Path.convert` 那处比较就行（大概第 929 行），比如把数据类型转换一下。
+
+下面是最小复现。印象中需要一个足够新的 Python 才支持 `-bb`。
+```console
+$ python -Im pip install Click
+$ python -bb -Werror
+Python 3.12.9 (main, Feb 22 2025, 21:46:24) [GCC 14.2.1 20241221] on linux
+Type ""help"", ""copyright"", ""credits"" or ""license"" for more information.
+>>> from click.types import Path
+>>> Path(allow_dash=True).convert('', '', '')
+Traceback (most recent call last):
+  File ""<stdin>"", line 1, in <module>
+  File ""/path/to/venv/lib/python3.12/site-packages/click/types.py"", line 865, in convert
+    is_dash = self.file_okay and self.allow_dash and rv in (b""-"", ""-"")
+                                                     ^^^^^^^^^^^^^^^^^
+BytesWarning: Comparison between bytes and string
+```
+
+环境：
+
+- Python 版本：3.12.9
+- Click 版本：8.1.8",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留严格 Python 选项、bytes 比较告警与复现，类型转换建议在原文中已存在，未新增解法。
+pallets__click-3653,en,medium,"tests/test_termui.py::test_prompt_and_confirm_ansi_respects_color[confirm-no-color]
+tests/test_termui.py::test_prompt_and_confirm_ansi_respects_color[prompt-no-color]",ANSI codes not stripped from click.confirm after upgrading to click 8.4,"<!--
+This issue tracker is a tool to address bugs in Click itself. Please use
+GitHub Discussions or the Pallets Discord for questions about your own code.
+
+Replace this comment with a clear outline of what the bug is.
+-->
+I had failing unit tests after upgrading to click 8.4.1. I was able to address some 
+by using `runner.invoke(cmd, color=False)`, but that didn't help for commands
+that use `click.confirm()`
+
+<!--
+Describe how to replicate the bug.
+
+Include a minimal reproducible example that demonstrates the bug.
+Include the full traceback if there was an exception.
+-->
+
+This test script `test_repro.py` replicates the issue.
+```
+import click
+from click.testing import CliRunner
+
+
+@click.command()
+def cmd():
+    click.echo(click.style('Hello World!', fg='green'))
+
+
+@click.command()
+def cmd_confirm():
+    click.confirm(click.style('Hello World!', fg='green'), abort=True)
+
+
+def test_echo_strips_ansi_with_color_false():
+    runner = CliRunner()
+    result = runner.invoke(cmd, color=False)
+    assert result.output == ""Hello World!\n""
+
+
+def test_confirm_strips_ansi_with_color_false():
+    runner = CliRunner()
+    result = runner.invoke(cmd_confirm, input=""Y"", color=False)
+    assert result.output == ""Hello World! [y/N]: Y\n""  # FAILS: ANSI codes present
+```
+
+With click 8.3.3 both tests pass. With click 8.4.0 and 8.4.1, the `test_confirm_strips_ansi_with_color_false` test fails:
+
+```
+uvx --with click==8.4 pytest test_repro.py
+...
+================================================ FAILURES ================================================
+_______________________________ test_confirm_strips_ansi_with_color_false ________________________________
+
+    def test_confirm_strips_ansi_with_color_false():
+        runner = CliRunner()
+        result = runner.invoke(cmd_confirm, input=""Y"", color=False)
+>       assert result.output == ""Hello World! [y/N]: Y\n""  # FAILS: ANSI codes present
+```
+
+<!--
+Describe the expected behavior that should have happened but didn't.
+-->
+The ansi codes should be stripped when running click.confirm, as they are for click.echo.
+
+Environment:
+
+- Python version: 3.13
+- Click version: 8.4.1
+- MacOS
+
+",升级到 click 8.4 之后，click.confirm 的输出里 ANSI 转义码没有被去掉,"升级到 click 8.4.1 之后我有一批单元测试挂了。其中一部分改用 `runner.invoke(cmd, color=False)` 就能解决，但用了 `click.confirm()` 的命令这样改也没用。
+
+下面这个测试脚本 `test_repro.py` 可以复现：
+```
+import click
+from click.testing import CliRunner
+
+
+@click.command()
+def cmd():
+    click.echo(click.style('Hello World!', fg='green'))
+
+
+@click.command()
+def cmd_confirm():
+    click.confirm(click.style('Hello World!', fg='green'), abort=True)
+
+
+def test_echo_strips_ansi_with_color_false():
+    runner = CliRunner()
+    result = runner.invoke(cmd, color=False)
+    assert result.output == ""Hello World!\n""
+
+
+def test_confirm_strips_ansi_with_color_false():
+    runner = CliRunner()
+    result = runner.invoke(cmd_confirm, input=""Y"", color=False)
+    assert result.output == ""Hello World! [y/N]: Y\n""  # FAILS: ANSI codes present
+```
+
+用 click 8.3.3 两个测试都通过。用 click 8.4.0 和 8.4.1，`test_confirm_strips_ansi_with_color_false` 会失败：
+
+```
+uvx --with click==8.4 pytest test_repro.py
+...
+================================================ FAILURES ================================================
+_______________________________ test_confirm_strips_ansi_with_color_false ________________________________
+
+    def test_confirm_strips_ansi_with_color_false():
+        runner = CliRunner()
+        result = runner.invoke(cmd_confirm, input=""Y"", color=False)
+>       assert result.output == ""Hello World! [y/N]: Y\n""  # FAILS: ANSI codes present
+```
+
+预期行为：运行 click.confirm 时 ANSI 转义码应该像 click.echo 那样被去掉。
+
+环境：
+
+- Python 版本：3.13
+- Click 版本：8.4.1
+- macOS",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 color=False 时 confirm 应与 echo 一样去掉 ANSI 转义码的要求及测试脚本。
+pallets__click-3678,en,medium,"tests/test_basic.py::test_param_named_help[argument]
+tests/test_basic.py::test_param_named_help[custom-flags]
+tests/test_basic.py::test_param_named_help[no-collision]
+tests/test_basic.py::test_param_named_help[option]
+tests/test_basic.py::test_param_squatting_help_option_name
+tests/test_options.py::test_argument_sharing_param_name_warning",help not resolving automatically,"From the docs: 
+
+The help parameter is implemented in Click in a very special manner. Unlike regular parameters it’s automatically added by Click for any command and it performs automatic conflict resolution. By default it’s called --help, but this can be changed. If a command itself implements a parameter with the same name, the default help parameter stops accepting it. There is a context setting that can be used to override the names of the help parameters called [help_option_names](https://click.palletsprojects.com/en/stable/api/#click.Context.help_option_names).
+
+What is wrong: 
+Help does not automatically resolve if there is an arg or kwarg called help. In the sample the file is called help.py
+
+``` 
+import click
+
+# This works 
+@click.command()
+@click.argument('helps')
+def this_works(helps):
+    print(helps)
+
+# > python -m help this
+# this
+
+# > python -m help --help
+# Usage: help.py [OPTIONS] HELPS
+
+# Options:
+#   --help  Show this message and exit.
+
+# This does not work
+@click.command()
+@click.argument('help')
+def this_does_not_work(help):
+    print(help)
+
+# > python -m help this
+# Usage: help.py [OPTIONS] HELP
+# Try 'help.py --help' for help.
+
+# Error: Invalid value for '--help': 'this' is not a valid boolean.
+
+# > python -m help --help
+# Usage: help.py [OPTIONS] HELP
+# Try 'help.py --help' for help.
+
+# Error: Missing argument 'HELP'.
+
+# This does not work
+@click.command()
+@click.option('--help', default='this_2')
+def this_does_not_work_also(help='this_2'):
+    print(help)
+
+# > python -m help 
+# None
+
+# > python -m help --help
+# Error: Option '--help' requires an argument.
+
+if __name__ == '__main__':
+    #this_works()
+    #this_does_not_work()
+    this_does_not_work_also()
+
+```
+- Python version: 3.10.15
+- Click version: 8.1.7
+",参数名叫 help 时，help 选项没有按文档说的自动处理冲突,"文档里是这么写的：
+
+help 参数在 Click 里的实现方式很特殊。和普通参数不同，它由 Click 自动加到每个命令上，并且会自动处理冲突。默认叫 --help，但可以改。如果命令自己实现了一个同名的参数，默认的 help 参数就不再接管它。有一个上下文设置 help_option_names 可以用来覆盖 help 参数的名字。
+
+问题在哪：
+如果有一个位置参数或者选项叫 help，help 并没有自动处理冲突。下面这个示例文件叫 help.py：
+
+```
+import click
+
+# This works
+@click.command()
+@click.argument('helps')
+def this_works(helps):
+    print(helps)
+
+# > python -m help this
+# this
+
+# > python -m help --help
+# Usage: help.py [OPTIONS] HELPS
+
+# Options:
+#   --help  Show this message and exit.
+
+# This does not work
+@click.command()
+@click.argument('help')
+def this_does_not_work(help):
+    print(help)
+
+# > python -m help this
+# Usage: help.py [OPTIONS] HELP
+# Try 'help.py --help' for help.
+
+# Error: Invalid value for '--help': 'this' is not a valid boolean.
+
+# > python -m help --help
+# Usage: help.py [OPTIONS] HELP
+# Try 'help.py --help' for help.
+
+# Error: Missing argument 'HELP'.
+
+# This does not work
+@click.command()
+@click.option('--help', default='this_2')
+def this_does_not_work_also(help='this_2'):
+    print(help)
+
+# > python -m help
+# None
+
+# > python -m help --help
+# Error: Option '--help' requires an argument.
+
+if __name__ == '__main__':
+    #this_works()
+    #this_does_not_work()
+    this_does_not_work_also()
+
+```
+- Python 版本：3.10.15
+- Click 版本：8.1.7",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 help 名称冲突的文档约定、位置参数和选项两类复现及输出。
+pallets__click-3769,en,medium,"tests/test_termui.py::test_progressbar_lands_on_final_position[iterate-25]
+tests/test_termui.py::test_progressbar_lands_on_final_position[iterate-3]
+tests/test_termui.py::test_progressbar_lands_on_final_position[iterate-7]
+tests/test_termui.py::test_progressbar_lands_on_final_position[update-25]
+tests/test_termui.py::test_progressbar_lands_on_final_position[update-3]
+tests/test_termui.py::test_progressbar_lands_on_final_position[update-7]",`click.progressbar` doesn't show full completion when using `show_pos=True` combined with `update_min_steps`,"Using a `click.progressbar` with:
+- `update_min_steps` which isn't a divisor of `length`
+- `show_pos=True`
+
+won't show full completion at the end. This can be reproduced as follows:
+
+```python
+import time
+
+import click
+
+with click.progressbar(
+    range(20),
+    show_pos=True,
+    update_min_steps=7,
+) as bar:
+    for i in bar:
+        time.sleep(0.1)
+```
+
+with (final) output in the terminal
+
+```text
+  [####################################]  14/20          
+```
+
+**Expected behaviour**: I had expected the output to show `20/20` at the end.
+This would be consistent with the default percentage formatting, as can be seen by commenting the line `show_pos=True` and re-running the reproduction:
+
+```text
+  [####################################]  100%          
+```
+
+Environment:
+
+- Python version: tested with 3.12.3 and 3.14.3
+- Click version: 8.4.1
+",`click.progressbar` 同时用 `show_pos=True` 和 `update_min_steps` 时，结束时显示不到 100%,"`click.progressbar` 在下面两个条件同时满足时：
+- `update_min_steps` 不能整除 `length`
+- `show_pos=True`
+
+结束时不会显示完成状态。复现方式：
+
+```python
+import time
+
+import click
+
+with click.progressbar(
+    range(20),
+    show_pos=True,
+    update_min_steps=7,
+) as bar:
+    for i in bar:
+        time.sleep(0.1)
+```
+
+终端里的（最终）输出是：
+
+```text
+  [####################################]  14/20
+```
+
+**预期行为**：我期望结束时显示的是 `20/20`。
+这样才和默认的百分比格式一致——把 `show_pos=True` 那一行注释掉再跑一遍，输出是：
+
+```text
+  [####################################]  100%
+```
+
+环境：
+
+- Python 版本：3.12.3 和 3.14.3 都试过
+- Click 版本：8.4.1",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：正文准确保留最终位置应为 20/20 的要求及百分比对照，标题的 100% 表述不改变正文约定。
+pallets__click-3781,en,medium,tests/test_termui.py::test_edit_pathlib[single],Support pathlib.Path in edit filename,"Would you welcome a PR to avoid this?
+
+```
+Argument of type ""Path"" cannot be assigned to parameter ""filename"" of type ""str | None"" in function ""edit""
+  Type ""Path"" is not assignable to type ""str | None""
+    ""Path"" is not assignable to ""str""
+    ""Path"" is not assignable to ""None""Pylance[reportArgumentType](https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType)
+```
+
+Easy workaround with:
+```py
+click.edit(filename=str(export_common.path))
+```
+
+but would be nice if didn't need `str`.",希望 edit 的 filename 参数支持 pathlib.Path,"给 `click.edit` 的 `filename` 传一个 `pathlib.Path` 时，类型检查会报下面这个错。你们愿意接受一个 PR 来解决它吗？
+
+```
+Argument of type ""Path"" cannot be assigned to parameter ""filename"" of type ""str | None"" in function ""edit""
+  Type ""Path"" is not assignable to type ""str | None""
+    ""Path"" is not assignable to ""str""
+    ""Path"" is not assignable to ""None""Pylance[reportArgumentType](https://github.com/microsoft/pyright/blob/main/docs/configuration.md#reportArgumentType)
+```
+
+现在的绕过办法很简单：
+```py
+click.edit(filename=str(export_common.path))
+```
+
+但如果能不用手动包一层 `str` 就更好了。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 edit 的 filename 接受 pathlib.Path 的诉求、类型检查报错和 str 绕过方式。
+pallets__click-3818,en,hard,"tests/test_abort_interrupt.py::test_interrupt_while_exiting_after_success
+tests/test_abort_interrupt.py::test_interrupt_while_reporting_abort[body-1]
+tests/test_abort_interrupt.py::test_interrupt_while_reporting_abort[body-2]
+tests/test_abort_interrupt.py::test_interrupt_while_reporting_abort[prompt-1]
+tests/test_abort_interrupt.py::test_interrupt_while_reporting_error",`KeyboardInterrupt` during `click.prompt()` can race,"## Bug
+
+When a user uses Ctrl-C during `click.prompt()`, this may cause an unhandled exception. Seen during CI on an Ubuntu 22.04 arm github runner. The same test on Ubuntu 22.04 x64, macOS arm, Windows x64/arm succeeded. This is likely to be a race that doesn't pop up every time
+
+```
+    | --- tty: Ctrl+C aborts at a prompt ---
+    | spawn /home/runner/work/ethstaker-deposit-cli/ethstaker-deposit-cli/ethstaker_deposit-cli-c082a10-linux-arm64/deposit --language english --ignore_connectivity generate-mnemonic
+    | Please choose the language of the mnemonic word list [1. 简体中文, 2. 繁體中文, 3. čeština, 4. English, 5. Français, 6. Italiano, 7. 日本語, 8. 한국어, 9. Português, 10. Español]:  [english]: ^CTraceback (most recent call last):
+    |   File ""click/core.py"", line 1490, in main
+    |   File ""click/core.py"", line 1968, in invoke
+    |   File ""click/core.py"", line 1300, in make_context
+    |   File ""click/core.py"", line 1311, in parse_args
+    |   File ""click/core.py"", line 2686, in handle_parse_result
+    |   File ""click/core.py"", line 3508, in consume_value
+    |   File ""ethstaker_deposit/utils/click.py"", line 62, in prompt_for_value
+    |   File ""click/core.py"", line 3372, in prompt_for_value
+    |   File ""click/termui.py"", line 218, in prompt
+    |   File ""click/termui.py"", line 201, in prompt_func
+    | click.exceptions.Abort
+    | 
+    | During handling of the above exception, another exception occurred:
+    | 
+    | Traceback (most recent call last):
+    |   File ""deposit.py"", line 128, in <module>
+    |   File ""deposit.py"", line 121, in run
+    |   File ""click/core.py"", line 1569, in __call__
+    |   File ""click/core.py"", line 1532, in main
+    |   File ""click/utils.py"", line 337, in echo
+    |   File ""click/_compat.py"", line 509, in should_strip_ansi
+    |   File ""click/_compat.py"", line 578, in isatty
+    | KeyboardInterrupt
+    | [PYI-3853:ERROR] Failed to execute script 'deposit' due to unhandled exception!
+    | 
+    | [TEST FAIL] Unexpected EOF while waiting for: Aborted
+```
+
+## Replication
+
+Probably a `click.prompt()` with Ctrl-C on a slower machine, run often enough to eventually trigger this race condition. In our case it was the free github `ubuntu-22.04-arm` runner.
+
+## Expected
+
+click handles the KeyboardInterrupt exception gracefully, regardless of timing or architecture.
+
+Environment:
+
+- Python version: 3.14
+- Click version: 8.4.2
+",`click.prompt()` 期间按 Ctrl-C 可能触发竞态,"## Bug
+
+用户在 `click.prompt()` 等待输入时按 Ctrl-C，有时会导致一个未处理的异常。这是在 CI 上碰到的，环境是 GitHub 的 Ubuntu 22.04 arm runner。同一个测试在 Ubuntu 22.04 x64、macOS arm、Windows x64/arm 上都通过了。很可能是一个不是每次都会出现的竞态。
+
+```
+    | --- tty: Ctrl+C aborts at a prompt ---
+    | spawn /home/runner/work/ethstaker-deposit-cli/ethstaker-deposit-cli/ethstaker_deposit-cli-c082a10-linux-arm64/deposit --language english --ignore_connectivity generate-mnemonic
+    | Please choose the language of the mnemonic word list [1. 简体中文, 2. 繁體中文, 3. čeština, 4. English, 5. Français, 6. Italiano, 7. 日本語, 8. 한국어, 9. Português, 10. Español]:  [english]: ^CTraceback (most recent call last):
+    |   File ""click/core.py"", line 1490, in main
+    |   File ""click/core.py"", line 1968, in invoke
+    |   File ""click/core.py"", line 1300, in make_context
+    |   File ""click/core.py"", line 1311, in parse_args
+    |   File ""click/core.py"", line 2686, in handle_parse_result
+    |   File ""click/core.py"", line 3508, in consume_value
+    |   File ""ethstaker_deposit/utils/click.py"", line 62, in prompt_for_value
+    |   File ""click/core.py"", line 3372, in prompt_for_value
+    |   File ""click/termui.py"", line 218, in prompt
+    |   File ""click/termui.py"", line 201, in prompt_func
+    | click.exceptions.Abort
+    |
+    | During handling of the above exception, another exception occurred:
+    |
+    | Traceback (most recent call last):
+    |   File ""deposit.py"", line 128, in <module>
+    |   File ""deposit.py"", line 121, in run
+    |   File ""click/core.py"", line 1569, in __call__
+    |   File ""click/core.py"", line 1532, in main
+    |   File ""click/utils.py"", line 337, in echo
+    |   File ""click/_compat.py"", line 509, in should_strip_ansi
+    |   File ""click/_compat.py"", line 578, in isatty
+    | KeyboardInterrupt
+    | [PYI-3853:ERROR] Failed to execute script 'deposit' due to unhandled exception!
+    |
+    | [TEST FAIL] Unexpected EOF while waiting for: Aborted
+```
+
+## 复现
+
+大概是在一台比较慢的机器上，对 `click.prompt()` 按 Ctrl-C，跑的次数够多就能碰上这个竞态。我们这边是在 GitHub 免费的 `ubuntu-22.04-arm` runner 上碰到的。
+
+## 预期
+
+不管时机和架构如何，click 都应该能妥善处理 KeyboardInterrupt 异常。
+
+环境：
+
+- Python 版本：3.14
+- Click 版本：8.4.2",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 Ctrl-C 的偶发竞态、完整堆栈及跨架构妥善处理 KeyboardInterrupt 的要求。
+pallets__click-3858,en,medium,tests/test_types/test_Path.py::test_path_converted_type_parameter_at_runtime,`click.Path` should be generic on `path_type`,"Click 8.5.0 made `click.prompt` and `click.ParamType` generic, so the return type of `click.prompt` is now normally clever enough to reveal the actual type of the value as converted from raw input.
+
+However, `click.Path` has a `path_type` parameter to which the input is converted, but  that information is not reflected in the return type of `click.Path.convert`, so it's always typed as `str | bytes | os.PathLike[str]`, regardless of the value of `path_type`.
+
+```python
+# mre.py
+import pathlib
+
+from typing_extensions import assert_type
+
+import click
+
+my_type = click.Path(file_okay=False, path_type=pathlib.Path)
+path = click.prompt(""Enter a name"", type=my_type)
+
+# expected: pathlib.Path, actual: str | bytes | os.PathLike[str]
+assert_type(path, pathlib.Path)
+```
+
+I checked the above MRE with mypy and pyright, as well as ty for completeness, on a local clone of the repo @ `main`:
+
+```console
+$ uv run mypy mre.py
+mre.py:12: error: Expression is of type ""str | bytes | PathLike[str]"", not ""Path""  [assert-type]
+    assert_type(path, pathlib.Path)
+    ^
+Found 1 error in 1 file (checked 1 source file)
+```
+
+```console
+$ uv run pyright mre.py
+WARNING: there is a new pyright version available (v1.1.408 -> v1.1.411).
+Please install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest`
+
+/Users/edgarramirez/Contrib/pallets/click/mre.py
+  /Users/edgarramirez/Contrib/pallets/click/mre.py:12:13 - error: ""assert_type"" mismatch: expected ""Path"" but received ""str | bytes | PathLike[str]"" (reportAssertTypeFailure)
+1 error, 0 warnings, 0 informations
+```
+
+```console
+$ uv run ty check mre.py
+error[type-assertion-failure]: Argument does not have asserted type `Path`
+  --> mre.py:12:1
+   |
+12 | assert_type(path, pathlib.Path)
+   | ^^^^^^^^^^^^----^^^^^^^^^^^^^^^
+   |             |
+   |             Inferred type is `str | bytes | PathLike[str]`
+info: `Path` and `str | bytes | PathLike[str]` are not equivalent types
+
+Found 1 diagnostic
+```
+
+I expect the return type of `click.prompt` to match the `path_type` value passed to `click.Path`.
+
+Environment:
+
+- Python version: 3.14
+- Click version: 8.5.0
+",`click.Path` 应该按 `path_type` 做成泛型,"Click 8.5.0 把 `click.prompt` 和 `click.ParamType` 做成了泛型，所以现在 `click.prompt` 的返回类型一般已经足够聪明，能反映出原始输入转换之后的真实类型。
+
+但 `click.Path` 有一个 `path_type` 参数，输入会被转换成这个类型，而这个信息没有体现在 `click.Path.convert` 的返回类型上——不管 `path_type` 传的是什么，返回类型永远是 `str | bytes | os.PathLike[str]`。
+
+```python
+# mre.py
+import pathlib
+
+from typing_extensions import assert_type
+
+import click
+
+my_type = click.Path(file_okay=False, path_type=pathlib.Path)
+path = click.prompt(""Enter a name"", type=my_type)
+
+# expected: pathlib.Path, actual: str | bytes | os.PathLike[str]
+assert_type(path, pathlib.Path)
+```
+
+我在本地 clone 的仓库 `main` 分支上，用 mypy 和 pyright 检查了上面这个最小复现，顺带也用 ty 跑了一遍：
+
+```console
+$ uv run mypy mre.py
+mre.py:12: error: Expression is of type ""str | bytes | PathLike[str]"", not ""Path""  [assert-type]
+    assert_type(path, pathlib.Path)
+    ^
+Found 1 error in 1 file (checked 1 source file)
+```
+
+```console
+$ uv run pyright mre.py
+WARNING: there is a new pyright version available (v1.1.408 -> v1.1.411).
+Please install the new version or set PYRIGHT_PYTHON_FORCE_VERSION to `latest`
+
+/Users/edgarramirez/Contrib/pallets/click/mre.py
+  /Users/edgarramirez/Contrib/pallets/click/mre.py:12:13 - error: ""assert_type"" mismatch: expected ""Path"" but received ""str | bytes | PathLike[str]"" (reportAssertTypeFailure)
+1 error, 0 warnings, 0 informations
+```
+
+```console
+$ uv run ty check mre.py
+error[type-assertion-failure]: Argument does not have asserted type `Path`
+  --> mre.py:12:1
+   |
+12 | assert_type(path, pathlib.Path)
+   | ^^^^^^^^^^^^----^^^^^^^^^^^^^^^
+   |             |
+   |             Inferred type is `str | bytes | PathLike[str]`
+info: `Path` and `str | bytes | PathLike[str]` are not equivalent types
+
+Found 1 diagnostic
+```
+
+我期望 `click.prompt` 的返回类型能和传给 `click.Path` 的 `path_type` 一致。
+
+环境：
+
+- Python 版本：3.14
+- Click 版本：8.5.0",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 path_type 与 prompt 返回类型对应的需求及三种类型检查器的原始结果。
+tortoise__tortoise-orm-2081,en,medium,"tests/test_issue_404.py::test_expand_db_url_with_brackets_in_password
+tests/test_issue_404.py::test_expand_db_url_with_unbalanced_brackets_in_password","Tortoise orm's expand_db_url() throws ValueError(""Invalid IPv6 URL"") for my db_url","**Describe the bug**
+
+tortoise-orm's [expand_db_url](https://github.com/tortoise/tortoise-orm/blob/［提交哈希已移除］/tortoise/backends/base/config_generator.py#L62) function in [config_generator.py](https://github.com/tortoise/tortoise-orm/blob/develop/tortoise/backends/base/config_generator.py) 
+throws  *ValueError(""Invalid IPv6 URL"")* when trying to parse db_url.
+
+expand_db_url function has,
+`    url = urlparse.urlparse(db_url)`
+
+Source code of urlparse (which uses urlsplit, see this line of [code](https://github.com/python/cpython/blob/［提交哈希已移除］/Lib/urllib/parse.py#L474))
+
+When given a db url with either one of these special characters '['  or ']', urllib's parse tries to parse and raises it's invalid IPv6 URL error.  
+
+**To Reproduce**
+```
+from urllib.parse import urlparse
+
+cs = 'mysql://some_user:ADM[r$VIS]@test-rds.somedata.net:3306/mydb?charset=utf8mb4'
+sms = 'mysql://fail_user:DMK_15[ZWIN6@test-rds.somedata.net:3306/mydb2?charset=utf8mb4'
+
+print(""This runs..."")
+urlparse(cs)
+print(""Fails..."")
+urlparse(sms)
+```
+
+**Expected behavior**
+Expected is to allow this password with special characters. 
+
+https://github.com/tortoise/tortoise-orm/blob/［提交哈希已移除］/tortoise/backends/base/config_generator.py#L62
+https://github.com/tortoise/tortoise-orm/blob/［提交哈希已移除］/tortoise/backends/base/config_generator.py#L63
+
+This shouldn't be happening. I tried the same with sqlalchemy ORM please have a look at the below code,
+mydatabase.py
+```
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
+_db_url = 'mysql://fail_user:DMK_15[ZWIN6@test-rds.somedata.net:3306/mydb2?charset=utf8mb4'
+engine = create_engine(_db_url, convert_unicode=True)
+db_session = scoped_session(sessionmaker(autocommit=False,
+                                         autoflush=False,
+                                         bind=engine))
+Base = declarative_base()
+Base.query = db_session.query_property()
+
+def init_db():
+    # import all modules here that might define models so that
+    # they will be registered properly on the metadata.  Otherwise
+    # you will have to import them first before calling init_db()
+    import models
+    Base.metadata.create_all(bind=engine)
+```
+models.py
+```
+from sqlalchemy import Column, Integer, String
+from mydatabase import Base
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True)
+    email = Column(String(120), unique=True)
+
+    def __init__(self, name=None, email=None):
+        self.name = name
+        self.email = email
+
+    def __repr__(self):
+        return '<User %r>' % (self.name)
+``` 
+Terminal:
+```
+>>> from mydatabase import init_db
+>>> a = init_db()
+```
+Above works without any issue. 
+
+After digging through the source code for sqlalchemy they use this [make_url](https://github.com/sqlalchemy/sqlalchemy/blob/［提交哈希已移除］/lib/sqlalchemy/engine/url.py#L221) following [RFC 1738](https://tools.ietf.org/html/rfc1738). 
+
+Ideally the above password **should be allowed**, it is an unexpected error here. Sqlalchemy connects with db, whereas when using tortoise orm error occurs.
+  
+I'm working on fixing this db url parsing logic for tortoise orm (if it is an error correct me otherwise). or is this error expected in tortoise orm and let it be. Please advice. :) 
+
+Python 3 [for urllib](https://docs.python.org/3/library/urllib.parse.html#url-parsing) say
+>Unmatched square brackets in the netloc attribute will raise a ValueError.
+
+
+
+**Additional context**
+Please note, I understand that this is because of the password in db url and just posting this for further discussion. Also somewhere down the line, somebody hopefully stumbles across this discussion when they face this IPV6 error using tortoise orm. ","tortoise-orm 的 expand_db_url() 解析我的 db_url 时抛 ValueError(""Invalid IPv6 URL"")","**问题描述**
+
+tortoise-orm 里 `tortoise/backends/base/config_generator.py` 的 expand_db_url 函数，在解析 db_url 时抛出 *ValueError(""Invalid IPv6 URL"")*。
+
+expand_db_url 里有这么一行：
+`    url = urlparse.urlparse(db_url)`
+
+看 urlparse 的源码（它内部用的是 urlsplit，见 CPython `Lib/urllib/parse.py` 第 474 行附近）：
+
+只要 db url 里出现 '[' 或 ']' 这两个特殊字符中的任何一个，urllib 的 parse 就会尝试按 IPv6 地址去解析，然后抛出它那个 invalid IPv6 URL 的错误。
+
+**复现步骤**
+```
+from urllib.parse import urlparse
+
+cs = 'mysql://some_user:ADM[r$VIS]@test-rds.somedata.net:3306/mydb?charset=utf8mb4'
+sms = 'mysql://fail_user:DMK_15[ZWIN6@test-rds.somedata.net:3306/mydb2?charset=utf8mb4'
+
+print(""This runs..."")
+urlparse(cs)
+print(""Fails..."")
+urlparse(sms)
+```
+
+**预期行为**
+预期是允许这种带特殊字符的密码。
+
+（出问题的位置是 config_generator.py 第 62、63 行那两句。）
+
+这种情况不应该发生。我用 sqlalchemy ORM 试了同样的事，请看下面的代码，
+mydatabase.py
+```
+from sqlalchemy import create_engine
+from sqlalchemy.orm import scoped_session, sessionmaker
+from sqlalchemy.ext.declarative import declarative_base
+
+_db_url = 'mysql://fail_user:DMK_15[ZWIN6@test-rds.somedata.net:3306/mydb2?charset=utf8mb4'
+engine = create_engine(_db_url, convert_unicode=True)
+db_session = scoped_session(sessionmaker(autocommit=False,
+                                         autoflush=False,
+                                         bind=engine))
+Base = declarative_base()
+Base.query = db_session.query_property()
+
+def init_db():
+    # import all modules here that might define models so that
+    # they will be registered properly on the metadata.  Otherwise
+    # you will have to import them first before calling init_db()
+    import models
+    Base.metadata.create_all(bind=engine)
+```
+models.py
+```
+from sqlalchemy import Column, Integer, String
+from mydatabase import Base
+
+class User(Base):
+    __tablename__ = 'users'
+    id = Column(Integer, primary_key=True)
+    name = Column(String(50), unique=True)
+    email = Column(String(120), unique=True)
+
+    def __init__(self, name=None, email=None):
+        self.name = name
+        self.email = email
+
+    def __repr__(self):
+        return '<User %r>' % (self.name)
+```
+终端里：
+```
+>>> from mydatabase import init_db
+>>> a = init_db()
+```
+上面这样跑完全没问题。
+
+翻了 sqlalchemy 的源码，它们用的是 `lib/sqlalchemy/engine/url.py` 里的 make_url，遵循的是 RFC 1738。
+
+按理说上面这种密码**应该被允许**，这里报错是不符合预期的。sqlalchemy 能连上库，换成 tortoise orm 就报错。
+
+我正在动手修 tortoise orm 这段 db url 解析逻辑（如果它确实算 bug 的话；不是的话请指正）。还是说这个报错在 tortoise orm 里就是预期行为、不用管？请给点建议 :)
+
+Python 3 的 urllib 文档（URL 解析一节）里说：
+>netloc 里不成对的方括号会抛出 ValueError。
+
+
+
+**补充说明**
+请注意，我知道这是 db url 里的密码引起的，发出来只是为了进一步讨论。另外也希望以后有人用 tortoise orm 碰到这个 IPv6 报错时能搜到这个讨论。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留密码含方括号的 URL 解析失败、SQLAlchemy 对照及原文已有源码线索。
+tortoise__tortoise-orm-2125,en,easy,tests/contrib/test_pydantic.py::test_backward_relations_annotated_kept,PydanticMeta: backward_relations = False removes annotated relations too,"### Problem
+
+`tortoise-orm==0.19.2`
+
+[Documentation says](https://tortoise.github.io/contrib/pydantic.html#tortoise.contrib.pydantic.creator.PydanticMeta.backward_relations):
+
+> `backward_relations : bool = True`
+> Use backward relations **without annotations** - not recommended, it can be huge data without control
+
+I expect the schema to contain only those backward_relations fields that I explicitly defined in the model, but it removes all backward_relations fields.
+
+### To Reproduce
+```
+from tortoise import Tortoise, fields
+from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.models import Model
+
+
+class Tournament(Model):
+    id = fields.IntField(pk=True)
+    name = fields.TextField()
+
+    events: fields.ReverseRelation[""Event""] # annotated relation
+
+    class PydanticMeta:
+        backward_relations = False
+
+
+# I want to have this in the generated schema:
+class Event(Model):
+    id = fields.IntField(pk=True)
+    name = fields.TextField()
+    tournament: fields.ForeignKeyNullableRelation[Tournament] = fields.ForeignKeyField(
+        ""models.Tournament"", related_name=""events"", null=True
+    )
+
+
+# I don't want to have this in the generated schema:
+class Mention(Model):
+    id = fields.IntField(pk=True)
+    tournament: fields.ForeignKeyNullableRelation[Tournament] = fields.ForeignKeyField(
+        ""models.Tournament"", related_name=""mentions""
+    )
+
+
+Tortoise.init_models([""__main__""], ""models"")
+
+Event_Pydantic = pydantic_model_creator(Tournament)
+print(Event_Pydantic.schema_json(indent=4))
+
+```
+
+### Expected behavior
+```
+{
+    ""title"": ""Tournament"",
+    ""type"": ""object"",
+    ""properties"": {
+        ""id"": {
+            ""title"": ""Id"",
+            ""minimum"": 1,
+            ""maximum"": 2147483647,
+            ""type"": ""integer""
+        },
+        ""name"": {
+            ""title"": ""Name"",
+            ""type"": ""string""
+        },
+        ""events"": {
+            ""title"": ""Events"",
+            ""type"": ""array"",
+            ""items"": {
+                ""$ref"": ""#/definitions/__main__.Event.leaf""
+            }
+        }
+    },
+    ""required"": [
+        ""id"",
+        ""name"",
+        ""events""
+    ],
+    ""additionalProperties"": false,
+    ""definitions"": {
+        ""__main__.Event.leaf"": {
+            ""title"": ""Event"",
+            ""type"": ""object"",
+            ""properties"": {
+                ""id"": {
+                    ""title"": ""Id"",
+                    ""minimum"": 1,
+                    ""maximum"": 2147483647,
+                    ""type"": ""integer""
+                },
+                ""name"": {
+                    ""title"": ""Name"",
+                    ""type"": ""string""
+                }
+            },
+            ""required"": [
+                ""id"",
+                ""name""
+            ],
+            ""additionalProperties"": false
+        }
+    }
+}
+```
+
+### Additional context
+
+I saw that @abondar was doing this functionality, maybe you can help?
+",PydanticMeta：backward_relations = False 把显式标注过的反向关系也一起去掉了,"### 问题
+
+`tortoise-orm==0.19.2`
+
+文档（contrib/pydantic 里 PydanticMeta.backward_relations 的说明）是这么写的：
+
+> `backward_relations : bool = True`
+> 使用**没有标注的**反向关系——不推荐，数据量可能会失控
+
+我的预期是：生成的 schema 里应该只包含我在模型上显式定义（标注）过的那些反向关系字段。但实际上它把所有反向关系字段都去掉了。
+
+### 复现
+```
+from tortoise import Tortoise, fields
+from tortoise.contrib.pydantic import pydantic_model_creator
+from tortoise.models import Model
+
+
+class Tournament(Model):
+    id = fields.IntField(pk=True)
+    name = fields.TextField()
+
+    events: fields.ReverseRelation[""Event""] # annotated relation
+
+    class PydanticMeta:
+        backward_relations = False
+
+
+# I want to have this in the generated schema:
+class Event(Model):
+    id = fields.IntField(pk=True)
+    name = fields.TextField()
+    tournament: fields.ForeignKeyNullableRelation[Tournament] = fields.ForeignKeyField(
+        ""models.Tournament"", related_name=""events"", null=True
+    )
+
+
+# I don't want to have this in the generated schema:
+class Mention(Model):
+    id = fields.IntField(pk=True)
+    tournament: fields.ForeignKeyNullableRelation[Tournament] = fields.ForeignKeyField(
+        ""models.Tournament"", related_name=""mentions""
+    )
+
+
+Tortoise.init_models([""__main__""], ""models"")
+
+Event_Pydantic = pydantic_model_creator(Tournament)
+print(Event_Pydantic.schema_json(indent=4))
+
+```
+
+### 预期行为
+```
+{
+    ""title"": ""Tournament"",
+    ""type"": ""object"",
+    ""properties"": {
+        ""id"": {
+            ""title"": ""Id"",
+            ""minimum"": 1,
+            ""maximum"": 2147483647,
+            ""type"": ""integer""
+        },
+        ""name"": {
+            ""title"": ""Name"",
+            ""type"": ""string""
+        },
+        ""events"": {
+            ""title"": ""Events"",
+            ""type"": ""array"",
+            ""items"": {
+                ""$ref"": ""#/definitions/__main__.Event.leaf""
+            }
+        }
+    },
+    ""required"": [
+        ""id"",
+        ""name"",
+        ""events""
+    ],
+    ""additionalProperties"": false,
+    ""definitions"": {
+        ""__main__.Event.leaf"": {
+            ""title"": ""Event"",
+            ""type"": ""object"",
+            ""properties"": {
+                ""id"": {
+                    ""title"": ""Id"",
+                    ""minimum"": 1,
+                    ""maximum"": 2147483647,
+                    ""type"": ""integer""
+                },
+                ""name"": {
+                    ""title"": ""Name"",
+                    ""type"": ""string""
+                }
+            },
+            ""required"": [
+                ""id"",
+                ""name""
+            ],
+            ""additionalProperties"": false
+        }
+    }
+}
+```
+
+### 补充说明
+
+我看到 @abondar 之前在做这块功能，也许可以帮忙看看？",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 backward_relations=False 时仍应保留显式标注反向关系的需求及预期 schema。
+tortoise__tortoise-orm-2128,en,hard,"tests/migrations/test_schema_editor_backends.py::test_mssql_alter_field_max_length
+tests/migrations/test_schema_editor_backends.py::test_mysql_alter_field_max_length
+tests/migrations/test_schema_editor_backends.py::test_postgres_alter_field_max_length",AlterField does not update CharField.max_length (PostgreSQL backend → (no-op) generated),"Changing CharField(max_length=…) in a model correctly generates an AlterField operation in the migration file, but tortoise sqlmigrate turns the operation into a (no-op) and produces no SQL. As a result, PostgreSQL column definitions (e.g., VARCHAR(32)) are never updated to the new length (e.g., VARCHAR(40)).
+
+```
+# models.py (initial)
+class Example(models.Model):
+    some_field = fields.CharField(max_length=32, null=True)
+
+# models.py (changed)
+class Example(models.Model):
+    some_field = fields.CharField(max_length=40, null=True)
+```
+
+Generated migration contains a valid AlterField:
+
+```
+ops.AlterField(
+    model_name='Example',
+    name='some_field',
+    field=fields.CharField(null=True, max_length=40),
+)
+```
+Inspect SQL
+
+```
+BEGIN;
+--
+-- Alter field some_field on Example
+--
+-- (no-op)
+COMMIT;
+```
+Applying the migration leaves the column unchanged at VARCHAR(32).
+
+AlterField should detect a change in max_length and produce SQL similar to:
+
+`ALTER TABLE example ALTER COLUMN some_field TYPE character varying(40);
+`
+Running ALTER TABLE ... TYPE varchar(40) manually via RunSQL works as expected.
+
+```
+ops.RunSQL(
+    ""ALTER TABLE some_table_a ALTER COLUMN some_field TYPE character varying(40);"",
+    ""ALTER TABLE some_table_a ALTER COLUMN some_field TYPE character varying(32);"",
+)
+```
+
+",AlterField 不会更新 CharField.max_length（PostgreSQL 后端生成的是 (no-op)）,"在模型里修改 CharField(max_length=…) 之后，迁移文件里能正确生成一条 AlterField 操作，但 tortoise sqlmigrate 会把这个操作变成 (no-op)，一条 SQL 都不生成。结果就是 PostgreSQL 里的列定义（比如 VARCHAR(32)）永远不会更新成新的长度（比如 VARCHAR(40)）。
+
+```
+# models.py (initial)
+class Example(models.Model):
+    some_field = fields.CharField(max_length=32, null=True)
+
+# models.py (changed)
+class Example(models.Model):
+    some_field = fields.CharField(max_length=40, null=True)
+```
+
+生成的迁移里有一条合法的 AlterField：
+
+```
+ops.AlterField(
+    model_name='Example',
+    name='some_field',
+    field=fields.CharField(null=True, max_length=40),
+)
+```
+查看它对应的 SQL：
+
+```
+BEGIN;
+--
+-- Alter field some_field on Example
+--
+-- (no-op)
+COMMIT;
+```
+应用这个迁移之后，列还是 VARCHAR(32)，没有变化。
+
+AlterField 应该能识别出 max_length 变了，并生成类似下面这样的 SQL：
+
+`ALTER TABLE example ALTER COLUMN some_field TYPE character varying(40);
+`
+通过 RunSQL 手动执行 ALTER TABLE ... TYPE varchar(40) 是能正常工作的。
+
+```
+ops.RunSQL(
+    ""ALTER TABLE some_table_a ALTER COLUMN some_field TYPE character varying(40);"",
+    ""ALTER TABLE some_table_a ALTER COLUMN some_field TYPE character varying(32);"",
+)
+```",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 AlterField 识别 max_length 变化的需求和 PostgreSQL 复现，未额外收窄为只支持该后端。
+tortoise__tortoise-orm-2129,en,easy,tests/migrations/test_schema_editor_sql.py::test_create_model_includes_db_default,CreateModel operation doesn't respect db_default on fields,"**Describe the bug**
+When db_default is present on a new field, the CreateModel operation does not create a SQL command for it in the create table SQL.
+
+**To Reproduce**
+```python
+class MyModel(models.Model):
+    dec_field = fields.DecimalField(max_digits=32, decimal_places=18, db_default=3)
+```
+this creates the following operation in migration
+```python
+ops.CreateModel(
+            name='MyModel',
+            fields=[
+                ('id', fields.IntField(generated=True, primary_key=True, unique=True, db_index=True)),
+                ('dec_field', fields.DecimalField(db_default=3, max_digits=32, decimal_places=18)),
+            ],
+            options={'table': 'mymodel', 'app': 'core', 'pk_attr': 'id'},
+          
+        )
+```
+which generates this SQL
+```sql
+--
+-- Create model MyModel
+--
+CREATE TABLE ""mymodel"" (
+    ""id"" SERIAL NOT NULL PRIMARY KEY,
+    ""dec_field"" DECIMAL(32,18) NOT NULL
+);
+```
+
+**Expected behavior**
+It should generate the following SQL:
+
+```sql
+--
+-- Create model MyModel
+--
+CREATE TABLE ""mymodel"" (
+    ""id"" SERIAL NOT NULL PRIMARY KEY,
+    ""dec_field"" DECIMAL(32,18) NOT NULL DEFAULT 3
+);
+```
+
+**Additional context**
+I've tried altering the default value afterwards, which generates a AlterField operation
+```python
+ops.AlterField(
+            model_name='MyModel',
+            name='dec_field',
+            field=fields.DecimalField(db_default=5, max_digits=32, decimal_places=18),
+        )
+```
+and this one works as expected:
+```sql
+--
+-- Alter field dec_field on MyModel
+--
+ALTER TABLE ""mymodel"" ALTER COLUMN ""dec_field"" SET DEFAULT 5;
+```
+",CreateModel 操作没有处理字段上的 db_default,"**问题描述**
+新字段上带了 db_default 时，CreateModel 操作生成的建表 SQL 里没有对应的默认值。
+
+**复现步骤**
+```python
+class MyModel(models.Model):
+    dec_field = fields.DecimalField(max_digits=32, decimal_places=18, db_default=3)
+```
+迁移里生成的操作是：
+```python
+ops.CreateModel(
+            name='MyModel',
+            fields=[
+                ('id', fields.IntField(generated=True, primary_key=True, unique=True, db_index=True)),
+                ('dec_field', fields.DecimalField(db_default=3, max_digits=32, decimal_places=18)),
+            ],
+            options={'table': 'mymodel', 'app': 'core', 'pk_attr': 'id'},
+
+        )
+```
+它生成的 SQL 是：
+```sql
+--
+-- Create model MyModel
+--
+CREATE TABLE ""mymodel"" (
+    ""id"" SERIAL NOT NULL PRIMARY KEY,
+    ""dec_field"" DECIMAL(32,18) NOT NULL
+);
+```
+
+**预期行为**
+应该生成下面这样的 SQL：
+
+```sql
+--
+-- Create model MyModel
+--
+CREATE TABLE ""mymodel"" (
+    ""id"" SERIAL NOT NULL PRIMARY KEY,
+    ""dec_field"" DECIMAL(32,18) NOT NULL DEFAULT 3
+);
+```
+
+**补充说明**
+我试过事后再改一次默认值，这会生成一条 AlterField 操作：
+```python
+ops.AlterField(
+            model_name='MyModel',
+            name='dec_field',
+            field=fields.DecimalField(db_default=5, max_digits=32, decimal_places=18),
+        )
+```
+这一条是正常的：
+```sql
+--
+-- Alter field dec_field on MyModel
+--
+ALTER TABLE ""mymodel"" ALTER COLUMN ""dec_field"" SET DEFAULT 5;
+```",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留 CreateModel 建表时应包含 db_default 的需求、预期 SQL 及 AlterField 对照。
+tortoise__tortoise-orm-2145,en,medium,"tests/migrations/test_operations_state.py::test_delete_model_with_fk
+tests/migrations/test_operations_state.py::test_delete_model_with_m2m
+tests/migrations/test_operations_state.py::test_delete_model_with_o2o",`tortoise migrate` fails to apply migration where model with foreign key was deleted,"**Describe the bug**
+When trying to apply migration (generated by `tortoise makemigrations`) with ops.DeleteModel operation for model which has foreign keys to any other model, `tortoise migrate` fails with error:
+```
+Connection: default
+  APPLY     models.0002_auto_20260315_2155
+  Plan: 1 to apply, 0 to roll back
+  Applying models.0002_auto_20260315_2155...Traceback (most recent call last):
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/bin/tortoise"", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/__init__.py"", line 9, in main
+    cli_main()
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 872, in main
+    raise SystemExit(asyncio.run(run_cli_async()))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/runners.py"", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/runners.py"", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/base_events.py"", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 859, in run_cli_async
+    await args.func(ctx, args)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 827, in _run_migrate_cmd
+    await migrate(ctx, args.app_label, args.migration, args.fake, args.dry_run)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 554, in migrate
+    await _run_migrate(ctx, app_label, migration, fake=fake, dry_run=dry_run)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 535, in _run_migrate
+    await migrate_api(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/api/migrate.py"", line 57, in migrate
+    await executor.migrate(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/executor.py"", line 111, in migrate
+    await step.migration.apply(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/migration.py"", line 52, in apply
+    operation.state_forward(self.app_label, state)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/operations.py"", line 337, in state_forward
+    state.reload_models(models_to_reload)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/schema_generator/state.py"", line 194, in reload_models
+    self._reload(related_models)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/schema_generator/state.py"", line 169, in _reload
+    model_state = self.models[(app_label, model_name)]
+                  ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: ('models', 'SomeModel2')
+```
+
+**To Reproduce**
+Full example can be found [here](https://github.com/RuslanUC/tortoise-bug-delete-model-with-fk-idk).
+
+1. Run `tortoise makemigraions` on app with following models:
+```python
+class SomeModel(Model):
+    id: int = fields.BigIntField(pk=True)
+
+class SomeModel2(Model):
+    id: int = fields.BigIntField(pk=True)
+    fk: SomeModel = fields.ForeignKeyField(""models.SomeModel"")
+```
+2. Remove or comment out SomeModel2.
+3. Run `tortoise makemigrations` again.
+4. Try to run `tortoise migrate`.
+
+**Expected behavior**
+Migration applies without errors.
+
+**Additional context**
+[Removing fk fields first](https://github.com/RuslanUC/piltover/blob/master/piltover/db/migrations/0009_auto_20260315_2023.py#L32-L33) works. 
+I.e. if you add ops.RunSQL to remove constraint and ops.RemoveField to remove field before DeleteModel and then run `tortoise migrate`, everything will work as expected.",删除了带外键的模型之后，`tortoise migrate` 应用迁移失败,"**问题描述**
+用 `tortoise makemigrations` 生成的迁移里，如果有一条 ops.DeleteModel 操作、而被删的模型带有指向其他模型的外键，那么 `tortoise migrate` 应用这个迁移时会报错：
+```
+Connection: default
+  APPLY     models.0002_auto_20260315_2155
+  Plan: 1 to apply, 0 to roll back
+  Applying models.0002_auto_20260315_2155...Traceback (most recent call last):
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/bin/tortoise"", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/__init__.py"", line 9, in main
+    cli_main()
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 872, in main
+    raise SystemExit(asyncio.run(run_cli_async()))
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/runners.py"", line 190, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/runners.py"", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ""/usr/lib64/python3.11/asyncio/base_events.py"", line 654, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 859, in run_cli_async
+    await args.func(ctx, args)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 827, in _run_migrate_cmd
+    await migrate(ctx, args.app_label, args.migration, args.fake, args.dry_run)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 554, in migrate
+    await _run_migrate(ctx, app_label, migration, fake=fake, dry_run=dry_run)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/cli/cli.py"", line 535, in _run_migrate
+    await migrate_api(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/api/migrate.py"", line 57, in migrate
+    await executor.migrate(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/executor.py"", line 111, in migrate
+    await step.migration.apply(
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/migration.py"", line 52, in apply
+    operation.state_forward(self.app_label, state)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/operations.py"", line 337, in state_forward
+    state.reload_models(models_to_reload)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/schema_generator/state.py"", line 194, in reload_models
+    self._reload(related_models)
+  File ""/home/ruslan/dev/python/tmp/tortoise-bug-delete-model-with-fk-idk/.venv/lib64/python3.11/site-packages/tortoise/migrations/schema_generator/state.py"", line 169, in _reload
+    model_state = self.models[(app_label, model_name)]
+                  ~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+KeyError: ('models', 'SomeModel2')
+```
+
+**复现步骤**
+完整的示例仓库在 GitHub 上（RuslanUC/tortoise-bug-delete-model-with-fk-idk）。
+
+1. 对下面这组模型运行 `tortoise makemigraions`：
+```python
+class SomeModel(Model):
+    id: int = fields.BigIntField(pk=True)
+
+class SomeModel2(Model):
+    id: int = fields.BigIntField(pk=True)
+    fk: SomeModel = fields.ForeignKeyField(""models.SomeModel"")
+```
+2. 删掉或注释掉 SomeModel2。
+3. 再运行一次 `tortoise makemigrations`。
+4. 运行 `tortoise migrate`。
+
+**预期行为**
+迁移能正常应用，不报错。
+
+**补充说明**
+先把外键字段删掉是可以绕过去的（我另一个项目 piltover 的迁移 0009 里就是这么做的）。
+也就是说，如果在 DeleteModel 之前先加一条 ops.RunSQL 删掉约束、再加一条 ops.RemoveField 删掉字段，然后跑 `tortoise migrate`，一切都正常。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留删除带外键模型时迁移应成功的需求、完整复现及原文已有的先删外键绕过方式。
+tortoise__tortoise-orm-2236,zh,medium,tests/test_inheritance.py::test_abstract_meta_ordering_is_inherited,subclass does not inherit parent's ordering,"```
+class BaseModel(Model):
+
+    created_at = fields.DatetimeField(auto_now_add=True, description=""创建时间"")
+    updated_at = fields.DatetimeField(auto_now=True, description=""更新时间"")
+
+    class Meta:
+        ordering = [""-created_at""]  # 创建时间倒序排序 目前默认所有子类都不会按创建时间降序排序
+        abstract = True 
+
+
+class Book(BaseModel):
+    name = fields.CharField(max_length=255, description=""书名"")
+    author = fields.CharField(max_length=255, description=""作者"")
+
+    class Meta:
+        table = ""books""
+
+Book.first() or Book.all()
+
+```
+
+没有按照时间创建时间倒序
+
+```
+[
+    {
+    ""updated_at"": ""2025-12-19T02:36:06.495233+00:00"",
+    ""created_at"": ""2025-12-19T02:36:06.495219+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 1,
+    ""name"": ""示例书籍""
+    },
+    {
+    ""updated_at"": ""2025-12-19T02:36:28.903933+00:00"",
+    ""created_at"": ""2025-12-19T02:36:28.903920+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 2,
+    ""name"": ""示例书籍""
+    },
+    {
+    ""updated_at"": ""2025-12-19T02:36:52.893059+00:00"",
+    ""created_at"": ""2025-12-19T02:36:52.893044+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 3,
+    ""name"": ""示例书籍""
+    }
+]
+```",子类没有继承父类 Meta 里的 ordering,"抽象基类 BaseModel 的 Meta 里设置了 `ordering = [""-created_at""]`（按创建时间倒序）。子类 Book 自己也定义了一个 Meta（只写了 table），然后查询 Book.first() 或 Book.all()：
+
+```
+class BaseModel(Model):
+
+    created_at = fields.DatetimeField(auto_now_add=True, description=""创建时间"")
+    updated_at = fields.DatetimeField(auto_now=True, description=""更新时间"")
+
+    class Meta:
+        ordering = [""-created_at""]  # 创建时间倒序排序 目前默认所有子类都不会按创建时间降序排序
+        abstract = True 
+
+
+class Book(BaseModel):
+    name = fields.CharField(max_length=255, description=""书名"")
+    author = fields.CharField(max_length=255, description=""作者"")
+
+    class Meta:
+        table = ""books""
+
+Book.first() or Book.all()
+
+```
+
+结果没有按创建时间倒序：
+
+```
+[
+    {
+    ""updated_at"": ""2025-12-19T02:36:06.495233+00:00"",
+    ""created_at"": ""2025-12-19T02:36:06.495219+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 1,
+    ""name"": ""示例书籍""
+    },
+    {
+    ""updated_at"": ""2025-12-19T02:36:28.903933+00:00"",
+    ""created_at"": ""2025-12-19T02:36:28.903920+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 2,
+    ""name"": ""示例书籍""
+    },
+    {
+    ""updated_at"": ""2025-12-19T02:36:52.893059+00:00"",
+    ""created_at"": ""2025-12-19T02:36:52.893044+00:00"",
+    ""author"": ""作者姓名"",
+    ""id"": 3,
+    ""name"": ""示例书籍""
+    }
+]
+```
+
+目前的表现是：所有子类默认都不会按创建时间降序排序，也就是父类 Meta 里的 ordering 没有被子类继承。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,原文是中文（代码 + 中文注释 + 一句中文说明），标题是英文。标题改中文，正文把代码注释里那句话和那句说明整理成正文，代码和输出逐字保留；Codex 复核：保留原生中文说明和代码输出，仅将英文标题与代码中的排序诉求整理为中文正文。
+tortoise__tortoise-orm-2255,zh,hard,tests/test_queryset.py::test_distinct_count_with_m2m_join,count() 方法在多对多条件查询distinct()后，会返回所有的数，不是distinct()后实际的数量,"**Describe the bug**
+多条件复合查询，含多对多查询，调用distinct()后再使用count()统计数
+
+**To Reproduce**
+应该为distinct()后打印出来的实列数
+
+**Expected behavior**
+实际返回了所有多对多的匹配结果，没有去处重复
+
+**Additional context**
+python3.12
+tortoise-orm[asyncpg]==0.25.3
+
+",,,,Codex（AI 复核，2026-09-18）,REJECT,原文标题和正文本来就是中文，不改写、不导入；Codex 复核：REJECT 仅表示跳过本次中文改写导入：原题标题及正文已是中文，zh_title/zh_body 留空符合原备注，不否决原题。
+tortoise__tortoise-orm-2269,en,medium,"tests/test_queryset.py::test_delete_filter_by_related_field
+tests/test_queryset.py::test_update_filter_by_related_field",Delete with related field query fails due to invalid SQL generation,"**Describe the bug**
+Using a filter query to select rows for deletion fails if the filter query is a related field query (i.e. across a foreign key).
+
+**To Reproduce**
+```
+from tortoise import Model, fields, run_async
+from tortoise.contrib.test import init_memory_sqlite
+
+
+class Device(Model):
+    device_id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=16)
+
+
+class LogMessage(Model):
+    device = fields.ForeignKeyField(""models.Device"", related_name=""log_messages"")
+    date_created = fields.DatetimeField(auto_now_add=True)
+    message = fields.CharField(max_length=1024)
+
+
+@init_memory_sqlite
+async def main() -> None:
+    await LogMessage.filter(device__name=""test"").delete()
+
+
+if __name__ == ""__main__"":
+    run_async(main())
+```
+
+**Expected behavior**
+In the example above, all ""LogMessage"" rows referencing devices having the name ""test"" should be deleted.
+
+Instead, an invalid SQL DELETE query is generated.
+
+",按关联字段过滤后 delete，生成的 SQL 不合法，删除失败,"**问题描述**
+用 filter 查询选出要删除的行时，如果过滤条件是关联字段查询（也就是跨外键的查询），删除会失败。
+
+**复现步骤**
+```
+from tortoise import Model, fields, run_async
+from tortoise.contrib.test import init_memory_sqlite
+
+
+class Device(Model):
+    device_id = fields.IntField(pk=True)
+    name = fields.CharField(max_length=16)
+
+
+class LogMessage(Model):
+    device = fields.ForeignKeyField(""models.Device"", related_name=""log_messages"")
+    date_created = fields.DatetimeField(auto_now_add=True)
+    message = fields.CharField(max_length=1024)
+
+
+@init_memory_sqlite
+async def main() -> None:
+    await LogMessage.filter(device__name=""test"").delete()
+
+
+if __name__ == ""__main__"":
+    run_async(main())
+```
+
+**预期行为**
+上面的例子里，所有引用了 name 为 ""test"" 的 Device 的 ""LogMessage"" 行都应该被删掉。
+
+实际上生成的是一条不合法的 SQL DELETE 语句。",Claude Opus 5（初稿，2026-09-18）,Codex（AI 复核，2026-09-18）,ACCEPT,Codex 复核：保留关联字段过滤后删除匹配记录的需求及完整复现，未从测试补丁增加 update 要求。

@@ -7,3 +7,6 @@ docs/plan/report.html linguist-generated=true -diff
 *.png binary
 *.jpg binary
 *.pdf binary
+
+# 已发布题面的重灌原件，CSV 单元格内的换行和空白参与 content_hash，必须逐字节保留。
+datasets/benchmark-dev/localize-2026-09-18.csv -text -whitespace
