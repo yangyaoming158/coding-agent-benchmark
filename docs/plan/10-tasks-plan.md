@@ -813,13 +813,13 @@
   "在给定预算内没修完"，和"改错了"同一类，该交给 Judge 判，照 `is_error` 的字面
   判成故障会触发重试、白花钱，归因也会指错方向。
 
-### E3-T6 自研 MiniAgent
+### E3-T6 自研 MiniAgent ✅ 已于 2026-09-19 完成
 - **Goal**：ReAct 循环 + 工具（read_file/list_dir/grep/apply_edit[/run_tests]）+ token 记账
 - **Req**：FR-10, MET-06 · **Deps**：E3-T1 · **🔑**
 - **AC**：Golden 集上至少解决 1 题；轨迹为原生结构化 JSONL；单题成本可核算
 - **Why**：满足"自研 Agent"要求，且是**外部 Agent 全部失败时的保底参赛者**
 - **P1 · C:L · E:2d · 🔑**
-- **2026-09-19 实现与本地验收通过，待提交 / PR review / 合并**：
+- **实际交付**（2026-09-19）：
   `miniagent_runtime.py` 实现四工具循环，`MiniAgentRunner` 共用提示词和失败判据；
   复用现有 `bench-base:py311`，无新依赖、无镜像构建，不改冻结件。
   真实 DeepSeek Flash（接口已不列旧 `deepseek-chat`，thinking 关闭）Golden 实验 **#145** / task run **#1407**：
