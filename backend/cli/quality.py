@@ -57,6 +57,10 @@ from app.infrastructure.models.benchmark import (
 #: 报告落点，进版本库（KB 级）。
 QUALITY_ROOT = REPO_ROOT / "datasets" / "quality"
 
+#: 改写成中文的题面打的标签（`cli/localize.py`）。值在这里抄一份而不 import：
+#: `cli.localize` 一导入就带上 `cli.queue` 和整套 ORM，报告这边只认一个字符串。
+REWRITTEN_TAG = "issue-rewritten-zh"
+
 #: 不给 `--set` 时看这两套：自建主数据集 + 官方校准集（§8.1 的 L2 和 L2'）。
 DEFAULT_SLUGS: tuple[str, ...] = ("benchmark-cn-v1", OFFICIAL_DATASET_ID)
 
@@ -86,6 +90,9 @@ class TaskRow:
     p2p_count: int
     agent_timeout_s: int
     test_timeout_s: int
+    #: 题面是改写成中文的（§8.5 Plan B，`issue-rewritten-zh` 标签），不是原生的中文 issue。
+    #: 报告里必须分得开：MET-05 的"中文题"数的是题面语言，"国产项目 / 中文社区"这一层它顶不上。
+    rewritten: bool = False
 
 
 @dataclass(slots=True)
@@ -118,6 +125,9 @@ class SetProfile:
     def languages(self) -> dict[str, int]:
         return dict(Counter(t.language for t in self.tasks).most_common())
 
+    def rewritten_count(self) -> int:
+        return sum(1 for t in self.tasks if t.rewritten)
+
     def difficulty(self) -> dict[str, int]:
         return dict(Counter(t.difficulty for t in self.tasks).most_common())
 
@@ -146,6 +156,7 @@ class SetProfile:
             "repos": self.by_repo(),
             "domestic_count": self.domestic_count(),
             "languages": self.languages(),
+            "rewritten_count": self.rewritten_count(),
             "difficulty": self.difficulty(),
             "f2p": self.f2p(),
             "p2p": self.p2p(),
@@ -184,6 +195,7 @@ def load_profile(session: Session, slug: str, version: str | None) -> SetProfile
             BenchmarkTask.pass_to_pass,
             BenchmarkTask.agent_timeout_s,
             BenchmarkTask.test_timeout_s,
+            BenchmarkTask.tags,
         )
         .join(BenchmarkSetItem, BenchmarkSetItem.benchmark_task_id == BenchmarkTask.id)
         .join(Repository, Repository.id == BenchmarkTask.repository_id)
@@ -201,6 +213,7 @@ def load_profile(session: Session, slug: str, version: str | None) -> SetProfile
             p2p_count=len(p2p),
             agent_timeout_s=agent_timeout,
             test_timeout_s=test_timeout,
+            rewritten=REWRITTEN_TAG in (tags or []),
         )
         for (
             task_id,
@@ -212,6 +225,7 @@ def load_profile(session: Session, slug: str, version: str | None) -> SetProfile
             p2p,
             agent_timeout,
             test_timeout,
+            tags,
         ) in rows
     ]
     digest = dataset.snapshot_digest
@@ -389,6 +403,7 @@ class QualityReport:
             "task_count": len(tasks),
             "languages": dict(Counter(t.language for t in tasks).most_common()),
             "chinese_count": sum(1 for t in tasks if t.language in ("zh", "mixed")),
+            "rewritten_count": sum(1 for t in tasks if t.rewritten),
             "difficulty": dict(Counter(t.difficulty for t in tasks).most_common()),
             "domestic_count": sum(1 for t in tasks if t.is_domestic),
         }
@@ -489,22 +504,33 @@ def render_markdown(report: QualityReport) -> str:
         "",
         "## 三、语言分布",
         "",
-        "| 数据集版本 | " + " | ".join(("zh", "mixed", "en")) + " | 中文（zh+mixed） |",
-        "|:---|---:|---:|---:|---:|",
+        "| 数据集版本 | "
+        + " | ".join(("zh", "mixed", "en"))
+        + " | 中文（zh+mixed） | 其中改写成中文 |",
+        "|:---|---:|---:|---:|---:|---:|",
     ]
     for p in report.profiles:
         langs = p.languages()
         zh, mixed = langs.get("zh", 0), langs.get("mixed", 0)
         lines.append(
             f"| `{p.name}` | {zh} | {mixed} | {langs.get('en', 0)} "
-            f"| {zh + mixed}（{_pct(zh + mixed, p.task_count)}） |"
+            f"| {zh + mixed}（{_pct(zh + mixed, p.task_count)}） | {p.rewritten_count()} |"
         )
     tl = totals["languages"]
     lines.append(
         f"| **合计** | {tl.get('zh', 0)} | {tl.get('mixed', 0)} | {tl.get('en', 0)} "
         f"| **{totals['chinese_count']}**"
-        f"（{_pct(totals['chinese_count'], totals['task_count'])}） |"
+        f"（{_pct(totals['chinese_count'], totals['task_count'])}） | {totals['rewritten_count']} |"
     )
+    if totals["rewritten_count"]:
+        lines += [
+            "",
+            f"「其中改写成中文」是打了 `{REWRITTEN_TAG}` 标签的题：仓库里的 issue 原文是英文，"
+            "题面是对着原 issue、F2P 用例和官方补丁**逐道改写**成中文的（§8.5 Plan B，"
+            "不是机器翻译；每道题谁出的初稿、谁复核的、为什么收，记在 "
+            "`datasets/benchmark-dev/localize-*.csv` 的 `drafter` / `reviewer` / `note` 列）。"
+            "它们算「题面是中文的题」，**不算**国产项目或中文社区的题。",
+        ]
     if report.unpublished_chinese:
         extra = "、".join(f"`{k}` {v} 道" for k, v in report.unpublished_chinese.items())
         lines += [

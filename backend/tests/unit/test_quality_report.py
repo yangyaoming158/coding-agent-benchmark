@@ -21,6 +21,7 @@ def a_task(
     f2p: int = 2,
     p2p: int = 1000,
     domestic: bool = False,
+    rewritten: bool = False,
 ) -> TaskRow:
     return TaskRow(
         task_id=task_id,
@@ -32,6 +33,7 @@ def a_task(
         p2p_count=p2p,
         agent_timeout_s=720,
         test_timeout_s=480,
+        rewritten=rewritten,
     )
 
 
@@ -221,3 +223,33 @@ def test_to_dict_is_json_shaped() -> None:
     assert data["mined_funnel"]["source_dataset_id"] == "benchmark-dev"
     assert data["mined_funnel"]["repos"][0]["repo"] == "pallets/click"
     assert data["official_funnel"] is None
+
+
+def test_rewritten_chinese_is_disclosed_separately() -> None:
+    """改写成中文的题（§8.5 Plan B）在语言表里单独一列，合计也单独数。
+
+    它们算"题面是中文"，但不是国产项目、也不是中文社区的 issue，混进 zh 一列不说明来源就是虚报。
+    """
+    profile = a_profile(
+        [
+            a_task("pallets__click-1", language="zh", rewritten=True),
+            a_task("pallets__click-2", language="zh", rewritten=True),
+            a_task("tortoise__tortoise-orm-3", language="zh"),
+        ]
+    )
+    assert profile.rewritten_count() == 2
+    assert profile.to_dict()["rewritten_count"] == 2
+    report = QualityReport(
+        generated_at="2026-09-18T00:00:00+00:00",
+        profiles=[profile],
+        unpublished_chinese={},
+        mined=[],
+        mined_source=None,
+        official=None,
+    )
+    assert report.totals()["rewritten_count"] == 2
+    text = render_markdown(report)
+    assert "| 其中改写成中文 |" in text
+    assert "`drafter` / `reviewer` / `note`" in text
+    assert "| 3 | 0 | 0 | 3（100%） | 2 |" in text
+    assert "不是机器翻译" in text
