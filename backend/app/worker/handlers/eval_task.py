@@ -327,9 +327,9 @@ def _build_runner(loaded: _Loaded, payload: EvalTaskPayload, *, store: ArtifactS
         return runner_class.from_params(
             loaded.agent_params, patches={loaded.task.task_id: loaded.task.gold_patch}
         )
-    # Claude Code 要知道打哪个端点、给几轮预算，两样都在 params 里。
+    # Claude Code / MiniAgent 的端点、轮次和预算在 params 里。
     # 镜像不在这里读 —— 它走 `AgentConfig.image`（`_agent_config()` 已经取过了）
-    if class_name == "ClaudeCodeRunner":
+    if class_name in {"ClaudeCodeRunner", "MiniAgentRunner"}:
         return runner_class.from_params(loaded.agent_params)
     return runner_class()
 

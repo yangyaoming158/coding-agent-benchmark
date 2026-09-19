@@ -819,6 +819,18 @@
 - **AC**：Golden 集上至少解决 1 题；轨迹为原生结构化 JSONL；单题成本可核算
 - **Why**：满足"自研 Agent"要求，且是**外部 Agent 全部失败时的保底参赛者**
 - **P1 · C:L · E:2d · 🔑**
+- **2026-09-19 实现与本地验收通过，待提交 / PR review / 合并**：
+  `miniagent_runtime.py` 实现四工具循环，`MiniAgentRunner` 共用提示词和失败判据；
+  复用现有 `bench-base:py311`，无新依赖、无镜像构建，不改冻结件。
+  真实 DeepSeek Flash（接口已不列旧 `deepseek-chat`，thinking 关闭）Golden 实验 **#145** / task run **#1407**：
+  `bench-golden__auth-2` **RESOLVED 1/1，平台故障 0，重试 0，独立测试 7 passed**。
+  原生 JSONL 记录 4 轮模型调用和全部四种工具；输入 6082 / 输出 471 / 缓存输入 4096，
+  单题估算 $0.000592788（`estimated`），含三次真实契约的本批总估算 **0.01276924 元 < 1 元预算**。
+  无付费 MiniAgent 测试 **30 passed**；真实契约 **5 passed / 1 skipped**（可控受保护路径用 sandbox 测试覆盖）；
+  `make check` **2021 passed / 3 skipped / 91 deselected**，Worker 已停止。
+  实验 `dirty=true`，只作开发验收、不进排行榜；正式实验须提交后的干净代码、重新核价和预算授权。
+  [验收记录、运行方法与 AC 对账](../miniagent-acceptance-2026-09-19.md)，
+  [费用与摘要证据](../miniagent-acceptance-2026-09-19.json)。
 
 ### E3-T7 国产 CLI Runner（Qwen Code 等）
 - **Req**：FR-09（国产） · **Deps**：E3-T4 · **P1 · C:M · E:1.5d · 🐳🔑**
