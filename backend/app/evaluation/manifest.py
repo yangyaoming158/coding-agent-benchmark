@@ -41,6 +41,7 @@ from typing import Any
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
+from app.domain.cost import TokenPrices
 from app.domain.manifest import DATASET_SNAPSHOT_DIGEST_KEY, MANIFEST_VERSION, VOLATILE_KEYS
 from app.domain.protocol import PROTOCOL_VERSION
 from app.infrastructure.gitmeta import git_state
@@ -102,6 +103,8 @@ class AgentRef:
     config_hash: str
     adapter_class: str
     params: dict[str, Any]
+    #: 本次运行采用的 token 单价快照。重放必须继续使用这份价格，不能读数据库现值。
+    token_prices: TokenPrices = field(default_factory=TokenPrices)
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +213,11 @@ def collect_provenance(
             config_hash=config.config_hash,
             adapter_class=agent.adapter_class,
             params=dict(config.params or {}),
+            token_prices=TokenPrices(
+                input_per_mtok=config.price_input_per_mtok,
+                output_per_mtok=config.price_output_per_mtok,
+                cache_read_per_mtok=config.price_cache_read_per_mtok,
+            ),
         ),
         images=images_for_tasks(session, task_ids),
         limits={
@@ -327,6 +335,7 @@ def build_manifest(prov: RunProvenance) -> dict[str, Any]:
             "config_hash": prov.agent.config_hash,
             "adapter_class": prov.agent.adapter_class,
             "params": prov.agent.params,
+            "pricing": prov.agent.token_prices.as_manifest(),
         },
         "images": {
             ref.environment_id: {"tag": ref.tag, "digest": ref.digest} for ref in prov.images
@@ -395,6 +404,21 @@ def pinned_image_ref(manifest: Mapping[str, Any], environment_id: str) -> str | 
         str(tag) if tag else None,
         str(digest) if digest else None,
     )
+
+
+def pinned_token_prices(manifest: Mapping[str, Any]) -> TokenPrices | None:
+    """读取 manifest 中冻结的 token 单价；旧 manifest 没有该块时返回 None。
+
+    新 manifest 一旦写了 `pricing`，哪怕三项都是 null，也表示“启动时没有配置
+    单价”。不能退回数据库现值，否则后来补价格会悄悄改变这次实验的成本口径。
+    """
+    agent = block(manifest, "agent")
+    if "pricing" not in agent:
+        return None
+    prices = TokenPrices.from_manifest(agent["pricing"])
+    if prices is None:
+        raise ProvenanceError("manifest.agent.pricing 不是合法的 token 单价块")
+    return prices
 
 
 # ── 比两份 manifest ─────────────────────────────────────────
@@ -486,4 +510,5 @@ __all__ = [
     "host_facts",
     "images_for_tasks",
     "pinned_image_ref",
+    "pinned_token_prices",
 ]

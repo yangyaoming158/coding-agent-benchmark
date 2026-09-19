@@ -56,6 +56,9 @@ class AgentConfig(Base):
     #: 并把 cost_source 标成 estimated，报告里必须和真实上报的费用区分显示。
     price_input_per_mtok: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 4))
     price_output_per_mtok: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 4))
+    #: 缓存读取单价必须独立记录。缓存 token 已包含在输入 token 里，估算时先从
+    #: 普通输入中扣掉，再按这一档计价；混用输入价会系统性高估。
+    price_cache_read_per_mtok: Mapped[Decimal | None] = mapped_column(sa.Numeric(10, 4))
     #: 配置内容的规范化哈希，用来判断两次实验用的是不是同一套参数。
     config_hash: Mapped[str] = mapped_column(sa.CHAR(64), nullable=False)
     enabled: Mapped[bool] = mapped_column(sa.Boolean, nullable=False, default=True)

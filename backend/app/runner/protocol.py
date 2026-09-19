@@ -52,6 +52,7 @@ from typing import Any, Final, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from app.domain.cost import TokenPrices
 from app.domain.enums import CostSource, IssueLanguage
 
 #: 线上协议的版本号。它描述的是 stdin/stdout 这套报文格式，
@@ -458,6 +459,9 @@ class AgentConfig:
     memory_mb: int | None = None
     #: Agent 容器的 CPU 配额。None 同上。
     cpus: float | None = None
+    #: 平台从数据库/manifest 取出的三档 token 单价。它不会下发给被测 AI；
+    #: 适配器自报不了成本时，由 harness 用同一份价格补成 estimated。
+    token_prices: TokenPrices | None = None
 
 
 @runtime_checkable

@@ -1203,7 +1203,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   新增 35 个测试（单元 19 + 集成 16），全量 1683 passed / 4 skipped。
   十节实现记录在 `07-platform-architecture.md` §13.5。
 
-### E5-T5 token→成本估算（协议纪律 3 的 `estimated`）
+### E5-T5 token→成本估算 ✅ 已于 2026-09-19 完成（协议纪律 3 的 `estimated`）
 - **Goal**：给 `agent_configs` 配一张单价表（输入 / 输出 / 缓存读**分开计价**），把 `cost_source=unavailable` 的 attempt 按 `token_usage × 单价` 估出 `cost_usd` 并标成 `estimated`
 - **Req**：MET-06 · **Deps**：E4-T4
 - **AC**：估出来的数和服务商账单在同一量级；`reported` / `estimated` / `unavailable` 三种来源在排行榜和报告里看得出区别（协议纪律 3 要求"必须区分显示"）；缓存读按缓存单价算 —— 它比普通输入便宜一个数量级，混着算会系统性偏高
@@ -1216,6 +1216,16 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   而那是报告里最有洞察力的一张图。E5-T2 已经补了 `RunProgress.cost_missing_attempts`，
   能让人看见"这个金额不全"，但看见不等于补上。
 - **P1 · C:S · E:0.5d**
+- **实际交付**（2026-09-19）：迁移 `0007` 为 `agent_configs` 增加独立缓存读取单价；
+  `app/domain/cost.py` 用纯函数按“普通输入 + 缓存读取 + 输出”三档估算，
+  `app/evaluation/costing.py` 只把正常结束、token 与价格完整的 `unavailable` 补成
+  `estimated`，绝不覆盖 `reported`，缺数据或数据矛盾继续保持 `unavailable`。
+  三档价格冻结进 manifest 1.1，Worker 和 MiniAgent 使用同一快照与同一公式。
+  `cli.experiment status` 分开显示三种来源；后端排行榜聚合原有三档计数继续复用，
+  本卡按约束未改 API / `frontend/`，完整 HTML 展示留给 E10-T3。
+  已有实验 #125 的实报 `$0.3453` 对比估算约 `$0.3261`（误差 5.6%）；
+  迁移在 `bench_test` 完成升降级与 `alembic check`，完整非付费测试 2051 passed / 2 skipped。
+  实现记录见 `07-platform-architecture.md` §13.6。
 
 ---
 

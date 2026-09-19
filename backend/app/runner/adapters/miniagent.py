@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Mapping
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.domain.cost import estimate_cost_usd
 from app.domain.enums import CostSource
 from app.runner.adapters.cli_text import shared_failure
 from app.runner.adapters.prompt import build_task_prompt
@@ -78,16 +78,6 @@ class MiniAgentRunner:
             raise ValueError("thinking 必须是 enabled 或 disabled")
         if not 1 <= self.max_turns <= 100 or not 1 <= self.max_output_tokens <= 8192:
             raise ValueError("MiniAgent max_turns 必须在 1–100，max_output_tokens 在 1–8192")
-        self.prices = self.params.get("prices_usd_per_mtok")
-        if self.prices is not None:
-            if not isinstance(self.prices, dict) or set(self.prices) != {
-                "input",
-                "output",
-                "cache_read",
-            }:
-                raise ValueError("prices_usd_per_mtok 必须包含 input/output/cache_read")
-            if any(not math.isfinite(float(v)) or float(v) < 0 for v in self.prices.values()):
-                raise ValueError("token 单价必须是非负有限数")
 
     @classmethod
     def from_params(cls, params: Mapping[str, Any]) -> MiniAgentRunner:
@@ -181,17 +171,22 @@ class MiniAgentRunner:
             and not container.timed_out
             and not container.oom_killed
         )
-        if usage is not None and self.prices is not None and finished:
-            cost = (
-                (usage.input - usage.cache_read) * float(self.prices["input"])
-                + usage.cache_read * float(self.prices["cache_read"])
-                + usage.output * float(self.prices["output"])
-            ) / 1_000_000
+        if usage is not None and config.token_prices is not None and finished:
+            estimated = estimate_cost_usd(
+                tokens_input=usage.input,
+                tokens_output=usage.output,
+                tokens_cache_read=usage.cache_read,
+                prices=config.token_prices,
+            )
+            cost = float(estimated) if estimated is not None else None
+        if cost is not None:
             events.append(
                 {
                     "type": "cost_estimate",
                     "ts": datetime.now(UTC).isoformat(),
-                    "prices_usd_per_mtok": self.prices,
+                    "prices_usd_per_mtok": config.token_prices.as_manifest()
+                    if config.token_prices is not None
+                    else None,
                     "cost_usd": cost,
                     "price_source": self.params.get("price_source"),
                     "model": task.model.name,

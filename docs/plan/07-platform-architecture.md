@@ -44,7 +44,7 @@
 `id PK` · `name UQ`(如 `claude-code`) · `display_name` · `kind enum(MOCK|ORACLE|NOOP|CLI|CUSTOM)` · `adapter_class` · `homepage` · `is_domestic bool`
 
 **`agent_configs`** — Agent × 模型 × 参数 的具体组合（**这才是排行榜上的"参赛者"**）
-`id PK` · `agent_id FK` · `label`(如 `aider@deepseek-chat`) · `agent_version` · `model_name` · `params jsonb`(temperature/max_turns/…) · `price_input_per_mtok numeric` · `price_output_per_mtok numeric` · `config_hash` · `enabled bool`
+`id PK` · `agent_id FK` · `label`(如 `aider@deepseek-chat`) · `agent_version` · `model_name` · `params jsonb`(temperature/max_turns/…) · `price_input_per_mtok numeric` · `price_output_per_mtok numeric` · `price_cache_read_per_mtok numeric` · `config_hash` · `enabled bool`
 > 把"Agent"与"配置"分开是必要的：同一个 Aider 接 3 个模型就是 3 个参赛者，而适配器只有 1 个。
 
 ### C. 评测域
@@ -55,7 +55,7 @@
 > `manifest jsonb` 承载 §24 可复现性的全部字段（镜像 digest 表、harness git sha、数据集哈希、环境变量白名单、随机种子）。
 
 **`evaluation_task_runs`** — 单题单次执行（核心宽表）
-`id PK` · `evaluation_run_id FK` · `benchmark_task_id FK` · `attempt_no smallint` · `lifecycle_status enum` · `infra_outcome enum` · `agent_outcome enum` · `queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at` · `agent_duration_ms/test_duration_ms/total_duration_ms` · `exit_code` · `tokens_input/tokens_output/tokens_total bigint` · `cost_usd numeric` · `cost_source enum` · `turns` · `patch_artifact_id FK NULL` · `files_changed/lines_added/lines_deleted` · `f2p_passed/f2p_total/p2p_passed/p2p_total` · `error_code` · `error_message_excerpt varchar(2000)` · `worker_id` · `retry_of_id FK NULL` · **`is_canonical boolean`**（这次 attempt 是否被选为统计依据，规则见协议 C-24）· **`raw_patch_empty boolean`** · **`protected_path_edit_attempted boolean`** · **`filtered_change_reasons jsonb`**
+`id PK` · `evaluation_run_id FK` · `benchmark_task_id FK` · `attempt_no smallint` · `lifecycle_status enum` · `infra_outcome enum` · `agent_outcome enum` · `queued_at/prepare_started_at/agent_started_at/agent_finished_at/test_started_at/test_finished_at/judged_at/completed_at` · `agent_duration_ms/test_duration_ms/total_duration_ms` · `exit_code` · `tokens_input/tokens_output/tokens_cache_read/tokens_total bigint` · `cost_usd numeric` · `cost_source enum` · `turns` · `patch_artifact_id FK NULL` · `files_changed/lines_added/lines_deleted` · `f2p_passed/f2p_total/p2p_passed/p2p_total` · `error_code` · `error_message_excerpt varchar(2000)` · `worker_id` · `retry_of_id FK NULL` · **`is_canonical boolean`**（这次 attempt 是否被选为统计依据，规则见协议 C-24）· **`raw_patch_empty boolean`** · **`protected_path_edit_attempted boolean`** · **`filtered_change_reasons jsonb`**
 索引：`(evaluation_run_id, lifecycle_status)`、`(benchmark_task_id)`、`(agent_outcome)`、UQ`(evaluation_run_id, benchmark_task_id, attempt_no)`、**部分唯一索引 `(evaluation_run_id, benchmark_task_id) WHERE is_canonical`**（保证每题只有一个认定结果）
 
 > **`is_canonical` 为什么必须是显式字段**：一道题重试多次时，被选作统计依据的那一次**不一定是编号最大的**。比如第 1 次就遇到 AI 超时（按协议 C-18 不可重试），它就是认定结果。靠"取最大 attempt_no"推断会算错。协议 C-57、C-58 明确禁止临时推断。
@@ -250,6 +250,33 @@ manifest 里没记 digest 时退回按 tag 起，行为和 E5-T4 之前一样 �
 
 `bench-env@sha256:f9c0afc8f30e…` 这个 digest 引用本机实测能直接起容器
 （`docker run --rm --network none 'bench-env@sha256:f9c0…' python -c ...` 正常输出）。
+
+---
+
+## 13.6 token→成本估算落地（2026-09-19，E5-T5）
+
+平台现在只补一种结果：适配器返回 `cost_source=unavailable`、没有运行错误、三项 token
+完整、三档单价也完整。统一公式在 `app/domain/cost.py`：
+
+```
+普通输入 token = tokens_input - tokens_cache_read
+cost_usd = (普通输入 × 输入价 + 缓存读取 × 缓存价 + 输出 × 输出价) / 1_000_000
+```
+
+缓存读取是输入的一部分，不能再加一次；`tokens_cache_read > tokens_input` 说明数据自相
+矛盾，保持 `unavailable`。`reported` 是 Agent 或服务商给出的事实，平台绝不覆盖。
+带错误的运行可能只收到了中途 token，同样不估算，避免把部分金额冒充完整账单。
+
+迁移 `0007` 给 `agent_configs` 增加可空的 `price_cache_read_per_mtok`。输入、输出、缓存
+读取三档价格会随实验一起写进 manifest（结构版本 1.1）；Worker 优先使用这份快照，
+只有 E5-T5 之前的旧 manifest 才回退到数据库现值。这样服务商日后调价不会改变旧实验
+的成本口径。MiniAgent 和平台补算共用同一个纯函数，不再维护两套公式。
+
+现有后端排行榜聚合已经分别返回 `reported / estimated / unavailable` 计数，本卡没有改
+API，也没有改 `frontend/`。`cli.experiment status` 现在直接显示三档计数；完整 HTML
+报告中的成本来源表和成本—能力矩阵留给 E10-T3 报告生成器。已有实验 #125 的 22 次
+Aider 实报合计 `$0.3453`，按同批 token 和历史价目估算为约 `$0.3261`，误差 5.6%，
+不需要新付费实验也能验证量级。
 
 ---
 

@@ -47,6 +47,7 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import (
     AgentOutcome,
+    CostSource,
     EvaluationRunStatus,
     InfraOutcome,
     JobState,
@@ -87,6 +88,7 @@ class AttemptRow:
     is_canonical: bool
     infra_outcome: InfraOutcome | None
     agent_outcome: AgentOutcome | None
+    cost_source: CostSource | None
     cost_usd: Decimal | None
     tokens_total: int | None
     prepare_started_at: datetime | None
@@ -108,16 +110,10 @@ class RunProgress:
     strict_resolve_rate: Decimal | None
     effective_resolve_rate: Decimal | None
     total_cost_usd: Decimal
-    #: 有多少次 attempt **报不出成本**（`cost_source=unavailable`）。
-    #: 和 `pending_control_run` 一样，它在 `evaluation_runs` 里没有对应的列，
-    #: 报出来是为了让人知道上面那个金额有多少水分。
-    #:
-    #: 为什么必须单独数：`total_cost_usd` 是把 None 跳过之后加出来的，
-    #: 一次全员报不出成本的实验会显示成 `$0.0000` —— 读起来就是"没花钱"。
-    #: 2026-09-06 接 Claude Code 时撞到：走中转端点的运行一律报 unavailable
-    #: （那边的 `total_cost_usd` 是错的，不是缺的），于是整场实验的成本栏是 0，
-    #: 而实际花掉的钱一分不少。协议纪律 3 管的是适配器，这一条是它在报表侧的影子。
-    cost_missing_attempts: int
+    #: 三种成本来源分别计数；NULL 表示尚未形成成本结论，不混进 unavailable。
+    cost_reported_attempts: int
+    cost_estimated_attempts: int
+    cost_unavailable_attempts: int
     total_tokens: int
     retry_count: int
     recovered_infra_failure_count: int
@@ -128,6 +124,11 @@ class RunProgress:
     def leaderboard_eligible(self) -> bool:
         """能不能进排行榜（协议 C-26）。`PARTIAL` 一律不能。"""
         return self.status is EvaluationRunStatus.COMPLETED
+
+    @property
+    def cost_missing_attempts(self) -> int:
+        """兼容旧调用方；“缺成本”只等于明确标记为 unavailable。"""
+        return self.cost_unavailable_attempts
 
 
 def counts_as_infra_failure(outcome: InfraOutcome) -> bool:
@@ -174,7 +175,9 @@ def summarize(
 
     # 成本和 token 累计**全部** attempt（C-56）：重试也是真金白银花掉的
     cost = sum((r.cost_usd for r in rows if r.cost_usd is not None), Decimal(0))
-    cost_missing = sum(1 for r in rows if r.cost_usd is None)
+    cost_reported = sum(1 for r in rows if r.cost_source is CostSource.REPORTED)
+    cost_estimated = sum(1 for r in rows if r.cost_source is CostSource.ESTIMATED)
+    cost_unavailable = sum(1 for r in rows if r.cost_source is CostSource.UNAVAILABLE)
     tokens = sum(r.tokens_total or 0 for r in rows)
 
     tasks_seen = {r.benchmark_task_id for r in rows}
@@ -196,7 +199,9 @@ def summarize(
         strict_resolve_rate=_rate(resolved, total_tasks),
         effective_resolve_rate=_rate(resolved, attributable),
         total_cost_usd=cost,
-        cost_missing_attempts=cost_missing,
+        cost_reported_attempts=cost_reported,
+        cost_estimated_attempts=cost_estimated,
+        cost_unavailable_attempts=cost_unavailable,
         total_tokens=tokens,
         retry_count=retry_count,
         recovered_infra_failure_count=_recovered(rows),
@@ -292,6 +297,7 @@ def load_attempts(session: Session, evaluation_run_id: int) -> list[AttemptRow]:
             EvaluationTaskRun.is_canonical,
             EvaluationTaskRun.infra_outcome,
             EvaluationTaskRun.agent_outcome,
+            EvaluationTaskRun.cost_source,
             EvaluationTaskRun.cost_usd,
             EvaluationTaskRun.tokens_total,
             EvaluationTaskRun.prepare_started_at,

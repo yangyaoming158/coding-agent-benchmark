@@ -79,6 +79,7 @@ import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
 from app.benchmark.schema import TaskDefinition
+from app.domain.cost import TokenPrices
 from app.domain.enums import EvaluationRunStatus, InfraOutcome, LifecycleStatus, PatchKind
 from app.domain.retry import AttemptRecord, decide_next
 from app.evaluation import progress as progress_mod
@@ -88,7 +89,7 @@ from app.evaluation.jobs import (
     enqueue_eval_task,
     run_key_for,
 )
-from app.evaluation.manifest import pinned_image_ref
+from app.evaluation.manifest import ProvenanceError, pinned_image_ref, pinned_token_prices
 from app.evaluation.orchestrator import mark_running
 from app.evaluation.persistence import persist_task_run
 from app.evaluation.task_run import TaskRunInputs, TaskRunOutcome, deadline_ms, execute_task_run
@@ -125,6 +126,7 @@ class _Loaded:
     extra_protected_paths: tuple[str, ...]
     agent_timeout_s: int
     repo_name: str
+    token_prices: TokenPrices
 
 
 def handle_eval_task(ctx: JobContext) -> None:
@@ -232,6 +234,16 @@ def _load(session: Session, payload: EvalTaskPayload) -> _Loaded:
         )
     task = TaskDefinition.model_validate(task_row.raw_definition)
 
+    try:
+        pinned_prices = pinned_token_prices(run.manifest or {})
+    except ProvenanceError as exc:
+        raise PayloadError(str(exc)) from exc
+    token_prices = pinned_prices or TokenPrices(
+        input_per_mtok=config.price_input_per_mtok,
+        output_per_mtok=config.price_output_per_mtok,
+        cache_read_per_mtok=config.price_cache_read_per_mtok,
+    )
+
     return _Loaded(
         task=task,
         adapter_class=agent.adapter_class,
@@ -241,6 +253,7 @@ def _load(session: Session, payload: EvalTaskPayload) -> _Loaded:
         extra_protected_paths=tuple(env.extra_protected_paths or ()),
         agent_timeout_s=task_row.agent_timeout_s,
         repo_name=task.repo_name,
+        token_prices=token_prices,
     )
 
 
@@ -291,6 +304,7 @@ def _agent_config(ctx: JobContext, loaded: _Loaded) -> AgentRunnerConfig:
         # 那样这台机器的内存账就有一半不受配置控制
         memory_mb=ctx.settings.agent_memory_mb,
         cpus=ctx.settings.agent_cpus,
+        token_prices=loaded.token_prices,
     )
 
 

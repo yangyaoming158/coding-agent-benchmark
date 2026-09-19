@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import time
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from app.domain.cost import TokenPrices
 from app.domain.enums import CostSource
 from app.runner.adapters.miniagent import MiniAgentRunner, error_for, parse_events
 from app.runner.adapters.prompt import build_task_prompt
@@ -76,11 +78,19 @@ def test_spec_patch_trajectory_and_cached_cost(workspace: Workspace, tmp_path: P
         (workspace.path / "tests/test_password.py").write_text("# retained as evidence\n")
         return result(stdout="\n".join(json.dumps(e) for e in events))
 
-    runner = MiniAgentRunner(
-        params={"prices_usd_per_mtok": {"input": 2, "output": 4, "cache_read": 0.2}},
-        run_container=fake,
+    runner = MiniAgentRunner(run_container=fake)
+    answer = runner.run(
+        task,
+        workspace,
+        AgentConfig(
+            artifact_dir=tmp_path / "artifacts",
+            token_prices=TokenPrices(
+                input_per_mtok=Decimal("2"),
+                output_per_mtok=Decimal("4"),
+                cache_read_per_mtok=Decimal("0.2"),
+            ),
+        ),
     )
-    answer = runner.run(task, workspace, AgentConfig(artifact_dir=tmp_path / "artifacts"))
     assert "auth/password.py" in answer.patch and "tests/test_password.py" in answer.patch
     assert answer.error is None and answer.token_usage is not None
     assert answer.token_usage.total == 120
@@ -160,8 +170,6 @@ def test_expired_task_never_starts_container(workspace: Workspace) -> None:
         {"max_output_tokens": 0},
         {"max_tokens_budget": 0},
         {"thinking": "invalid"},
-        {"prices_usd_per_mtok": {"input": -1}},
-        {"prices_usd_per_mtok": {"input": float("nan"), "output": 0, "cache_read": 0}},
     ],
 )
 def test_invalid_configuration_rejected(params: dict[str, Any]) -> None:

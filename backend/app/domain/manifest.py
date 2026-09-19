@@ -12,7 +12,7 @@
 """
 
 #: manifest 的结构版本。结构变了就加 1，好让老运行能被认出来。
-MANIFEST_VERSION = "1.0"
+MANIFEST_VERSION = "1.1"
 
 #: 数据集快照摘要在 manifest 里的键。E1-T6 定的口径，位置和名字都不动 ——
 #: `app.benchmark.dataset.gate_verdict()` 靠这个 JSONB 路径找门禁实验。

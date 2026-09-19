@@ -17,12 +17,14 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.domain.cost import TokenPrices
 from app.domain.enums import (
     AgentKind,
     AgentOutcome,
@@ -37,6 +39,7 @@ from app.domain.enums import (
 )
 from app.domain.enums import TestRole as Role
 from app.domain.enums import TestStatus as Status
+from app.evaluation.costing import estimate_unavailable_cost
 from app.evaluation.persistence import persist_task_run
 from app.evaluation.task_run import TaskRunOutcome, Timings
 from app.infrastructure.models.agent import Agent, AgentConfig
@@ -255,6 +258,37 @@ def test_token_usage_lands_in_the_columns(session: Session, task_run: Evaluation
     assert task_run.tokens_total == 7425
     assert task_run.turns == 2
     assert task_run.cost_source is CostSource.REPORTED
+
+
+def test_platform_estimated_cost_lands_with_its_source(
+    session: Session, task_run: EvaluationTaskRun
+) -> None:
+    """统一估算后的金额和来源必须一起落库，不能只在内存里改。"""
+    raw = AgentRunResult(
+        agent_name="claude-code",
+        started_at=START,
+        finished_at=START + timedelta(seconds=3),
+        duration_ms=3000,
+        token_usage=TokenUsage(
+            input=1_000_000,
+            output=100_000,
+            cache_read=900_000,
+        ),
+    )
+    estimated = estimate_unavailable_cost(
+        raw,
+        TokenPrices(
+            input_per_mtok=Decimal("0.30"),
+            output_per_mtok=Decimal("1.20"),
+            cache_read_per_mtok=Decimal("0.006"),
+        ),
+    )
+
+    persist_task_run(session, task_run, make_outcome(agent_result=estimated))
+    session.flush()
+
+    assert task_run.cost_usd == Decimal("0.155400")
+    assert task_run.cost_source is CostSource.ESTIMATED
 
 
 def test_cache_hits_are_not_added_into_the_total(
