@@ -1,7 +1,7 @@
 """Worker 主循环（E5-T1 建，E5-T2 改成多槽位）。
 
-    reap_orphans() ──▶ ┌── 回收过期租约 ──▶ 兜底定案 ──▶ 有空槽就领 ──┐
-      （启动时一次）    │                                    │        │
+    单 Worker 锁 ──▶ reap_orphans() ──▶ 回收过期租约 ──▶ 磁盘够才领 ─┐
+                         （启动时一次）                              │
                         │                                    ▼        │
                         │                          每条作业起一个槽线程 │
                         │                          槽线程里：心跳 + 处理 │
@@ -76,7 +76,9 @@ from app.infrastructure.logging import get_logger
 from app.infrastructure.models.job import JobQueue
 from app.worker.cancel import CancelWatcher
 from app.worker.concurrency import ConcurrencyLimits
+from app.worker.disk import DiskGate, DiskReader, relevant_disk_headrooms
 from app.worker.registry import HandlerRegistry, JobContext
+from app.worker.singleton import SingleWorkerGuard
 
 logger = get_logger(__name__)
 
@@ -97,8 +99,8 @@ _RESERVED_CONNECTIONS = 4
 def default_worker_id() -> str:
     """没配 `WORKER_ID` 时用 `主机名-进程号`。
 
-    进程号每次重启都变。一台机器上跑多个 Worker 时建议在配置里写死
-    （worker-1、worker-2……）：启动时回收自己的残留容器要靠这个标识认领。
+    进程号每次重启都变，正好能从日志里区分重启前后的两个进程；单实例限制由
+    `SingleWorkerGuard` 保证，不靠这个字符串猜。
     """
     return f"{socket.gethostname()}-{os.getpid()}"[:MAX_WORKER_ID_LENGTH]
 
@@ -130,6 +132,7 @@ class Worker:
         docker_client: Any = None,
         slots: int | None = None,
         limits: ConcurrencyLimits | None = None,
+        disk_reader: DiskReader | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.registry = registry
@@ -144,6 +147,11 @@ class Worker:
         self.session_factory = session_factory
         self.worker_id = (self.settings.worker_id or default_worker_id())[:MAX_WORKER_ID_LENGTH]
         self._docker_client = docker_client
+        self._disk_gate = DiskGate(
+            min_free_ratio=self.settings.image_disk_min_free_ratio,
+            reader=disk_reader
+            or (lambda: relevant_disk_headrooms(self.settings, docker_client=self._docker_client)),
+        )
         self._stop = threading.Event()
         self._force = threading.Event()
         #: 有槽位空出来了。槽满的时候主循环等它，而不是干等一个轮询周期 ——
@@ -231,34 +239,36 @@ class Worker:
 
     def run(self) -> None:
         """阻塞式主循环，收到停机信号才返回。"""
-        logger.info(
-            "worker_started",
-            worker_id=self.worker_id,
-            job_types=[t.value for t in self.registry.job_types],
-            slots=self.slots,
-            agent_concurrency=self.limits.agent_limit,
-            sandbox_concurrency=self.limits.sandbox_limit,
-            lease_s=self.settings.job_lease_s,
-            heartbeat_s=self.settings.job_heartbeat_s,
-        )
-        self._log_capacity()
-        if self.settings.worker_reap_on_start:
-            reaped = self.reap_orphan_containers()
-            if reaped:
-                logger.warning("startup_reaped_containers", count=reaped)
+        guard = SingleWorkerGuard(self.session_factory, worker_id=self.worker_id)
+        with guard:
+            logger.info(
+                "worker_started",
+                worker_id=self.worker_id,
+                job_types=[t.value for t in self.registry.job_types],
+                slots=self.slots,
+                agent_concurrency=self.limits.agent_limit,
+                sandbox_concurrency=self.limits.sandbox_limit,
+                lease_s=self.settings.job_lease_s,
+                heartbeat_s=self.settings.job_heartbeat_s,
+            )
+            self._log_capacity()
+            if self.settings.worker_reap_on_start:
+                reaped = self.reap_orphan_containers()
+                if reaped:
+                    logger.warning("startup_reaped_containers", count=reaped)
 
-        self._watcher.start()
-        try:
-            while not self._stop.is_set():
-                self._reap_expired_leases()
-                self._sweep_stale_runs()
-                if self._fill_slots() == 0:
-                    self._idle()
-        finally:
-            self._watcher.stop()
-            self._drain()
-            reaped = self.reap_orphan_containers()
-            logger.info("worker_stopped", worker_id=self.worker_id, reaped_containers=reaped)
+            self._watcher.start()
+            try:
+                while not self._stop.is_set():
+                    self._reap_expired_leases()
+                    self._sweep_stale_runs()
+                    if self._fill_slots() == 0:
+                        self._idle()
+            finally:
+                self._watcher.stop()
+                self._drain()
+                reaped = self.reap_orphan_containers()
+                logger.info("worker_stopped", worker_id=self.worker_id, reaped_containers=reaped)
 
     def _log_capacity(self) -> None:
         """启动时算一次最坏情况内存，超线就告警（E9-T2）。
@@ -307,6 +317,8 @@ class Worker:
         多槽位的并发调度在 `run()` 里。
         """
         self._reap_expired_leases()
+        if not self._disk_gate.allows_new_jobs():
+            return False
         job = self._lease()
         if job is None:
             return False
@@ -340,6 +352,8 @@ class Worker:
         self._harvest()
         started = 0
         while not self._stop.is_set() and self.in_flight < self.slots:
+            if not self._disk_gate.allows_new_jobs():
+                break
             job = self._lease()
             if job is None:
                 break

@@ -5,7 +5,7 @@
 第二次是不等了，但**仍然会回收残留容器**再退出。
 
     python -m app.worker                    # 一直跑
-    WORKER_ID=worker-1 python -m app.worker # 多个 Worker 时给个固定标识
+    WORKER_ID=worker-main python -m app.worker # 固定标识便于查日志；仍只允许一个进程
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from app.infrastructure.config import get_settings
 from app.infrastructure.logging import configure_logging
 from app.worker.handlers import default_registry
 from app.worker.loop import Worker
+from app.worker.singleton import WorkerAlreadyRunningError
 
 
 def main() -> None:
@@ -21,7 +22,10 @@ def main() -> None:
     configure_logging(settings)
     worker = Worker(default_registry(), settings=settings)
     worker.install_signal_handlers()
-    worker.run()
+    try:
+        worker.run()
+    except WorkerAlreadyRunningError as exc:
+        raise SystemExit(str(exc)) from None
 
 
 if __name__ == "__main__":

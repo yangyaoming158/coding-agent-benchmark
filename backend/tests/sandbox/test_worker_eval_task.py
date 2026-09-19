@@ -7,6 +7,7 @@
 |:---|:---|
 | 队列跑得通一道真题 | `test_a_real_task_runs_end_to_end_through_the_queue` |
 | 启动时清掉上一条命的残留 | `test_startup_reaps_a_leftover_container` |
+| Worker 中断后续跑且不重复 | `test_a_golden_job_resumes_after_worker_interruption` |
 | 放弃等待之后也要清干净 | `test_shutdown_reaps_containers_left_by_an_abandoned_handler` |
 | SIGTERM 后无残留容器 | `test_sigterm_leaves_no_containers` |
 
@@ -32,6 +33,7 @@ from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.domain.enums import AgentOutcome, InfraOutcome, JobState, JobType, LifecycleStatus
+from app.infrastructure import queue
 from app.infrastructure.config import REPO_ROOT, Settings, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun
@@ -203,6 +205,72 @@ def test_a_real_task_runs_end_to_end_through_the_queue(
     assert job.state is JobState.DONE
 
     assert bench_containers(docker_client) == [], "跑完不该留下容器"
+
+
+def test_a_golden_job_resumes_after_worker_interruption(
+    factory: sessionmaker[Session],
+    settings: Settings,
+    seeded: tuple[int, int],
+    docker_client: object,
+) -> None:
+    """Worker 在领任务后消失，重启后只补完未完成的 Golden 作业。
+
+    把租约设成已过期，等价于前一个进程被 ``kill -9`` 后不再心跳。新 Worker 先
+    回收租约，再跑同一条作业；完成记录只能有一条，之后再轮询也不能重复执行。
+    """
+    run_id, task_id = seeded
+    with factory() as session:
+        job = enqueue_eval_task(
+            session,
+            evaluation_run_id=run_id,
+            benchmark_task_id=task_id,
+            max_attempts=3,
+        )
+        job_id = job.id
+        session.commit()
+
+    with factory() as session:
+        interrupted = queue.lease(
+            session,
+            worker_id="interrupted-worker",
+            job_types=[JobType.EVAL_TASK],
+            lease_s=-1,
+        )
+        session.commit()
+    assert interrupted is not None and interrupted.id == job_id
+
+    restarted = Worker(
+        default_registry(),
+        settings=settings.model_copy(
+            update={"worker_id": "restarted-worker", "job_retry_backoff_base_s": 3600.0}
+        ),
+        session_factory=factory,
+    )
+    assert restarted.run_once() is False, "刚回收的作业必须先经过退避"
+
+    with factory() as session:
+        session.execute(
+            sa.update(JobQueue).where(JobQueue.id == job_id).values(available_at=sa.func.now())
+        )
+        session.commit()
+
+    assert restarted.run_once() is True
+    assert restarted.run_once() is False, "已完成作业不能在重启后重复执行"
+
+    with factory() as session:
+        attempts = (
+            session.execute(
+                sa.select(EvaluationTaskRun).where(EvaluationTaskRun.evaluation_run_id == run_id)
+            )
+            .scalars()
+            .all()
+        )
+        finished = session.get(JobQueue, job_id)
+    assert len(attempts) == 1
+    assert attempts[0].agent_outcome is AgentOutcome.RESOLVED
+    assert finished is not None and finished.state is JobState.DONE
+    assert finished.attempts == 2, "被中断的领取也要计数，避免无限崩溃循环"
+    assert bench_containers(docker_client) == []
 
 
 # ── 残留容器回收 ────────────────────────────────────────────
