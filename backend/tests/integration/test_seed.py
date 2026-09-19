@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -21,6 +23,14 @@ def test_seed_creates_sentinel_agents(session: Session) -> None:
     assert (created, updated) == (len(SEED_AGENTS) * 2, 0)
     kinds = set(session.scalars(select(Agent.kind)))
     assert {AgentKind.ORACLE, AgentKind.NOOP, AgentKind.MOCK} <= kinds
+    miniagent = session.scalar(
+        select(AgentConfig).where(AgentConfig.label == "miniagent@deepseek-flash")
+    )
+    assert miniagent is not None
+    assert miniagent.price_input_per_mtok == Decimal("0.3000")
+    assert miniagent.price_output_per_mtok == Decimal("1.2000")
+    assert miniagent.price_cache_read_per_mtok == Decimal("0.0060")
+    assert "prices_usd_per_mtok" not in miniagent.params
 
 
 def test_seed_is_idempotent(session: Session) -> None:

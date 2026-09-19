@@ -76,6 +76,7 @@ def test_the_worker_passes_the_configured_limits_down() -> None:
     class _Loaded:
         agent_params: ClassVar[dict[str, Any]] = {}
         model_name = "none"
+        token_prices = None
 
     ctx = _Ctx()
     ctx.settings = settings  # type: ignore[attr-defined]

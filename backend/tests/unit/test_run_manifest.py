@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 
+from app.domain.cost import TokenPrices
 from app.domain.manifest import DATASET_SNAPSHOT_DIGEST_KEY, MANIFEST_VERSION, VOLATILE_KEYS
 from app.domain.protocol import PROTOCOL_VERSION
 from app.evaluation.manifest import (
@@ -28,6 +30,7 @@ from app.evaluation.manifest import (
     determinism_facts,
     diff_manifests,
     pinned_image_ref,
+    pinned_token_prices,
 )
 from app.infrastructure.models.benchmark import EnvironmentSpec
 from app.infrastructure.models.evaluation import EvaluationRun
@@ -57,6 +60,11 @@ def make_provenance(**overrides: object) -> RunProvenance:
             config_hash="0" * 64,
             adapter_class="app.runner.adapters.oracle.OracleRunner",
             params={"temperature": 0},
+            token_prices=TokenPrices(
+                input_per_mtok=Decimal("0.30"),
+                output_per_mtok=Decimal("1.20"),
+                cache_read_per_mtok=Decimal("0.006"),
+            ),
         ),
         "images": (
             ImageRef(
@@ -89,9 +97,26 @@ def test_manifest_carries_the_seven_groups_of_facts() -> None:
     assert manifest[DATASET_SNAPSHOT_DIGEST_KEY] == "sha256:" + "3" * 64
     assert manifest["dataset"]["slug"] == "benchmark-dev"
     assert manifest["agent"]["config_hash"] == "0" * 64
+    assert manifest["agent"]["pricing"] == {
+        "input_per_mtok": "0.30",
+        "output_per_mtok": "1.20",
+        "cache_read_per_mtok": "0.006",
+    }
     assert manifest["images"]["pallets__click__py311"]["digest"] == "sha256:" + "f" * 64
     assert manifest["limits"]["agent_concurrency"] == 10
     assert manifest["determinism"]["env"]["PYTHONHASHSEED"] == "0"
+
+
+def test_token_prices_are_pinned_and_old_manifests_fall_back() -> None:
+    manifest = build_manifest(make_provenance())
+
+    assert pinned_token_prices(manifest) == TokenPrices(
+        input_per_mtok=Decimal("0.30"),
+        output_per_mtok=Decimal("1.20"),
+        cache_read_per_mtok=Decimal("0.006"),
+    )
+    old_manifest = {**manifest, "agent": {"name": "oracle"}}
+    assert pinned_token_prices(old_manifest) is None
 
 
 def test_optional_keys_are_absent_when_unset() -> None:

@@ -17,7 +17,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from app.domain.enums import AgentOutcome, EvaluationRunStatus, InfraOutcome
+from app.domain.enums import AgentOutcome, CostSource, EvaluationRunStatus, InfraOutcome
 from app.evaluation.progress import AttemptRow, summarize
 
 START = datetime(2026, 9, 6, 10, 0, tzinfo=UTC)
@@ -31,6 +31,7 @@ def row(
     infra: InfraOutcome = InfraOutcome.SUCCESS,
     agent: AgentOutcome | None = AgentOutcome.RESOLVED,
     cost: str | None = "0.01",
+    cost_source: CostSource | None = CostSource.REPORTED,
     tokens: int | None = 1000,
     start_min: int = 0,
     end_min: int = 1,
@@ -41,6 +42,7 @@ def row(
         is_canonical=canonical,
         infra_outcome=infra,
         agent_outcome=agent,
+        cost_source=cost_source,
         cost_usd=None if cost is None else Decimal(cost),
         tokens_total=tokens,
         prepare_started_at=START + timedelta(minutes=start_min),
@@ -237,13 +239,20 @@ def test_attempts_with_no_cost_are_counted_separately() -> None:
     报表侧的影子 —— 金额旁边必须能看到"有几次是不知道"。
     """
     progress = summarize(
-        [row(1, cost=None), row(2, cost=None), row(3, cost="0.02")],
+        [
+            row(1, cost=None, cost_source=CostSource.UNAVAILABLE),
+            row(2, cost=None, cost_source=CostSource.UNAVAILABLE),
+            row(3, cost="0.02"),
+        ],
         total_tasks=3,
         all_jobs_done=True,
         current_status=EvaluationRunStatus.RUNNING,
     )
     assert progress.total_cost_usd == Decimal("0.02")
     assert progress.cost_missing_attempts == 2
+    assert progress.cost_reported_attempts == 1
+    assert progress.cost_estimated_attempts == 0
+    assert progress.cost_unavailable_attempts == 2
 
 
 def test_a_fully_priced_run_reports_nothing_missing() -> None:
@@ -254,3 +263,20 @@ def test_a_fully_priced_run_reports_nothing_missing() -> None:
         current_status=EvaluationRunStatus.RUNNING,
     )
     assert progress.cost_missing_attempts == 0
+
+
+def test_cost_sources_are_counted_without_treating_null_as_unavailable() -> None:
+    progress = summarize(
+        [
+            row(1, cost="0.02", cost_source=CostSource.REPORTED),
+            row(2, cost="0.01", cost_source=CostSource.ESTIMATED),
+            row(3, cost=None, cost_source=CostSource.UNAVAILABLE),
+            row(4, cost=None, cost_source=None),
+        ],
+        total_tasks=4,
+        all_jobs_done=True,
+        current_status=EvaluationRunStatus.RUNNING,
+    )
+    assert progress.cost_reported_attempts == 1
+    assert progress.cost_estimated_attempts == 1
+    assert progress.cost_unavailable_attempts == 1

@@ -76,6 +76,7 @@ from typing import Any
 from app.domain.enums import ArtifactKind, InfraOutcome, LifecycleStatus, PatchKind
 from app.domain.execution_plan import ExecutionPlan
 from app.domain.protected_paths import enforcement_patterns
+from app.evaluation.costing import estimate_unavailable_cost
 from app.evaluation.executor import DEFAULT_GOLDEN_IMAGE, ExecutionOutcome, execute_tests
 from app.evaluation.gate import NULL_GATE, PhaseGate, TaskCancelledError
 from app.infrastructure.logging import get_logger
@@ -340,6 +341,10 @@ def execute_task_run(
                 raise _AbortError(
                     InfraOutcome.AGENT_RUNTIME_ERROR, f"适配器崩了：{type(exc).__name__}: {exc}"
                 ) from exc
+
+        # 统一成本补算放在适配器返回之后、写日志和落库之前。reported 原样保留；
+        # 超时/报错只拿到部分 token 时也保持 unavailable。
+        agent_result = estimate_unavailable_cost(agent_result, config.token_prices)
 
         timings = replace(
             timings,

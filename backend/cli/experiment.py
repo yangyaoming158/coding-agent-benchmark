@@ -266,11 +266,17 @@ def _status_detail(session: Session, run_id: int) -> int:
     )
     # 报不出成本的那几次要单独说。不说的话，一场全员 unavailable 的实验
     # 会显示成 `$0.0000`，读起来就是"没花钱"——而钱是实实在在花掉了的
-    missing = snapshot.cost_missing_attempts
+    missing = snapshot.cost_unavailable_attempts
     caveat = f"；其中 {missing} 次报不出成本，这个金额是不全的" if missing else ""
     print(
         f"  成本 / token  ${float(snapshot.total_cost_usd):.4f} / {snapshot.total_tokens}"
         f"（累计全部 attempt，C-56{caveat}）"
+    )
+    print(
+        "  成本来源      "
+        f"reported={snapshot.cost_reported_attempts}  "
+        f"estimated={snapshot.cost_estimated_attempts}  "
+        f"unavailable={snapshot.cost_unavailable_attempts}"
     )
     print(f"  makespan      {_ms(snapshot.makespan_ms)}")
     print(f"  并发设置      agent={run.agent_concurrency}  sandbox={run.sandbox_concurrency}")
@@ -680,6 +686,14 @@ def _print_manifest(run_id: int, manifest: dict[str, object]) -> None:
         print(f"              整份快照 {dataset.get('snapshot_task_count')} 道全投")
     print(f"  参赛者      {agent.get('label')}（{agent.get('name')} × {agent.get('model_name')}）")
     print(f"              版本 {agent.get('agent_version')} · 参数哈希 {agent.get('config_hash')}")
+    pricing = agent.get("pricing")
+    if isinstance(pricing, dict):
+        print(
+            "  Token 单价  "
+            f"输入 ${pricing.get('input_per_mtok')} / "
+            f"输出 ${pricing.get('output_per_mtok')} / "
+            f"缓存读取 ${pricing.get('cache_read_per_mtok')}（每百万 token）"
+        )
     print(f"  镜像        {len(images)} 个环境（协议 C-36：按 digest 引用）")
     for env_id, ref in sorted(images.items()):
         digest = (ref or {}).get("digest") if isinstance(ref, dict) else None

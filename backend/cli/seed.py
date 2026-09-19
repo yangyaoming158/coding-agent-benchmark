@@ -20,11 +20,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.domain.cost import TokenPrices
 from app.domain.enums import AgentKind
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.models import Agent, AgentConfig
@@ -43,16 +45,29 @@ class SeedAgent:
     model_name: str = "none"
     #: 适配器私有配置，原样进 `agent_configs.params`。
     params: Mapping[str, Any] = field(default_factory=dict)
+    #: 平台统一成本估算使用的三档美元单价。
+    token_prices: TokenPrices = field(default_factory=TokenPrices)
 
 
-#: 单价随时间变化，正式实验前需核对并创建独立配置；此处按高峰价保守估算。
+#: 单价随时间变化，正式实验前需核对并创建独立配置；当前模型按高峰价保守估算。
+DEEPSEEK_FLASH_PRICES = TokenPrices(
+    input_per_mtok=Decimal("0.30"),
+    output_per_mtok=Decimal("1.20"),
+    cache_read_per_mtok=Decimal("0.006"),
+)
+#: 2026-09-10 以前 pilot 使用的 deepseek-chat 价目，只服务历史同条件配置。
+DEEPSEEK_CHAT_PRICES = TokenPrices(
+    input_per_mtok=Decimal("0.27"),
+    output_per_mtok=Decimal("1.10"),
+    cache_read_per_mtok=Decimal("0.07"),
+)
+
 MINIAGENT_PARAMS: dict[str, Any] = {
     "image": "bench-base:py311",
     "max_turns": 20,
     "max_output_tokens": 2048,
     "max_tokens_budget": 30_000,
     "thinking": "disabled",
-    "prices_usd_per_mtok": {"input": 0.3, "output": 1.2, "cache_read": 0.006},
     "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
 }
 
@@ -66,6 +81,7 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         note="四工具 ReAct、原生 JSONL、逐轮 token 与单价估算成本（E3-T6）",
         model_name="deepseek/deepseek-flash",
         params=MINIAGENT_PARAMS,
+        token_prices=DEEPSEEK_FLASH_PRICES,
     ),
     SeedAgent(
         name="oracle",
@@ -102,7 +118,11 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         # 镜像写进 params 而不是新开一列：同一个 Aider 接不同底座模型时，
         # 镜像是同一个，而 E2-T3 的分层构建器到位后这里会换成 bench-agent:<env>-aider，
         # 那时改的是数据不是表结构
-        params={"image": "bench-agent:py311-aider"},
+        params={
+            "image": "bench-agent:py311-aider",
+            "price_source": "https://api-docs.deepseek.com/news/news1226/ (historical)",
+        },
+        token_prices=DEEPSEEK_CHAT_PRICES,
     ),
     SeedAgent(
         name="claude-code",
@@ -121,7 +141,9 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
             "image": "bench-agent:py311-claude-code",
             "base_url": "https://api.deepseek.com/anthropic",
             "max_turns": 40,
+            "price_source": "https://api-docs.deepseek.com/news/news1226/ (historical)",
         },
+        token_prices=DEEPSEEK_CHAT_PRICES,
     ),
 )
 
@@ -164,6 +186,9 @@ def seed_agents(session: Session) -> tuple[int, int]:
                     # 而不是留空 —— 留空会让报表里出现一堆 "未知模型"。
                     model_name=spec.model_name,
                     params={"note": spec.note, **spec.params},
+                    price_input_per_mtok=spec.token_prices.input_per_mtok,
+                    price_output_per_mtok=spec.token_prices.output_per_mtok,
+                    price_cache_read_per_mtok=spec.token_prices.cache_read_per_mtok,
                     config_hash=f"{spec.config_label:_<64}"[:64],
                     enabled=True,
                 )
@@ -172,6 +197,9 @@ def seed_agents(session: Session) -> tuple[int, int]:
         else:
             config.model_name = spec.model_name
             config.params = {"note": spec.note, **spec.params}
+            config.price_input_per_mtok = spec.token_prices.input_per_mtok
+            config.price_output_per_mtok = spec.token_prices.output_per_mtok
+            config.price_cache_read_per_mtok = spec.token_prices.cache_read_per_mtok
             updated += 1
 
     return created, updated
