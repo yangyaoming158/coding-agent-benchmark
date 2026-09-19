@@ -12,6 +12,7 @@ from __future__ import annotations
 import threading
 import time
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
@@ -23,8 +24,10 @@ from app.infrastructure import queue
 from app.infrastructure.config import Settings, get_settings
 from app.infrastructure.db import create_session_factory
 from app.infrastructure.models.job import JobQueue
+from app.sandbox.images import DiskHeadroom
 from app.worker.loop import Worker
 from app.worker.registry import HandlerRegistry, JobContext
+from app.worker.singleton import SingleWorkerGuard, WorkerAlreadyRunningError
 
 pytestmark = pytest.mark.db
 
@@ -69,18 +72,24 @@ def settings() -> Settings:
             "job_retry_backoff_base_s": 0.01,
             "worker_shutdown_grace_s": 5.0,
             "worker_reap_on_start": True,
+            # 普通队列测试不依赖宿主磁盘；磁盘门禁在专门用例里注入读数。
+            "image_disk_min_free_ratio": 0.0,
         }
     )
 
 
 def make_worker(
-    settings: Settings, factory: sessionmaker[Session], handlers: dict[JobType, object]
+    settings: Settings,
+    factory: sessionmaker[Session],
+    handlers: dict[JobType, object],
+    **kwargs: object,
 ) -> Worker:
     return Worker(
         HandlerRegistry(handlers),  # type: ignore[arg-type]
         settings=settings,
         session_factory=factory,
         docker_client=FakeDocker(),
+        **kwargs,
     )
 
 
@@ -127,6 +136,77 @@ def test_run_once_returns_false_on_an_empty_queue(
 ) -> None:
     worker = make_worker(settings, factory, {JobType.EVAL_TASK: lambda _ctx: None})
     assert worker.run_once() is False
+
+
+def test_low_disk_does_not_lease_a_new_job(
+    settings: Settings, factory: sessionmaker[Session]
+) -> None:
+    """磁盘低于水位时作业留在 PENDING，没有先领走再等待。"""
+    job_id = put(factory)
+
+    def low_disk() -> tuple[DiskHeadroom, ...]:
+        return (DiskHeadroom(path=Path("/var/lib/docker"), total_bytes=100, free_bytes=10),)
+
+    worker = make_worker(
+        settings.model_copy(update={"image_disk_min_free_ratio": 0.15}),
+        factory,
+        {JobType.EVAL_TASK: lambda _ctx: None},
+        disk_reader=low_disk,
+    )
+
+    assert worker.run_once() is False
+    job = reload(factory, job_id)
+    assert job.state is JobState.PENDING
+    assert job.attempts == 0
+
+
+def test_second_worker_is_refused_before_it_reaps_containers(
+    settings: Settings, factory: sessionmaker[Session]
+) -> None:
+    """已有 Worker 持锁时，后启动者不能先执行孤儿回收。"""
+
+    class CountingDocker(FakeDocker):
+        class _Containers:
+            calls = 0
+
+            @classmethod
+            def list(cls, **_kwargs: object) -> list[object]:
+                cls.calls += 1
+                return []
+
+        containers = _Containers()
+
+    owner = SingleWorkerGuard(factory, worker_id="first-worker")
+    owner.acquire()
+    try:
+        docker = CountingDocker()
+        worker = Worker(
+            HandlerRegistry({JobType.EVAL_TASK: lambda _ctx: None}),
+            settings=settings.model_copy(update={"worker_id": "second-worker"}),
+            session_factory=factory,
+            docker_client=docker,
+        )
+        with pytest.raises(WorkerAlreadyRunningError, match="已有 Worker"):
+            worker.run()
+        assert docker.containers.calls == 0
+    finally:
+        owner.release()
+
+
+def test_single_worker_lock_can_be_taken_after_the_owner_stops(
+    factory: sessionmaker[Session],
+) -> None:
+    """持锁连接关闭后锁立即释放，重启不需要人工清数据库。"""
+    first = SingleWorkerGuard(factory, worker_id="first-worker")
+    second = SingleWorkerGuard(factory, worker_id="second-worker")
+
+    first.acquire()
+    with pytest.raises(WorkerAlreadyRunningError):
+        second.acquire()
+    first.release()
+
+    second.acquire()
+    second.release()
 
 
 def test_business_writes_and_the_done_mark_commit_together(

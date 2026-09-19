@@ -430,6 +430,11 @@ env Dockerfile 的 apt 步骤都照抄了这个写法。pip 走清华源，实�
 "no space left on device"）根本指不到真正的原因。同一个函数 `scripts/check_env.py`
 也用了一份，E9-T3 的「磁盘水位」直接复用。
 
+**E9-T3 已把同一阈值接到 Worker 领取入口。** 每轮领取前检查工作区、本地制品目录和
+Docker root 所在分区；任一处低于阈值就不领取新作业，已经在跑的容器继续收尾。
+作业留在 `PENDING` 且不增加 `attempts`，水位恢复后下一轮自动继续。Docker 或磁盘探测
+失败时保守暂停领取，并记录 `worker_disk_check_failed`，避免在无法确认余量时继续写盘。
+
 ### (9) 回收：判据是"有没有 tag"，不是 `bench.layer` 标签
 
 `bench images gc` 删两类镜像：**环境已经不存在的**（配方和 `environment_specs`

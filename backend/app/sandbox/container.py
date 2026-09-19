@@ -804,8 +804,8 @@ def reap_orphans(*, client: Any = None, min_age_s: float = 0.0) -> list[str]:
     根本跑不到，容器会一直占着内存和 pid —— 下一批评测就会因为资源不够而莫名其妙
     地失败，而且失败原因指向的是新任务，不是那个已经死掉的 Worker。
 
-    `min_age_s` 是保险丝：多个 Worker 同时跑时，别把别人**正在用**的容器删掉。
-    传 0（默认）表示不管年龄全删，适合单机单 Worker。
+    `min_age_s` 是人工调试时的额外保险丝。正式 Worker 会先取得单实例数据库锁，
+    确认没有另一个有效 Worker 后才调用这里；传 0（默认）表示不看年龄。
     """
     client = client or get_docker_client()
     try:
@@ -826,7 +826,7 @@ def reap_orphans(*, client: Any = None, min_age_s: float = 0.0) -> list[str]:
         _remove_quietly(container)
         removed.append(container_id)
     if removed:
-        logger.info("reaped_orphan_containers", count=len(removed))
+        logger.info("reaped_orphan_containers", count=len(removed), container_ids=removed)
     return removed
 
 

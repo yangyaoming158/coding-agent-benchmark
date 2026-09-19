@@ -95,6 +95,8 @@ def settings() -> Settings:
             "job_max_attempts": 1,
             "worker_shutdown_grace_s": 20.0,
             "worker_reap_on_start": False,
+            # 这组只测调度，FakeDocker 不实现 docker.info；磁盘门禁有独立用例覆盖。
+            "image_disk_min_free_ratio": 0.0,
             # 取消的响应上限就是这个数。生产默认 5 秒，这里压到 0.1 秒好让测试快
             "cancel_poll_s": 0.1,
             "run_sweep_interval_s": 0.2,

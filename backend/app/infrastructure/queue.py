@@ -357,7 +357,13 @@ def reap_expired_leases(
         )
 
     if requeued or dead:
-        logger.warning("reaped_expired_leases", requeued=len(requeued), dead=len(dead))
+        logger.warning(
+            "reaped_expired_leases",
+            requeued=len(requeued),
+            dead=len(dead),
+            requeued_job_ids=requeued,
+            dead_job_ids=dead,
+        )
     return ReapResult(requeued=tuple(requeued), dead=tuple(dead))
 
 
