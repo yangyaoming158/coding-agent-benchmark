@@ -1,0 +1,194 @@
+{
+  "dataset_sha256": "sha256:35fd015147004a019d735337f01f08d665a5185683af24c7f3cfe753a4701b56",
+  "dirty": true,
+  "gate": {
+    "checked_at": "2026-09-18T11:54:44.772442+00:00",
+    "noop": {
+      "evaluation_run_id": 142,
+      "resolve_rate": 0.0,
+      "resolved_count": 0,
+      "total_tasks": 41
+    },
+    "oracle": {
+      "evaluation_run_id": 141,
+      "resolve_rate": 1.0,
+      "resolved_count": 41,
+      "total_tasks": 41
+    },
+    "protocol_clause": "C-50",
+    "snapshot_digest": "sha256:19a2508ae0e12fffe86b150c36d8e7baa4887d761112d8000b410012511c4e55"
+  },
+  "harness_git_sha": "efe96601c7488cceeb3172ab7afe813f4f0b4582",
+  "published_at": "2026-09-18T11:54:44.772436+00:00",
+  "slug": "benchmark-cn-v1",
+  "source_dataset_id": "benchmark-dev",
+  "task_count": 41,
+  "task_hashes_sha256": "sha256:19a2508ae0e12fffe86b150c36d8e7baa4887d761112d8000b410012511c4e55",
+  "tasks": [
+    {
+      "content_hash": "8da2fa92fa31df887ca0d3786632ea265f88ea6785377d90f7a3d53ab0eb5680",
+      "task_id": "pallets__click-2271"
+    },
+    {
+      "content_hash": "82b02dd406712c795afd7bd5669f585817057ff718c696e719f89e4fd6fd031a",
+      "task_id": "pallets__click-2365"
+    },
+    {
+      "content_hash": "af03e5720fc80b1167dc13df0b798bf09611864532423ef7ae6396de5b5c5064",
+      "task_id": "pallets__click-2397"
+    },
+    {
+      "content_hash": "b440ea405e595b65ab2a1a4b1e76b6d35162ddda097c12a1514fe5bae45bc142",
+      "task_id": "pallets__click-2696"
+    },
+    {
+      "content_hash": "dda241ef98c4215dd6b0adde327dce0025c8c2a75574d67924915a64a75b5b8e",
+      "task_id": "pallets__click-2775"
+    },
+    {
+      "content_hash": "923b427f1d5f8f7d8b9511b53760ef5459e2b61d82e42346b5e6f88ba14e5a26",
+      "task_id": "pallets__click-2788"
+    },
+    {
+      "content_hash": "e40e60caa87ee61fa63e64208f584111e98e35893bf70bdc9b2ed2af61426cb3",
+      "task_id": "pallets__click-2818"
+    },
+    {
+      "content_hash": "d78f184a91cac3b363e54a47bc738d479799f7ca323349b1b933779d82a00089",
+      "task_id": "pallets__click-2840"
+    },
+    {
+      "content_hash": "e0941ce848610c69db86966b3c4b87fe7f051c25cce625c55d201504dccd9e34",
+      "task_id": "pallets__click-2933"
+    },
+    {
+      "content_hash": "324c659f86aef3d2d0ce727ad0d9b2310dfe004f2da7cf9678bc4443a4ab5e2d",
+      "task_id": "pallets__click-3058"
+    },
+    {
+      "content_hash": "06431e0d805e99f201f8859b594eec283e1f3b83ac0ca39b878990ac5859c275",
+      "task_id": "pallets__click-3068"
+    },
+    {
+      "content_hash": "1ef4518b9018e9cbbe44dd9ec6e921e30bea635fdcfbcb745678309754878f6c",
+      "task_id": "pallets__click-3079"
+    },
+    {
+      "content_hash": "633e51a09f4ae9b846199c1d67d069ec756243ad3098174eea3da7ec29b99231",
+      "task_id": "pallets__click-3126"
+    },
+    {
+      "content_hash": "9f8a9981d7c23d48669f2b76187c1a6ba0c9b8a3a6defefc4ded2d7d60c8371b",
+      "task_id": "pallets__click-3152"
+    },
+    {
+      "content_hash": "0889d0cb179d6dfcb1536f2659a302daef905aba0a011024bf78ed5b7d0231fa",
+      "task_id": "pallets__click-3224"
+    },
+    {
+      "content_hash": "99a82b285cf5a482cb983f7d851ba6955fd826899a5029d1ac9f8590fbcdb590",
+      "task_id": "pallets__click-3225"
+    },
+    {
+      "content_hash": "e492376790ca35fa18adf244f80c8886f238f9146fd006dada7e9aed155ca824",
+      "task_id": "pallets__click-3244"
+    },
+    {
+      "content_hash": "3c311f3688038318710f94066bc1e9ffe744e9c007dd4310f850320c30336e7b",
+      "task_id": "pallets__click-3256"
+    },
+    {
+      "content_hash": "1eb45124b1dda30525a6ef887ebd478f0e750f33cd1f44ac91aefe28be11ca63",
+      "task_id": "pallets__click-3363"
+    },
+    {
+      "content_hash": "152d114cb7ca44c08cabe7f08d30e4c3c0340d12b14291570fc069a7fac3a143",
+      "task_id": "pallets__click-3434"
+    },
+    {
+      "content_hash": "73eb6d559cacec21cbd9726aa71c48870b3905982df07c42d0bc14ac50162663",
+      "task_id": "pallets__click-3466"
+    },
+    {
+      "content_hash": "207efd91de781e41cbef2a460080837a6108f824f7002c5a21a85c0a3bb2e446",
+      "task_id": "pallets__click-3482"
+    },
+    {
+      "content_hash": "6e87ee292824bd546abca07a70237b585112077dd0490f626d45fff2bd7e8f37",
+      "task_id": "pallets__click-3484"
+    },
+    {
+      "content_hash": "115d3c816597ddccb6037a9d3243569aad8d14aaf26405415bd5f82a970513b3",
+      "task_id": "pallets__click-3507"
+    },
+    {
+      "content_hash": "28d9867061df50db16f8e83c52b04037311a46d189efa05d9c2a6c385a1dc659",
+      "task_id": "pallets__click-3533"
+    },
+    {
+      "content_hash": "c6f089385f62663b2c0275d553d5a4726f9a98ee8ec82c71882693860981d4fa",
+      "task_id": "pallets__click-3578"
+    },
+    {
+      "content_hash": "e9641769d0df5aa62a0b7f1737b3d61d34f97feec53fbeb4be50168349e80b17",
+      "task_id": "pallets__click-3642"
+    },
+    {
+      "content_hash": "7f35a7e2cf66bee27cd14887397fd41770c89a4d45ecc6d9b9e20e2b861e1019",
+      "task_id": "pallets__click-3653"
+    },
+    {
+      "content_hash": "5187896d255aafa6f997cb038ac16998a99ddcc6c586183f786fafcb9fac9761",
+      "task_id": "pallets__click-3678"
+    },
+    {
+      "content_hash": "69dabfb9ad08db7656fb54fc60e5159cb3dab5c9633171fe649dc6ccc6874162",
+      "task_id": "pallets__click-3769"
+    },
+    {
+      "content_hash": "d61f402a17f37df876264acc6ebb09b8658a14551f973d0a01bca8bec8197ede",
+      "task_id": "pallets__click-3781"
+    },
+    {
+      "content_hash": "ac47e127d71cd05c5298b881eeaf7f07ff63743c4e5bffe77f2c8fa0a6d06ff1",
+      "task_id": "pallets__click-3818"
+    },
+    {
+      "content_hash": "4ed2dbd6f3edff1f4667ff507b495305023ca55292424a2faf9af77fb5d91991",
+      "task_id": "pallets__click-3858"
+    },
+    {
+      "content_hash": "c387bc110c259b2ee3a295e6fd5c0cb58b121137e58d2799bb50c4a5873c2d6f",
+      "task_id": "tortoise__tortoise-orm-2081"
+    },
+    {
+      "content_hash": "cc292fd05136c2c754fca1e359a4210f07055afaf4a2318dabb64209f455e6d7",
+      "task_id": "tortoise__tortoise-orm-2125"
+    },
+    {
+      "content_hash": "1a0cb61510bf98971efde118ce306b73516047f33ab829e70a3738e923113d37",
+      "task_id": "tortoise__tortoise-orm-2128"
+    },
+    {
+      "content_hash": "74134e377e6be8d2344dc6b2c8c65d57580c1e512e2e43f60cd898cf8e50c5b3",
+      "task_id": "tortoise__tortoise-orm-2129"
+    },
+    {
+      "content_hash": "8dd3b291442cb5eb74a0c10bf5821abcb9e20daf33585069043bb86bf3f3bdba",
+      "task_id": "tortoise__tortoise-orm-2145"
+    },
+    {
+      "content_hash": "60e03ea2afe6dc0dd89653024952aafc7ba79b48150685ec9deadf2e94f3a008",
+      "task_id": "tortoise__tortoise-orm-2236"
+    },
+    {
+      "content_hash": "70fa1b94978950a324d3632a9e57af64a8999ad9ef0ecec7f9bfd19ebb1ae8e3",
+      "task_id": "tortoise__tortoise-orm-2255"
+    },
+    {
+      "content_hash": "f1720f6c9d489eb82ed9e72030317ad16d497a5cc869cfdf8559a34c6623a36d",
+      "task_id": "tortoise__tortoise-orm-2269"
+    }
+  ],
+  "version": "v2"
+}

@@ -1609,6 +1609,14 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   `container_sigkilled_without_oom_flag`**。细账在 `03-benchmark-spec.md` §8.12。
   指纹 `datasets/manifests/benchmark-cn-v1@v1.json`（dirty=true，同前三版的原因：门禁在未提交的
   工作区上跑）。`benchmark-dev@v1` 和 `swebench-verified-subset@v1/@v2` 一行没动。
+- **2026-09-18 追加：Plan B 中文题面落地，发布 `benchmark-cn-v1@v2`（41 道，题面 41/41 中文）**。
+  `cli/localize.py` draft / import（12 条单测），对照表 `datasets/benchmark-dev/localize-2026-09-18.csv`
+  （40 ACCEPT / 1 REJECT，tortoise-2255 原生中文跳过改写）。门禁 Oracle #141 41/41、Noop #142 0/41、0 平台故障，
+  快照 `sha256:19a2508ae0e1…`，指纹 `datasets/manifests/benchmark-cn-v1@v2.json`（dirty=true）。v1 不动。
+  **披露**：初稿 Claude Opus 5（AI）、复核 Codex（AI）、用户核对后拍板，不是人工逐题改写；质量报告
+  `datasets/quality/quality-2026-09-18.md` 第三节"其中改写成中文"单独一列（40）。细账在 `03-benchmark-spec.md` §8.5 落地实录。
+  AC 重新对账：AC 10 中文 41/41（其中 40 道改写、1 道原生），MET-05 降级线"自建中文 ≥40"按题面语言到线；
+  **AC 6 仍 ❌（41 < 60）**。本次只交付 Plan B 中文题面；LlamaFactory 探测仍未完成，不在本次提交中。
 ### E8-T4 校准集 50 题 · **P1 · C:M · E:1d · 🌐🐳**
 ### E8-T5 数据集质量报告（来源构成/语言分布/难度分布/漏斗数据） ✅ 已于 2026-09-17 完成 · **P1 · C:S · E:0.5d**
 - **AC**（卡片原本只有标题，2026-09-17 开工前定的）：

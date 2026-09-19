@@ -489,6 +489,16 @@ make dataset-publish SLUG=benchmark-cn-v1
 # 摘要对不上 1701c943ff5b… 的话，先查 tortoise 那 8 道的 P2P 里还有没有
 # test_init_creates_migrations_package —— 它依赖执行顺序（03 §8.12 二），
 # `assembly.ORDER_DEPENDENT_TEST_FUNCTIONS` 在组装时剔掉，重灌走 promote-assemble 会自动生效
+# ⚠ 上面重灌出来的是 v1（英文题面）。**最终实验用的是 benchmark-cn-v1@v2**（2026-09-18，中文题面，§8.5 Plan B）。
+# `promote assemble` 组装出来的永远是候选里的**英文原文**；改写、复核过的中文题面只存在提交进仓库的
+# 对照表里，要用 `cli.localize import` 导回 —— 它只换 issue_title / issue_body / issue_language / tags，
+# 测试和补丁不动，validation_state 不动，content_hash 重算。这一步不跑的话题面退回英文、快照摘要和 v2 对不上，
+# 而且不报错。**顺序**：要连 v1 一起复现的话先把上面 v1 冻出来再导（导完 v1 的题就变了，再 stage 只能得到 v2）；
+# 只要 v2 的话 park-unreviewed 之后直接导
+cd backend && uv run python -m cli.localize import ../datasets/benchmark-dev/localize-2026-09-18.csv
+make dataset-stage DATASET=benchmark-dev SLUG=benchmark-cn-v1
+make dataset-gate SLUG=benchmark-cn-v1 && make worker
+make dataset-publish SLUG=benchmark-cn-v1                  # 摘要以 datasets/manifests/benchmark-cn-v1@v2.json 为准
 ```
 
 **工作区不干净时，建实验的那几步会被拒**（协议 C-27，E5-T4 落的）。
