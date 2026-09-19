@@ -1872,7 +1872,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   组装成题，而人工终审只覆盖 31 道，不把没审过的退回 `REVIEW_REQUIRED` 的话，
   `dataset stage` 会把 20 道没人审过的题一起冻进快照（AGENTS.md §12 已补）
 
-### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） · **P1 · C:M · E:1d**
+### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） ✅ 已于 2026-09-19 完成
 - **Goal**：把 Worker 崩溃、重复启动、磁盘不足和容器残留变成可自动恢复、可从日志定位的故障。
 - **Req**：NFR-02, NFR-04 · **Deps**：E5-T1, E5-T2, E9-T2 · **Modules**：`worker`, `infrastructure/queue`, `sandbox`
 - **AC**：
@@ -1884,7 +1884,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   6. 容器在创建失败、运行异常、超时和停机路径都能清理，结束后无评测容器残留
   7. 孤儿回收、租约回收、磁盘暂停/恢复、断点续跑和重试都有结构化日志，带对象 ID 和结果
   8. 用不调用模型的 Mock / Golden 测试验证中断恢复；补齐必要测试并通过 `make check`
-- **开发验收**（2026-09-19，待 review / 合并）：
+- **实际交付**（2026-09-19）：
   - `app/worker/singleton.py` 用 PostgreSQL 会话级 advisory lock 保证单机只有一个 Worker。
     锁在任何 Docker 枚举或孤儿回收之前取得；持锁连接断开后 PostgreSQL 自动释放，
     所以 `kill -9` 后无需清锁。第二个 Worker 记录 `worker_already_running` 并退出。
