@@ -35,7 +35,8 @@ def test_parser_has_every_step_with_defaults() -> None:
     args = parser.parse_args(["sample"])
     expected = (swebench.DEFAULT_SEED, swebench.DEFAULT_SAMPLE_SIZE, False)
     assert (args.seed, args.n, args.check) == expected
-    assert swebench.DEFAULT_SAMPLE_SIZE == 75  # 2026-09-16 晚从 50 抽到 75，前 50 道不变
+    # 2026-09-16 晚 50 → 75，2026-09-18 75 → 100，前面的名单不变
+    assert swebench.DEFAULT_SAMPLE_SIZE == 100
     args = parser.parse_args(["pull", "--only", "a__b-1", "--limit", "3", "--dry-run"])
     assert args.only == ["a__b-1"] and args.limit == 3 and args.dry_run
     args = parser.parse_args(["import", "--allow-unpulled", "--dry-run"])

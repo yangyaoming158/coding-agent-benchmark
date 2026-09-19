@@ -768,6 +768,11 @@ def cmd_show(args: argparse.Namespace) -> int:
 #: 人工终审的两个判定。
 VERDICTS = ("ACCEPT", "REJECT")
 
+# 终审表的 review 列是验证器的原话，会把在基线上就挂的 P2P 逐条列出来 ——
+# matplotlib-25122 那一行 642 条用例 289 KB（2026-09-18），超过 csv 模块默认的 128 KB
+# 单元格上限，import-review 和 park-unreviewed 读到那一行直接崩。放开上限，表多大都读。
+csv.field_size_limit(sys.maxsize)
+
 #: 导出给人看的 CSV 表头。`verdict` 和 `reason` 留空，人填完再导回来。
 #:
 #: **`fail_to_pass` 和 `gold_patch` 必须在表里**，这是 2026-09-10 第一轮终审的教训：

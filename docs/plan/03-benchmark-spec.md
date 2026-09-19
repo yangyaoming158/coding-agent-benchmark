@@ -2098,6 +2098,63 @@ Oracle 实验 #135 **59/59 = 100%**，Noop 实验 #136 **0/59 = 0%**，118 个�
 E1-T8（Go）2026-09-16 降为 P2，缺口按 §8.5 Plan B 人工构造中文 Golden 题顶。
 成活率 25 道新题 17 道（68%），比预估的 84% 低，差在 matplotlib（5 道只活 1 道，pandas 那个坑占 2 道）。
 
+#### 十、同种子抽到 100（2026-09-18）：v3 发布 75 道，MET-05 总数到 116
+
+**这次只扩样本，不改任务格式、判定或已发布版本。** 默认抽样数由 75 调到 100，种子仍是
+20260915，抽样池仍是 173 道（摘要 `7973719e3a9e…`）。名单原件
+`datasets/swebench/sample-seed20260915-n100.json`，`cli.swebench sample --check` 回显
+“和重算结果逐字相同”。原 n75 的 75 道全部保留、相对顺序不变，新增 25 道；
+**不是整个数组的前 75 个位置相同**，新题按仓库插入，交接时的“前 75 道逐字相同”应按此更正。
+n50 / n75 名单和 v1 / v2 发布指纹均保留。
+
+**漏斗**，原件 `datasets/swebench/import-report-2026-09-18.md`：
+
+| 层 | 数量 | 说明 |
+|:---|---:|:---|
+| 官方题数 / 离线筛通过 | 500 / 173 | 筛选规则未变 |
+| 抽样后 / git 镜像备好 | 100 / 100 | 固定种子，9 个仓库 |
+| 环境镜像备好 / 入库 | 98 / 98 | 2 道官方镜像 + 96 道按官方配方本机构建 |
+| VALID | **75** | 原 59 + 新增 16 |
+| REVIEW_REQUIRED | 0 | 本轮人工终审 1 收 6 否，已导回 |
+| INVALID | 23 | 19 道一般拒收 + 3 道 COMMIT_MISSING + 1 道 F2P_NOT_FAILING |
+
+报告旧表头“官方镜像拉得到”实际统计所有就绪镜像，不代表 98 道都从官方仓库拉取；
+官方镜像只有 flask-5014、pylint-6386，其余 96 道的本机构建名单附在报告中。
+astropy-8707 / 8872 没有可用镜像：astropy 3.1 的安装依赖 `astropy_helpers` 子模块。
+配方原件 `build-specs.json` 覆盖 100 道、25 个环境层（n75 是 23 个），matplotlib 配额 17 道。
+本次收尾只复用已有镜像，门禁前按库内 digest 核对 75/75 全部存在，没有拉取或构建镜像。
+
+**新增题验证与终审**：25 道中 24 道入库并验证，初验 15 VALID / 7 REVIEW_REQUIRED / 2 INVALID；
+7 道终审由用户拍板，CSV `datasets/swebench/review-2026-09-18-n100-official.csv` 已导回，
+1 收 6 否后新增 16 VALID、8 INVALID，累计 75 VALID / 23 INVALID。
+
+| 题 | 终审 | 理由（CSV 保留原文） |
+|:---|:---|:---|
+| matplotlib-23314 | REJECT | 命名空间包 `mpl_toolkits` 的 conftest 从 `/testbed` 与 `/workspace` 导入冲突，基线收集失败 |
+| matplotlib-24970 | REJECT | pandas 2.3 与 numpy 1.25.2 不兼容，基线 P2P 报 ImportError |
+| matplotlib-25122 | REJECT | pytest 9 将类作用域 fixture 的弃用告警作为错误，642 条 P2P 在基线 ERROR |
+| pylint-4551 | REJECT | 测试补丁导入 gold 才新增的 `get_annotation`，基线模块收集失败，P2P 也为空 |
+| sphinx-10323 | REJECT | pygments 行号渲染格式不同，基线 P2P 断言失败 |
+| sphinx-9229 | REJECT | autodoc 输出与预期不符，根因未查清，未靠剔 P2P 放行 |
+| sphinx-9711 | ACCEPT | 八步通过，只因官方 P2P 为空进入人审；1 条 F2P 在 base 失败、gold 通过 |
+
+顺手修复 `cli/promote.py` 的 CSV 单元格上限：matplotlib-25122 的 `review` 列约 289 KB，
+超过默认 128 KB，`import-review` 原来会崩溃；现在设置 `csv.field_size_limit(sys.maxsize)`，
+`test_park_unreviewed.py::test_a_huge_review_cell_does_not_break_reading` 覆盖超长单元格读取。
+
+**门禁与发布（2026-09-18）**：Oracle #143 **75/75 = 100%**，Noop #144 **0/75 = 0%**，
+150 次评测均完成，0 平台故障、0 次 `container_sigkilled_without_oom_flag`；正式门禁函数回显
+`gate_ok: True`、`problems: ()`。Worker 已优雅退出，进程列表确认没有残留。
+已发布 `swebench-verified-subset@v3`，清单哈希 `6003a0519a52…`，导出哈希 `5640bd34bb05…`；
+发布指纹 `datasets/manifests/swebench-verified-subset@v3.json` 记录完整哈希和实验号，
+本地日志 `var/swebench-logs/gate-v3-143-144.log`（不入库）。工作区未提交，门禁与发布指纹均
+如实标 `dirty=true`，门禁实验不得进入排行榜；正式实验仍需干净工作区。
+
+**MET-05 对账**：官方 v3 的 75 道 + 已发布 `benchmark-cn-v1@v2` 的 41 道 = **116 道**，
+比总数底线 100 多 16 道；两套数据集仍分别评测、分别统计解决率。
+中文题面 Plan B 的实现与证据由 E8-T3 分支交付，这批题面是 AI 出稿、AI 复核、用户核对拍板后
+改写成中文，不称为“人工改写”；本分支不包含该分支代码。
+
 ## 8.12 `benchmark-cn-v1@v1` 发布与数据集质量报告落地实录（2026-09-17，E8-T3 收口 + E8-T5）
 
 > 工具：`python -m cli.dataset {stage,gate,publish}`（E1-T6 那套，`DATASET=benchmark-dev SLUG=benchmark-cn-v1`）

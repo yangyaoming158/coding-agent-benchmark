@@ -196,14 +196,15 @@ def test_instance_dockerfile_pins_version_and_copies_inputs() -> None:
 
 @pytest.mark.skipif(not SPECS_FILE.exists(), reason="仓库里没有 build-specs.json")
 def test_every_sampled_instance_rewrites_cleanly() -> None:
-    """真实的 75 道：三层都改写得出来，一条 RecipeError 都不能有。
+    """真实的 100 道：三层都改写得出来，一条 RecipeError 都不能有。
 
     env 的个数比"版本数"少：官方的 env key 是安装脚本的哈希，脚本一样的版本共用一层
-    （astropy 4.3 / 5.0 / 5.1 一层，sphinx 3.x–7.x 一层），所以 50 → 75 只多了 3 个 env。
+    （astropy 4.3 / 5.0 / 5.1 一层，sphinx 3.x–7.x 一层），所以 50 → 75 只多了 3 个 env，
+    75 → 100 又只多了 2 个（2026-09-18 导出实测）。
     """
     specs = load_build_specs(SPECS_FILE)
     summary = summarize(specs)
-    assert summary["instances"] == 75 and summary["envs"] == 23
+    assert summary["instances"] == 100 and summary["envs"] == 25
     assert "repo.anaconda.com" not in base_context_files(specs)["Dockerfile"]
     for key in specs.envs:
         files = env_context_files(specs, key)
@@ -228,4 +229,4 @@ def test_every_sampled_instance_rewrites_cleanly() -> None:
     assert summary["need_freetype"] == sorted(
         i for i in specs.instances if i.startswith("matplotlib")
     )
-    assert len(summary["need_freetype"]) == 13
+    assert len(summary["need_freetype"]) == 17  # n100 的 matplotlib 配额是 17（n75 是 13）

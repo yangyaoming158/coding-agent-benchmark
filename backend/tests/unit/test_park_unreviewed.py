@@ -46,6 +46,18 @@ def test_several_sheets_merge(tmp_path: Path) -> None:
     assert reviewed_task_ids([first, second]) == {"a-1", "b-9"}
 
 
+def test_a_huge_review_cell_does_not_break_reading(tmp_path: Path) -> None:
+    """review 列是验证器原话，一道题 642 条 P2P 挂掉就是 289 KB（matplotlib-25122，2026-09-18）。
+
+    csv 模块默认单元格上限 128 KB，不放开的话 import-review / park-unreviewed 读到那一行直接崩。
+    """
+    cases = (f"tests/test_mlab.py::TestSpectral::test_csd[{i}]" for i in range(6000))
+    huge = "在基线上就挂：" + ", ".join(cases)
+    assert len(huge) > 131072
+    path = _csv(tmp_path / "review.csv", [("m-25122", "REJECT", huge), ("s-9711", "ACCEPT", "收")])
+    assert reviewed_task_ids([path]) == {"m-25122", "s-9711"}
+
+
 def test_golden_tasks_are_never_parked() -> None:
     """Golden 题不走人工终审，不能被这一步退回去 —— 退了哨兵测试就没题可跑。"""
     assert not _is_mined("bench-golden__auth-2")
