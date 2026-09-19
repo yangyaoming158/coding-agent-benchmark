@@ -45,7 +45,28 @@ class SeedAgent:
     params: Mapping[str, Any] = field(default_factory=dict)
 
 
+#: 单价随时间变化，正式实验前需核对并创建独立配置；此处按高峰价保守估算。
+MINIAGENT_PARAMS: dict[str, Any] = {
+    "image": "bench-base:py311",
+    "max_turns": 20,
+    "max_output_tokens": 2048,
+    "max_tokens_budget": 30_000,
+    "thinking": "disabled",
+    "prices_usd_per_mtok": {"input": 0.3, "output": 1.2, "cache_read": 0.006},
+    "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
+}
+
 SEED_AGENTS: tuple[SeedAgent, ...] = (
+    SeedAgent(
+        name="miniagent",
+        display_name="MiniAgent（自研）",
+        kind=AgentKind.CUSTOM,
+        adapter_class="app.runner.adapters.miniagent.MiniAgentRunner",
+        config_label="miniagent@deepseek-flash",
+        note="四工具 ReAct、原生 JSONL、逐轮 token 与单价估算成本（E3-T6）",
+        model_name="deepseek/deepseek-flash",
+        params=MINIAGENT_PARAMS,
+    ),
     SeedAgent(
         name="oracle",
         display_name="Oracle 哨兵",

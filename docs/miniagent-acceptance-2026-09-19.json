@@ -1,0 +1,81 @@
+{
+  "runs": [
+    {
+      "name": "Golden #145",
+      "input": 6082,
+      "output": 471,
+      "cache_read": 4096,
+      "turns": 4,
+      "estimated_cny": "0.00395192"
+    },
+    {
+      "name": "test_produces_patch_on_a_solva0",
+      "input": 5662,
+      "output": 467,
+      "cache_read": 4736,
+      "turns": 4,
+      "estimated_cny": "0.00288872"
+    },
+    {
+      "name": "test_cost_is_reported_or_expli0",
+      "input": 7436,
+      "output": 508,
+      "cache_read": 6272,
+      "turns": 5,
+      "estimated_cny": "0.00332144"
+    },
+    {
+      "name": "test_result_survives_noisy_std0",
+      "input": 5423,
+      "output": 425,
+      "cache_read": 4608,
+      "turns": 4,
+      "estimated_cny": "0.00260716"
+    }
+  ],
+  "total_estimated_cny": "0.01276924",
+  "price_source": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing/",
+  "prices_cny_per_mtok": {
+    "input": 1,
+    "output": 4,
+    "cache_read": 0.02
+  },
+  "as_of": "2026-09-19 off-peak",
+  "budget_cny": 1,
+  "observed_balance_change_cny": "0.00",
+  "balance_note": "余额接口按分返回且可能延迟，不用余额差替代 token 费用估算",
+  "golden": {
+    "evaluation_run_id": 145,
+    "task_run_id": 1407,
+    "task_id": "bench-golden__auth-2",
+    "base_git_sha": "c100a1c75812eb3d56c57098980563bd37d77164",
+    "dirty": true,
+    "model": "deepseek/deepseek-flash",
+    "thinking": "disabled",
+    "lifecycle": "COMPLETED",
+    "infra_outcome": "SUCCESS",
+    "agent_outcome": "RESOLVED",
+    "test_passed": 7,
+    "retries": 0,
+    "cost_usd_unrounded": "0.000592788",
+    "cost_source": "estimated",
+    "max_tokens_budget": 30000
+  },
+  "runtime_sha256": {
+    "backend/app/runner/miniagent_runtime.py": "058fd3d9bb9dcb2f7f7b1da0a15b1012f6ea668101f50139940990cdc8337931",
+    "backend/app/runner/adapters/miniagent.py": "3caf452a33739ae859c7a1ab64c6d8f9cb303c97a72264a03d454521b9f0714e"
+  },
+  "artifact_uncompressed_sha256": {
+    "agent.log.gz": "05b8d31fc32f16b423fb8a6409810adec86b4c13807677499cd22d2715ef9420",
+    "patch-raw.diff.gz": "a947d055adb319b60ca9273d1bb72d098cdfcc1e3d8eabc100bf75bb1c038bbc",
+    "patch.diff.gz": "7a0e6129a075fa8e84f597daa84be70de67d8358856544755eb40827a0973eff",
+    "report.xml.gz": "441c5e9739354d585acbd30c34395406f2234189ed63bc41fbc2a2484c424812",
+    "test.log.gz": "9df08f828df2cdb96a825500f635d61aace86e3de090bb8a7b61597a3ce8a1b8",
+    "trajectory.jsonl.gz": "df52616b0bc281ff06c56f19dffd86de71ccadf156f36c15409d254d8a3fa61d"
+  },
+  "checks": {
+    "unit": "30 passed",
+    "live_contract": "5 passed, 1 skipped",
+    "make_check": "2021 passed, 3 skipped, 91 deselected"
+  }
+}
