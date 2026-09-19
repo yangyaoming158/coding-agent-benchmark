@@ -813,13 +813,13 @@
   "在给定预算内没修完"，和"改错了"同一类，该交给 Judge 判，照 `is_error` 的字面
   判成故障会触发重试、白花钱，归因也会指错方向。
 
-### E3-T6 自研 MiniAgent
+### E3-T6 自研 MiniAgent ✅ 已于 2026-09-19 完成
 - **Goal**：ReAct 循环 + 工具（read_file/list_dir/grep/apply_edit[/run_tests]）+ token 记账
 - **Req**：FR-10, MET-06 · **Deps**：E3-T1 · **🔑**
 - **AC**：Golden 集上至少解决 1 题；轨迹为原生结构化 JSONL；单题成本可核算
 - **Why**：满足"自研 Agent"要求，且是**外部 Agent 全部失败时的保底参赛者**
 - **P1 · C:L · E:2d · 🔑**
-- **2026-09-19 实现与本地验收通过，待提交 / PR review / 合并**：
+- **实际交付**（2026-09-19）：
   `miniagent_runtime.py` 实现四工具循环，`MiniAgentRunner` 共用提示词和失败判据；
   复用现有 `bench-base:py311`，无新依赖、无镜像构建，不改冻结件。
   真实 DeepSeek Flash（接口已不列旧 `deepseek-chat`，thinking 关闭）Golden 实验 **#145** / task run **#1407**：
@@ -1872,7 +1872,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   组装成题，而人工终审只覆盖 31 道，不把没审过的退回 `REVIEW_REQUIRED` 的话，
   `dataset stage` 会把 20 道没人审过的题一起冻进快照（AGENTS.md §12 已补）
 
-### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） · **P1 · C:M · E:1d**
+### E9-T3 稳定性加固（孤儿回收、磁盘水位、失败重跑、断点续跑） ✅ 已于 2026-09-19 完成
 - **Goal**：把 Worker 崩溃、重复启动、磁盘不足和容器残留变成可自动恢复、可从日志定位的故障。
 - **Req**：NFR-02, NFR-04 · **Deps**：E5-T1, E5-T2, E9-T2 · **Modules**：`worker`, `infrastructure/queue`, `sandbox`
 - **AC**：
@@ -1884,7 +1884,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   6. 容器在创建失败、运行异常、超时和停机路径都能清理，结束后无评测容器残留
   7. 孤儿回收、租约回收、磁盘暂停/恢复、断点续跑和重试都有结构化日志，带对象 ID 和结果
   8. 用不调用模型的 Mock / Golden 测试验证中断恢复；补齐必要测试并通过 `make check`
-- **开发验收**（2026-09-19，待 review / 合并）：
+- **实际交付**（2026-09-19）：
   - `app/worker/singleton.py` 用 PostgreSQL 会话级 advisory lock 保证单机只有一个 Worker。
     锁在任何 Docker 枚举或孤儿回收之前取得；持锁连接断开后 PostgreSQL 自动释放，
     所以 `kill -9` 后无需清锁。第二个 Worker 记录 `worker_already_running` 并退出。
