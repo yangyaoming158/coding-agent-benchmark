@@ -1912,7 +1912,17 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
     92 deselected**，ruff、格式、mypy strict 和 4 条 import-linter 规则全部通过。
   - 未改冻结协议、数据库枚举、迁移、前端或后端 API；没有建镜像、下载大文件或启动付费实验。
 
-### E9-T4 性能报告生成 · **P1 · C:M · E:1d**
+### E9-T4 性能报告生成 · **P1 · C:M · E:1d** ✅
+- **Goal**：把 DEL-05 的性能事实并入统一报告，不维护第二套统计口径
+- **Deps**：E9-T1、E9-T2、E5-T5 · **Modules**：`report`
+- **AC**：① 输出批次 makespan、阶段 P50/P95/最大值和有效并发曲线；② 输出成本
+  P50/P95、平台故障率和重试；③ 可读宿主采样 CSV 的 CPU/内存峰值；④ 给出
+  16 vCPU / 32 GiB、300 次运行的容量外推；⑤ `external_wait_ms` 或宿主 CPU 未采到时
+  明确显示“不可用”，不能把数据库默认 0 当实测 0
+- **2026-09-20 实现记录**：`app/report/aggregate.py` 复用 `analytics.timing`、
+  `analytics.concurrency`、`domain.makespan` 和排行榜成本口径。性能章节和 E10-T3
+  共用一份 `ReportData`，HTML / Markdown / JSON 不各算一遍。当前 pilot 没写入
+  `external_wait_ms`，宿主采样只有内存列，所以报告主动披露缺失；没有补造数字。
 
 ### E9-T5 题目定期复验与自动隔离 · **P2 · C:M · E:1d · 🐳**
 - **Goal**：`03-benchmark-spec.md` §7.4「发布后定期复验（每周一次）不通过的任务自动隔离」
@@ -1929,7 +1939,22 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ### E10-T1 docker compose 一键部署（api/worker/pg/minio/frontend） · **P0 · C:M · E:1.5d · 🐳**
 ### E10-T2 MinioArtifactStore 接入与切换验证 · **P1 · C:S · E:0.5d**
-### E10-T3 报告生成器（HTML + Markdown + JSON，含每题轨迹链接） · **P1 · C:L · E:2d**
+### E10-T3 报告生成器（HTML + Markdown + JSON，含每题轨迹链接） · **P1 · C:L · E:2d** ✅
+- **Goal**：从已有实验生成可归档、可复核、可机器读取的统一报告
+- **Deps**：E5-T5、E6-T1、E7-T0、E9-T4 · **Modules**：`report`、`cli.report`
+- **AC**：① 一条命令对一个或多个同数据集、同协议版本的运行生成 HTML、Markdown、
+  JSON；② 三种格式来自同一份版本化中间结构；③ 含严格/有效解决率、轮间极差、
+  逐题结果翻转率、难度/语言/仓库分面、平台故障与重试；④ 费用来源分别显示
+  `reported / estimated / unavailable`，任何缺失都不显示成 `$0`；⑤ 含成本—解决率、
+  失败分类、Agent×类别、Top-N 案例及补丁/日志/轨迹链接；⑥ 未完成的 LLM 归因、
+  盲检准确率、κ 和不足 3 个真实 Agent 主动披露；⑦ 三份文件登记到 `artifacts` 和
+  `report_records`
+- **实现**：`python -m cli.report generate --run ID [--run ID ...]`。HTML 为无 CDN 的
+  单文件，JSON 的 `schema_version=1.0`。迁移 `0008` 给 `artifact_kind` 增加
+  `REPORT_MARKDOWN` / `REPORT_JSON`；报告本身不需要后端 API 或前端改动，案例链接
+  复用现有 `/api/task-runs/{id}/artifacts/{kind}`。
+- **范围声明**：生成器完成不等于 DEL-03/DEL-04 已有足够实验事实。最终报告仍需
+  E10-T4 的第三个真实 Agent 和 E6-T2～T4 的 LLM 归因/人工盲检；本卡没有运行付费实验。
 ### E10-T4 最终实验（100×3）与对比报告 · **P1 · C:L · E:2d**
 ### E10-T5 Harness Replay 校准实验（MET-01） · **P1 · C:M · E:1d**
 ### E10-T6 部署文档 / 使用文档 / 架构文档 · **P0 · C:M · E:1.5d**

@@ -1,6 +1,6 @@
 """归因的查库与落库（E6-T1）。
 
-分工和 `app.evaluation.leaderboard` 一样：**判定口径在纯函数里，这里只管取数和写数。**
+分工和 `app.analytics.leaderboard` 一样：**判定口径在纯函数里，这里只管取数和写数。**
 
     load_facts(session)                 → 每次运行一份 RunFacts（一条 SQL 取完）
     existing_stages(session)            → 已经有结论的运行，以及是哪一层给的

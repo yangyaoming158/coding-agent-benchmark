@@ -96,6 +96,8 @@ layers = [
     # worker 要投作业、api 也要投作业，走的都是下面的 app.infrastructure.queue。
     "app.api | app.worker",
     "app.evaluation | app.benchmark | app.report",
+    # 评测 API 与报告共用的只读聚合口径，避免复制解决率/耗时/并发算法。
+    "app.analytics",
     "app.runner",
     "app.sandbox | app.judge | app.attribution",
     "app.storage",
@@ -108,7 +110,7 @@ name = "domain 不依赖任何其他模块"
 type = "forbidden"
 source_modules = ["app.domain"]
 forbidden_modules = [
-    "app.api", "app.evaluation", "app.benchmark", "app.report",
+    "app.api", "app.evaluation", "app.benchmark", "app.report", "app.analytics",
     "app.runner", "app.sandbox", "app.judge", "app.attribution",
     "app.storage", "app.infrastructure", "app.worker",
 ]

@@ -71,7 +71,7 @@
 > 量级：300 run × ~50 用例 ≈ 15,000 行/实验，完全无压力。逐用例入库是"证据可查"的基础，也是失败归因 Stage 2 的数据源。
 
 **`artifacts`** — 统一制品索引
-`id PK` · `owner_type enum(TASK|TASK_RUN|EVAL_RUN|VALIDATION)` · `owner_id` · `kind enum(AGENT_STDOUT|AGENT_STDERR|TEST_STDOUT|TEST_REPORT_XML|TRAJECTORY|PATCH|REPORT_HTML|VALIDATION_EVIDENCE|BUILD_LOG)` · `uri` · `backend enum(LOCAL|MINIO)` · `content_type` · `size_bytes` · `sha256` · `compressed bool` · `created_at`
+`id PK` · `owner_type enum(TASK|TASK_RUN|EVAL_RUN|VALIDATION)` · `owner_id` · `kind enum(AGENT_STDOUT|AGENT_STDERR|TEST_STDOUT|TEST_REPORT_XML|TRAJECTORY|PATCH|REPORT_HTML|REPORT_MARKDOWN|REPORT_JSON|VALIDATION_EVIDENCE|BUILD_LOG)` · `uri` · `backend enum(LOCAL|MINIO)` · `content_type` · `size_bytes` · `sha256` · `compressed bool` · `created_at`
 索引：`(owner_type, owner_id)`
 
 ### D. 归因与人工域
@@ -278,6 +278,28 @@ API，也没有改 `frontend/`。`cli.experiment status` 现在直接显示三�
 Aider 实报合计 `$0.3453`，按同批 token 和历史价目估算为约 `$0.3261`，误差 5.6%，
 不需要新付费实验也能验证量级。
 
+## 13.7 统一报告生成器落地（2026-09-20，E9-T4 / E10-T3）
+
+`app/report/aggregate.py` 只做查询与聚合，`models.py` 是三种格式共用的版本化中间结构，
+`render.py` 才负责排版。解决率、成本来源、分面、阶段耗时、并发曲线和容量外推分别复用
+已有 `analytics.leaderboard`、`analytics.timing`、`analytics.concurrency` 和
+`domain.makespan`，没有另写一套公式。
+
+入口是 `python -m cli.report generate --run ID [--run ID ...]`。选择的运行必须属于同一个
+`benchmark_set` 版本并使用同一个协议版本；不符合排行榜准入规则的真实运行保留在原始
+运行表中，但不混进 Agent 对比汇总，并在警告里列出。HTML 是无外部 CDN 的单文件，
+Markdown 便于代码评审，JSON 的 `schema_version=1.0` 供后续自动处理。
+
+三份文件挂在首个运行的 `EVAL_RUN` 制品目录，并各写一条 `report_records`；比较报告完整的
+`run_ids` 数组仍是权威范围。迁移 `0008` 增加 `REPORT_MARKDOWN` 和 `REPORT_JSON`，避免把
+三种文件都谎报成 `REPORT_HTML`。Top-N 失败案例直接链接已有题目执行制品接口，因此本卡
+不新增 API，也不改前端。
+
+缺数据不补零：只要一次 attempt 的费用不可用，每题成本就显示“不可用”；当前适配器没有
+写 `external_wait_ms` 时，默认值 0 不解释成实测 0%；没有宿主 CPU 采样、LLM 归因、人工
+盲检或第三个真实 Agent 时也都主动披露。生成器已经能使用 pilot 数据，但 DEL-03 / DEL-04
+是否最终达标仍由 E10-T4 和 E6-T2～T4 提供的实验事实决定。
+
 ---
 
 # 14 Backend Architecture
@@ -293,20 +315,21 @@ Python 3.11+ · **FastAPI**（自动 OpenAPI → 前端类型生成；async 原�
 app/
   api/              HTTP 层：路由、请求/响应模型、依赖注入（薄）
   domain/           纯领域模型与枚举（Evaluation Semantics 的代码化，零外部依赖）
+  analytics/        评测与报告共用的只读统计口径
   benchmark/        任务 Schema、校验器、挖掘器、数据集版本
   runner/           AgentRunner 协议 + 各适配器
   sandbox/          Docker 封装、镜像构建、工作区物化、资源限额
   evaluation/       编排、状态机、重试策略
   judge/            报告解析、补丁归一化、F2P/P2P 判定
   attribution/      规则分类、特征提取、LLM Judge
-  report/           统计聚合、HTML/Markdown 生成
+  report/           报告查询、HTML/Markdown/JSON 生成
   storage/          ArtifactStore 抽象与实现
   infrastructure/   DB、队列、配置、日志、指标
   worker/           Worker 进程入口与 job handler
 ```
 
 **依赖方向（写进 CI 的 import-linter 规则）**：
-`api → evaluation/benchmark/report → runner → sandbox/judge/attribution → storage/infrastructure → domain`
+`api → evaluation/benchmark/report → analytics → runner → sandbox/judge/attribution → storage/infrastructure → domain`
 `domain` 不依赖任何模块；`sandbox` 不依赖 `runner`（Runner 用 Sandbox，反之不行）。
 
 > **2026-09-04 修正（E3-T1）**：`runner` 原先和 `sandbox/judge/attribution` 并排写在同一层。
