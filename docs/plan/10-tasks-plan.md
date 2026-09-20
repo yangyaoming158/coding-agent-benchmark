@@ -2058,6 +2058,14 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
      claude-code 没有这个上限（平台侧 `max_tokens_budget=None`）。按 flash 高峰价最坏 $0.09 / 题。
   4. 先用新配置各跑 1 道 Golden 题：看 `cost_source` 是 `reported` 还是 `estimated`（aider 走
      litellm，它的价格表未必有 deepseek-flash），token 用量是否合理，再开全量。
+     **2026-09-20 已跑**：#146 aider / #147 claude-code / #148 miniagent 各 1 道 `bench-golden__auth-2`，
+     全部 RESOLVED、0 故障；aider 的成本是 `reported`（litellm 认识 deepseek-flash，报的数和 flash 高峰价
+     手算一致），另两个 `estimated`，manifest 已冻 flash 价目；三次合计约 $0.01。
+- **AC 1 ✅（2026-09-20）**：两版各 Oracle ×3 + Noop ×1，八个实验 #149–#156 全部 `dirty=false`，
+  逐题、逐用例三轮完全一致，Noop 116 道全 `EMPTY_PATCH`，0 平台故障。实验号、命令和一致性
+  比对结果在 `03-benchmark-spec.md` §8.13。两版都不用重新 stage。
+- **开跑前还差**：DeepSeek 余额（2026-09-20 晚查是 ¥19.97，一轮估 ¥85 / 夜间半价 ¥45，用户去充值）；
+  轮数拍板（口径写"各一次"，E9-T1 说必须多轮报离散度——建议 2 轮、夜间跑）。
 ### E10-T5 Harness Replay 校准实验（MET-01） · **P1 · C:M · E:1d**
 ### E10-T6 部署文档 / 使用文档 / 架构文档 · **P0 · C:M · E:1.5d**
 ### E10-T7 答辩演示脚本与录屏兜底 · **P0 · C:S · E:0.5d**

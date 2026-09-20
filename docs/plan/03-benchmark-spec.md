@@ -2272,3 +2272,36 @@ make dataset-publish SLUG=benchmark-cn-v1 ALLOW_DIRTY=1
 进集 0 的六个仓库原因各不同：xorbitsai 探过 17 条只过 1 条、测试要下模型（§E8-T3 卡②）；
 sqlfluff 全量套件 10 分钟、内存撞上限（②）；sglang / LlamaFactory / loguru / lmdeploy 没建镜像、没探过。
 官方题那条漏斗（500 → 173 → 75 → 74 → 59）和 §8.6 九一致，报告里原样复用 `cli.swebench report` 的表。
+
+## 8.13 最终实验前的确定性检查（2026-09-20，E10-T4 口径 AC 1）
+
+§9 第三条"确定性哨兵"原来只在单题上做 3 次；E10-T4 口径把它放大到整个发布版：两套发布版各跑 Oracle 3 轮 +
+Noop 1 轮，三轮每道题的 `agent_outcome` **和逐用例状态**都必须完全一致。全部通过，两版都不用重新 stage。
+
+**环境**：main `7a0bd59`（#116 合并后，`git status --porcelain` 为空，八个实验全部 `dirty=false`）；
+单 Worker，`agent=10 / sandbox=4 / slots=8`；不调任何模型、不花钱。命令（都在 `backend/` 下）：
+
+```bash
+python -m cli.experiment start --agent oracle --set benchmark-cn-v1 --version v2 --rounds 3 --name "E10-T4 确定性检查 Oracle · benchmark-cn-v1@v2"
+python -m cli.experiment start --agent noop   --set benchmark-cn-v1 --version v2 --name "E10-T4 确定性检查 Noop · benchmark-cn-v1@v2"
+python -m cli.experiment start --agent oracle --set swebench-verified-subset --version v3 --rounds 3 --name "E10-T4 确定性检查 Oracle · swebench-verified-subset@v3"
+python -m cli.experiment start --agent noop   --set swebench-verified-subset --version v3 --name "E10-T4 确定性检查 Noop · swebench-verified-subset@v3"
+python -m app.worker   # 464 条作业，22:13 起跑，22:36 全部收尾（23 分钟）
+```
+
+**结果**：
+
+| 数据集 | 实验 | 解决 | 平台故障 | 重试 | makespan |
+|:--|:--|--:|--:|--:|--:|
+| `benchmark-cn-v1@v2`（41 道） | Oracle #149 / #150 / #151 | 41/41 × 3 | 0 | 0 | 86 / 112 / 104 s |
+| | Noop #152 | 0/41（41 道全 `EMPTY_PATCH`） | 0 | 0 | 127 s |
+| `swebench-verified-subset@v3`（75 道） | Oracle #153 / #154 / #155 | 75/75 × 3 | 0 | 0 | 272 / 284 / 335 s |
+| | Noop #156 | 0/75（75 道全 `EMPTY_PATCH`） | 0 | 0 | 374 s |
+
+**一致性**（SQL 直接比 `evaluation_task_runs` 和 `test_results`）：逐题 `agent_outcome` / `infra_outcome`
+三轮一致 41/41、75/75；逐用例把每道题每轮的 `(role, test_id, status)` 按序拼成签名，三轮签名完全相同的
+41/41、75/75，差异 0 道——中文集每轮 56,915 条用例、官方题每轮 11,894 条。Worker 日志
+`container_sigkilled_without_oom_flag` 0 次、error 级 0 条，结束后无残留容器。
+
+顺带一个观察：三轮 makespan 逐轮变长（86 → 112 → 104、272 → 284 → 335），是同一台机器上镜像层缓存和
+其他进程的波动，不是判定问题——判定结果一个用例都没变。
