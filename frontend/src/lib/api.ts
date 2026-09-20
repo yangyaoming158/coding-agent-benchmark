@@ -15,22 +15,72 @@ export class ApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly code = "HTTP_ERROR",
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-/** 发一个 GET 请求。失败时抛 ApiError，带上状态码，方便界面区分"没连上"和"接口报错"。 */
-export async function apiGet<T>(path: string): Promise<T> {
+type RequestOptions = {
+  method?: "GET" | "POST";
+  token?: string;
+  body?: unknown;
+};
+
+/** 统一发送 JSON 请求。管理员 token 只在需要保护的接口上传递。 */
+export async function apiRequest<T>(
+  path: string,
+  { method = "GET", token, body }: RequestOptions = {},
+): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { Accept: "application/json" },
+    method,
+    headers: {
+      Accept: "application/json",
+      ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(token ? { "X-Bench-Token": token } : {}),
+    },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  if (!response.ok) {
+    const payload = (await response.json().catch(() => null)) as {
+      code?: string;
+      message?: string;
+    } | null;
+    throw new ApiError(
+      payload?.message ?? `${path} 返回 ${response.status}`,
+      response.status,
+      payload?.code,
+    );
+  }
+  return (await response.json()) as T;
+}
+
+/** 发一个 GET 请求。 */
+export async function apiGet<T>(path: string, token?: string): Promise<T> {
+  return apiRequest<T>(path, { token });
+}
+
+/** 发一个 POST JSON 请求。 */
+export async function apiPost<T>(
+  path: string,
+  body: unknown,
+  token?: string,
+): Promise<T> {
+  return apiRequest<T>(path, { method: "POST", token, body });
+}
+
+/** 按需读取补丁或日志正文；大制品不经过 JSON。 */
+export async function apiText(path: string, token?: string): Promise<string> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    headers: token ? { "X-Bench-Token": token } : undefined,
     cache: "no-store",
   });
   if (!response.ok) {
     throw new ApiError(`${path} 返回 ${response.status}`, response.status);
   }
-  return (await response.json()) as T;
+  return response.text();
 }
 
 /**

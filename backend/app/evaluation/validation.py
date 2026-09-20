@@ -53,7 +53,9 @@ S7 = `execute_tests(plan, agent_patch=gold_patch)` —— 官方补丁，这就�
 是另一件事：**已经发布的题目**在正式评测时超时一次就被隔离 —— 那种情况要先按 C-20
 跑对照组，只有题目复验也失败才隔离。两者不是一回事，别混。
 
-`QUARANTINED` 在这里只有一个来源：`previous_state` 已经是 `VALID` 的题目复验没过。
+`QUARANTINED` 在**这个模块**里只有一个来源：`previous_state` 已经是 `VALID` 的题目复验没过。
+另一个来源在 `app.attribution.review_service`（E6-T3，2026-09-20）：人工盲检两人一致判 N2
+（题目缺陷）也会隔离当前题。两条路都只改 `validation_state`，不动已发布快照。
 
 ## 不稳定用例：报出来，不偷偷改题
 

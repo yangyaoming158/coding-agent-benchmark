@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.api import agents, benchmark_sets, health, leaderboard, runs, task_runs, tasks
+from app.api import agents, benchmark_sets, health, leaderboard, reviews, runs, task_runs, tasks
 from app.api.deps import require_admin_token_configured
 from app.api.errors import install_error_handlers
 from app.domain.protocol import PROTOCOL_VERSION
@@ -88,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(runs.router)
     app.include_router(task_runs.router)
     app.include_router(leaderboard.router)
+    app.include_router(reviews.router)
 
     get_logger(__name__).info(
         "API 已装配",
