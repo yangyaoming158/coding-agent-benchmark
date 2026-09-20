@@ -1,0 +1,9 @@
+exit_code=4 duration_s=0.620
+--- stderr ---
+ImportError while loading conftest '/workspace/tests/conftest.py'.
+tests/conftest.py:3: in <module>
+    from click.testing import CliRunner
+src/click/__init__.py:52: in <module>
+    from .types import BOOL as BOOL
+E   ImportError: cannot import name 'BOOL' from 'click.types' (/workspace/src/click/types.py)
+

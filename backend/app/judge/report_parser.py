@@ -120,6 +120,13 @@ _SUMMARY_LINE = re.compile(rf"^({_STATUS_WORDS})\s+(\S.*)$")
 
 #: 短摘要那一节的开头。只在这一节里认摘要行，免得把被测代码打印的同形状文本当成结果。
 _SUMMARY_HEADER = "short test summary info"
+#: pytest 在**收集之前**就死掉的形态：conftest 导入失败。退出码 4，没有 ERRORS 一节、
+#: 没有摘要行、也不写 junitxml。2026-09-21 E10-T4 第 1 轮（#160）实测：AI 删了
+#: `click/types.py` 里的 `BOOL`，conftest 一句 `from click.testing import ...` 就挂，
+#: 原来会被当成"平台没收回报告"记 HARNESS_ERROR。
+_CONFTEST_LOAD_FAILURE = re.compile(r"^(\w+(?:Error|Exception))? ?while loading conftest '([^']+)'")
+#: 紧跟在上面那行后面的 traceback，最后一行 `E   ImportError: ...` 是给人看的原因
+_TRACEBACK_E_LINE = re.compile(r"^E\s+(\S.*)$")
 
 #: 短摘要里 SKIPPED 行的形状：`SKIPPED [1] tests/test_a.py:26: reason`，没有用例 ID。
 _SKIPPED_COUNT_PREFIX = re.compile(r"^\[\d+\]\s")
@@ -203,6 +210,10 @@ class IntegrityCheck:
     #: 非空基本就是解析器的锅，按 C-13 的 (a) 分支走。
     near_misses: Mapping[str, str]
     collection_error_modules: tuple[str, ...]
+    #: pytest 在收集阶段就死了（conftest 导入失败那类）：一条用例都没跑、也没写 junitxml。
+    #: 这种"没有报告"是收集失败的必然结果，不是平台没把报告收回来，所以不能按 (a) 算平台故障；
+    #: 该怪谁由 `collection_error_modules` 走 C-13 (b) 判。
+    collection_aborted: bool = False
 
     @property
     def blames_harness(self) -> bool:
@@ -214,8 +225,13 @@ class IntegrityCheck:
         收集错误**不算**在内：它既可能是 AI 改坏了 import（分支 b），
         也可能是题目坏了（分支 a），这里分不出来。那一步归 E4-T3，
         它手里有补丁改了哪些文件的信息，能拿 C-13c 的实际证据去判。
+
+        `collection_aborted` 时"报告不完整"也不算平台的证据：pytest 连收集都没开始，
+        本来就不会有 junitxml，拿"没有 XML"当平台故障等于把 AI 改坏 import 的锅
+        全扣给平台（2026-09-21 #160 实测 4 道）。
         """
-        return not self.report_complete or bool(self.near_misses)
+        incomplete = not self.report_complete and not self.collection_aborted
+        return incomplete or bool(self.near_misses)
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +305,10 @@ class ParsedReport:
             if self.resolve(t, repo_root=repo_root) is None
         )
         complete = self.source is ReportSource.JUNIT_XML and not self.truncated
+        # 只有文本、一条用例都没有、却有收集错误 —— pytest 死在收集阶段，没有 XML 是必然的
+        aborted = (
+            self.source is ReportSource.STDOUT and not self.cases and bool(self.collection_errors)
+        )
         return IntegrityCheck(
             report_complete=complete,
             report_problem=self.problem or (None if complete else _INCOMPLETE_REASONS[self.source]),
@@ -296,6 +316,7 @@ class ParsedReport:
             reported_ids=tuple(sorted(self.cases)),
             near_misses=self._near_misses(missing),
             collection_error_modules=tuple(e.module_path for e in self.collection_errors),
+            collection_aborted=aborted,
         )
 
     def _near_misses(self, missing_ids: Sequence[str]) -> dict[str, str]:
@@ -552,11 +573,22 @@ def parse_pytest_text(text: str, *, repo_root: Path | str | None = None) -> Pars
     skipped_without_id = 0
     in_summary = False
 
+    conftest_failure: tuple[str, str | None] | None = None
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         if _SUMMARY_HEADER in line:
             in_summary = True
             continue
+
+        loading = _CONFTEST_LOAD_FAILURE.match(line)
+        if loading is not None:
+            # 记路径，原因等后面的 `E   ...` 行；同一份输出里只会有一次
+            conftest_failure = (loading.group(2), loading.group(1))
+            continue
+        if conftest_failure is not None and conftest_failure[1] is not None:
+            e_line = _TRACEBACK_E_LINE.match(line)
+            if e_line is not None:
+                conftest_failure = (conftest_failure[0], e_line.group(1))
 
         test_id, tail = _split_leading_test_id(line)
         tail_match = _VERBOSE_TAIL.match(tail)
@@ -605,6 +637,15 @@ def parse_pytest_text(text: str, *, repo_root: Path | str | None = None) -> Pars
             cases[normalized] = replace(existing, status=status, message_excerpt=message)
         elif existing.message_excerpt is None and message is not None:
             cases[normalized] = replace(existing, message_excerpt=message)
+
+    if conftest_failure is not None:
+        path, message = conftest_failure
+        collection_errors.append(
+            CollectionError(
+                module_path=normalize_test_id(path, repo_root=repo_root),
+                message_excerpt=(message or "conftest 加载失败")[:MAX_MESSAGE_EXCERPT],
+            )
+        )
 
     return ParsedReport(
         cases=cases,

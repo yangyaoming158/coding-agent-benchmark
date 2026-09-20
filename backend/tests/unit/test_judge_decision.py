@@ -377,6 +377,30 @@ def test_missing_with_a_collection_error_blames_the_agent() -> None:
     assert verdict.counts_as_infra_failure is False
 
 
+def test_conftest_import_failure_is_the_agents_fault_not_a_harness_error() -> None:
+    """(b) 的另一种形态：pytest 死在收集之前，一条用例都没有、也没有 junitxml。
+
+    报告只有文本兜底、`report_complete=False`，原来 `blames_harness` 一律按 (a)
+    记 HARNESS_ERROR —— 2026-09-21 #160 因此把 4 道 AI 改坏 import 的题算成了
+    平台故障，差点把整个实验推过 C-26 的 5% 线。
+    """
+    report = make_report(
+        {},
+        source=ReportSource.STDOUT,
+        collection_errors=(
+            CollectionError("tests/conftest.py", "ImportError: cannot import name 'BOOL'"),
+        ),
+    )
+    verdict = judge(
+        infra_outcome=InfraOutcome.SUCCESS, report=report, fail_to_pass=F2P, pass_to_pass=P2P
+    )
+
+    assert verdict.lifecycle_status is LifecycleStatus.COMPLETED
+    assert verdict.infra_outcome is InfraOutcome.SUCCESS
+    assert verdict.agent_outcome is AgentOutcome.UNRESOLVED
+    assert verdict.counts_as_infra_failure is False
+
+
 def test_missing_with_protected_edit_raises_tampering_flag() -> None:
     """(b) AI 试图改受保护路径 + 出现 MISSING → 升级为疑似作弊（C-13c）。"""
     report = make_report({P2P[0]: Status.PASSED})
