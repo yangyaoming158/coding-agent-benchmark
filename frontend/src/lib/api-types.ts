@@ -357,6 +357,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/review/queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Review Queue
+         * @description 新建或恢复抽检批次，并返回当前标注者尚未处理的案例。
+         */
+        get: operations["get_review_queue_api_review_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review/{task_run_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Review Case
+         * @description 返回复核证据；自动归因只对已经提交有效类别的当前 reviewer 解锁。
+         */
+        get: operations["get_review_case_api_review__task_run_id__get"];
+        put?: never;
+        /**
+         * Post Review
+         * @description 保存一条标签或备注。COMMENT 不算标注，也不会解锁自动答案。
+         */
+        post: operations["post_review_api_review__task_run_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -469,7 +513,7 @@ export interface components {
          * @description 制品的种类。日志、补丁、轨迹这些都可达数 MB，一律不入库，只在库里留索引行。
          * @enum {string}
          */
-        ArtifactKind: "AGENT_STDOUT" | "AGENT_STDERR" | "TEST_STDOUT" | "TEST_REPORT_XML" | "TRAJECTORY" | "PATCH" | "REPORT_HTML" | "VALIDATION_EVIDENCE" | "BUILD_LOG";
+        ArtifactKind: "AGENT_STDOUT" | "AGENT_STDERR" | "TEST_STDOUT" | "TEST_REPORT_XML" | "TRAJECTORY" | "PATCH" | "REPORT_HTML" | "REPORT_MARKDOWN" | "REPORT_JSON" | "VALIDATION_EVIDENCE" | "BUILD_LOG";
         /**
          * ArtifactSummary
          * @description 一个制品的索引。前端靠 `kind` 拼下载链接。
@@ -487,6 +531,40 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /**
+         * AttributionStage
+         * @description 失败归因是哪一层给出的结论。规则层准确率接近 100%，大模型层只处理规则分不清的情况。
+         * @enum {string}
+         */
+        AttributionStage: "RULE" | "LLM" | "HUMAN";
+        /**
+         * AttributionStatus
+         * @description 归因任务本身的状态。NEEDS_HUMAN 表示自动归因给不出可信结论，要进人工复核队列。
+         * @enum {string}
+         */
+        AttributionStatus: "OK" | "NEEDS_HUMAN" | "FAILED";
+        /**
+         * AutomaticAttributionResponse
+         * @description 提交有效标签后才出现的自动归因对照。
+         */
+        AutomaticAttributionResponse: {
+            stage: components["schemas"]["AttributionStage"];
+            category: components["schemas"]["FailureCategory"];
+            secondary_category: components["schemas"]["FailureCategory"] | null;
+            /** Confidence */
+            confidence: string | null;
+            /** Judge Model */
+            judge_model: string | null;
+            /** Prompt Hash */
+            prompt_hash: string | null;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /** Reasoning Zh */
+            reasoning_zh: string | null;
+            status: components["schemas"]["AttributionStatus"];
         };
         /**
          * BenchmarkSetDetail
@@ -673,6 +751,30 @@ export interface components {
             resolve_rate: string | null;
         };
         /**
+         * FailureCategory
+         * @description 失败原因分类（`docs/plan/06-judge-attribution.md` §12.1）。
+         *
+         *     F6、F7、F8、N1 靠纯规则就能判，不用调大模型；F1~F5 才需要大模型判断。
+         *     N2 表示人工复核后确认**题目本身有问题** —— 它让抽检不只是纠正分类，
+         *     还能反过来改进数据集质量：发现坏题 → 隔离 → 重算受影响的历史结果。
+         * @enum {string}
+         */
+        FailureCategory: "F1_REQUIREMENT_MISUNDERSTANDING" | "F2_WRONG_FILE_LOCALIZATION" | "F3_INCOMPLETE_FIX" | "F4_INCORRECT_LOGIC" | "F5_SYNTAX_OR_BUILD_ERROR" | "F6_REGRESSION" | "F7_EMPTY_OR_INVALID_PATCH" | "F8_AGENT_TOOL_OR_BUDGET_FAILURE" | "N1_INFRASTRUCTURE_FAILURE" | "N2_TASK_DEFECT";
+        /**
+         * GoldPatchSummary
+         * @description 官方补丁只给人工看文件与规模，不返回代码正文。
+         */
+        GoldPatchSummary: {
+            /** Available */
+            available: boolean;
+            /** Files */
+            files: string[];
+            /** Lines Added */
+            lines_added: number;
+            /** Lines Deleted */
+            lines_deleted: number;
+        };
+        /**
          * HealthResponse
          * @description 健康检查的返回。
          */
@@ -692,6 +794,14 @@ export interface components {
             /** Migration Revision */
             migration_revision: string | null;
         };
+        /**
+         * HumanReviewAction
+         * @description 人工复核的处理动作。
+         *
+         *     MARK_TASK_DEFECT 对应 N2：复核人认为不是 AI 的问题，是题目坏了。
+         * @enum {string}
+         */
+        HumanReviewAction: "ACCEPT" | "CORRECT" | "MARK_TASK_DEFECT" | "COMMENT";
         /**
          * InfraOutcome
          * @description 这次跑得对不对 —— 平台自己有没有出故障（协议 C-05）。
@@ -944,6 +1054,156 @@ export interface components {
             already_decided: number;
             /** Still Running */
             still_running: number;
+        };
+        /**
+         * ReviewBatchResponse
+         * @description 抽检批次元数据。类别分层刻意不返回，避免队列侧漏。
+         */
+        ReviewBatchResponse: {
+            /** Batch Id */
+            batch_id: string;
+            /** Seed */
+            seed: number;
+            /** Target Size */
+            target_size: number;
+            /** Selected Count */
+            selected_count: number;
+            /** Eligible Count */
+            eligible_count: number;
+            /** Insufficient Pool */
+            insufficient_pool: boolean;
+            /**
+             * Blind
+             * @default true
+             */
+            blind: boolean;
+        };
+        /**
+         * ReviewCaseResponse
+         * @description 盲检一屏三栏需要的全部证据。
+         */
+        ReviewCaseResponse: {
+            /** Batch Id */
+            batch_id: string;
+            /** Reviewer */
+            reviewer: string;
+            /** Position */
+            position: number;
+            /** Task Run Id */
+            task_run_id: number;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            /** Issue Body */
+            issue_body: string;
+            /** Repository */
+            repository: string;
+            difficulty: components["schemas"]["TaskDifficulty"];
+            /** Tags */
+            tags: string[];
+            /** Agent Config Label */
+            agent_config_label: string;
+            infra_outcome: components["schemas"]["InfraOutcome"] | null;
+            agent_outcome: components["schemas"]["AgentOutcome"] | null;
+            gold_patch: components["schemas"]["GoldPatchSummary"];
+            /** Patches */
+            patches: components["schemas"]["ReviewPatchSummary"][];
+            /** Artifacts */
+            artifacts: components["schemas"]["ArtifactKind"][];
+            /** Tests */
+            tests: components["schemas"]["ReviewTestResult"][];
+            progress: components["schemas"]["ReviewProgressResponse"];
+            own_selected_category?: components["schemas"]["FailureCategory"] | null;
+            automatic_attribution?: components["schemas"]["AutomaticAttributionResponse"] | null;
+        };
+        /** ReviewPatchSummary */
+        ReviewPatchSummary: {
+            kind: components["schemas"]["PatchKind"];
+            /** Files Changed */
+            files_changed: number;
+            /** Lines Added */
+            lines_added: number;
+            /** Lines Deleted */
+            lines_deleted: number;
+            /** Is Empty */
+            is_empty: boolean;
+            /** Applies Cleanly */
+            applies_cleanly: boolean | null;
+        };
+        /**
+         * ReviewPhase
+         * @description 一个案例目前需要谁处理。它不是数据库枚举，只用于接口状态。
+         * @enum {string}
+         */
+        ReviewPhase: "PRIMARY" | "ARBITRATION" | "COMPLETE";
+        /** ReviewProgressResponse */
+        ReviewProgressResponse: {
+            phase: components["schemas"]["ReviewPhase"];
+            /** Label Count */
+            label_count: number;
+            /** Current Reviewer Submitted */
+            current_reviewer_submitted: boolean;
+            final_category: components["schemas"]["FailureCategory"] | null;
+        };
+        /**
+         * ReviewQueueItemResponse
+         * @description 队列中的一个案例，不含自动类别、理由、置信度或 evidence。
+         */
+        ReviewQueueItemResponse: {
+            /** Position */
+            position: number;
+            /** Task Run Id */
+            task_run_id: number;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            required_phase: components["schemas"]["ReviewPhase"];
+        };
+        /** ReviewQueueResponse */
+        ReviewQueueResponse: {
+            batch: components["schemas"]["ReviewBatchResponse"];
+            /** Reviewer */
+            reviewer: string;
+            /** Items */
+            items: components["schemas"]["ReviewQueueItemResponse"][];
+            /** Pending Count */
+            pending_count: number;
+        };
+        /**
+         * ReviewSubmitRequest
+         * @description 盲检者提交自己的类别；ACCEPT/CORRECT 由后端比较后派生。
+         */
+        ReviewSubmitRequest: {
+            /** Batch Id */
+            batch_id: string;
+            /** Reviewer */
+            reviewer: string;
+            category?: components["schemas"]["FailureCategory"] | null;
+            /** Comment */
+            comment?: string | null;
+        };
+        /** ReviewSubmitResponse */
+        ReviewSubmitResponse: {
+            /** Review Id */
+            review_id: number;
+            action: components["schemas"]["HumanReviewAction"];
+            progress: components["schemas"]["ReviewProgressResponse"];
+            automatic_attribution?: components["schemas"]["AutomaticAttributionResponse"] | null;
+            /** Task Quarantined */
+            task_quarantined: boolean;
+        };
+        /** ReviewTestResult */
+        ReviewTestResult: {
+            /** Test Id */
+            test_id: string;
+            role: components["schemas"]["TestRole"];
+            status: components["schemas"]["TestStatus"];
+            /** Duration Ms */
+            duration_ms: number | null;
+            /** Message Excerpt */
+            message_excerpt: string | null;
         };
         /**
          * RunDetail
@@ -2192,6 +2452,223 @@ export interface operations {
             };
             /** @description 资源不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_queue_api_review_queue_get: {
+        parameters: {
+            query: {
+                reviewer: string;
+                batch_id?: string | null;
+                seed?: number;
+                target_size?: number;
+            };
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewQueueResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_case_api_review__task_run_id__get: {
+        parameters: {
+            query: {
+                batch_id: string;
+                reviewer: string;
+            };
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path: {
+                task_run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewCaseResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    post_review_api_review__task_run_id__post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path: {
+                task_run_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReviewSubmitRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewSubmitResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

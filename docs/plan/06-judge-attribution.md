@@ -488,3 +488,84 @@ E6-T1 曾把 `ANALYZING` 留给本卡，但真接历史数据时发现不能这�
 不会把已有判定改掉，也不会阻塞评测主流程。
 
 本卡没有改冻结协议、数据库枚举、迁移、后端 API 或前端，也没有调真实模型。
+
+---
+
+# 12.8 抽检队列与盲检落地实录（2026-09-20，E6-T3）
+
+实现落在 `app/attribution/review.py`、`app/attribution/review_service.py` 和
+`app/api/reviews.py`，前端入口是 `/review`。这张卡只复核“为什么失败”，不改
+`evaluation_task_runs` 的判定字段，也不接入 Worker 主流程。
+
+## 一、批次号就是可复现的抽样凭证
+
+候选只取 `is_canonical=true`、已有 RULE/LLM 自动归因、状态为 `OK` 或
+`NEEDS_HUMAN` 的执行记录。抽样先按自动类别分层：每个已有类别至少 5 条，
+不足 5 条就全取；然后从各层剩余样本补到 50 条。全池不足 50 条时不复制，直接全取。
+
+输入先按 `failure_attributions.id` 排序，再使用固定随机种子，所以数据库返回顺序
+不会改变结果。`sample_batch_id` 记录版本、种子、归因行截止 ID、目标数和抽中快照的
+SHA-256 指纹，例如：
+
+```text
+review-v1-s20260920-a238-n50-d0123456789abcdef0123456789abcdef
+```
+
+恢复旧批次时只读取截止 ID 以内的归因，再重算抽样和指纹。自动归因如果被改过，接口
+返回 `REVIEW_BATCH_STALE`，不会把新答案静默混进正在标注的批次。这样复用了现有
+`human_reviews.sample_batch_id`，没有新增批次表或数据库迁移。
+
+## 二、盲检由后端响应保证
+
+`GET /api/review/queue` 只返回位置、task-run、题号、题目标题和当前需要“双人标注”
+还是“第三人仲裁”。它不返回分层类别和各类数量。
+
+`GET /api/review/{task_run_id}` 返回题面、Agent 补丁、测试结果、日志入口和官方补丁
+的文件/行数摘要，但在**当前 reviewer 提交有效类别之前**，JSON 中不存在
+`automatic_attribution` 和 `own_selected_category` 两个键。自动类别、次类别、理由、
+置信度、模型、prompt hash 和 evidence 都没有发给浏览器，不是靠 CSS 隐藏。
+`COMMENT` 只记备注，不算有效类别，也不解锁自动答案。
+
+这组接口连 GET 都要求 `X-Bench-Token`。原因是详情包含只供复核使用的官方补丁摘要，
+提交后还会返回自动归因。P0 仍使用单一管理员 token；`reviewer` 是流程留痕字段，
+不是完整账号系统，现场由管理员分别给标注者使用。
+
+## 三、前两人独立，分歧才进入第三人仲裁
+
+前两个不同 reviewer 各自提交一个类别。接口只公开已提交人数，不公开另一人的选择：
+
+- 两人一致：该案例完成，类别就是两人的共同答案；
+- 两人不一致：状态变成 `ARBITRATION`，第三个 reviewer 独立选择最终类别；
+- 同一 reviewer 不能对同一批次、同一案例重复提交类别；
+- 第三人的类别是最终仲裁结果，不按三票多数表决。
+
+接口让人直接选择 F1～F8、N1 或 N2，再由后端与隐藏的自动类别比较并保存现有动作：
+
+- 选择等于自动类别 → `ACCEPT`，`corrected_category=NULL`；
+- 选择不同于自动类别 → `CORRECT`，`corrected_category=所选类别`；
+- 选择 N2 → `MARK_TASK_DEFECT`，且必须填写具体理由；
+- 不选类别、只写备注 → `COMMENT`，comment 必填。
+
+一旦出现第一条非 COMMENT 的人工标签，RULE/LLM 的 upsert 就不再覆盖这条自动归因。
+这是为了保留抽检时真正给机器打分的基线；人工结果只写 `human_reviews`，不把
+`failure_attributions` 改成 HUMAN 后丢掉原答案。
+
+## 四、N2 只隔离当前题，不改历史结果
+
+只有双人一致或第三人仲裁形成的**最终类别**为 N2 时，才把对应
+`benchmark_tasks.validation_state` 改为 `QUARANTINED`，并在 `quarantine` JSON 中记录
+原状态、原因、批次号和 reviewer。单个人先选 N2 不会立即隔离。
+
+这个动作不删除已发布的数据集项，不改已有运行的 `infra_outcome` / `agent_outcome`，
+也不重算历史排行榜。它只阻止有问题的题继续作为正常候选进入后续数据集生产。
+
+## 五、E6-T4 可以直接使用的原始数据
+
+每条有效标签都保留 `sample_batch_id`、`evaluation_task_run_id`、`reviewer`、`blind=true`、
+派生后的 action、人工类别（ACCEPT 可由该批次冻结的自动类别恢复）、comment 和提交顺序。
+因此 E6-T4 可以按批次恢复机器类别、前两位人工类别、是否仲裁和最终人工类别，计算
+准确率、Cohen's kappa 和混淆矩阵；`COMMENT` 不进入分母。
+
+自动化测试使用合成的 RULE/LLM 归因和测试制品，不调用真实模型。数据库里原有 71 条
+待 LLM 回填记录仍受预算约束；没有它们也可以完成代码、盲态和标注流程验收，正式
+MET-04 统计则必须等授权后的真实回填和人工标注完成。

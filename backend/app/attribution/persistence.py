@@ -56,6 +56,7 @@ from app.domain.enums import (
     ArtifactOwnerType,
     AttributionStage,
     AttributionStatus,
+    HumanReviewAction,
     PatchKind,
     TestRole,
     TestStatus,
@@ -63,7 +64,7 @@ from app.domain.enums import (
 from app.domain.patch_paths import derive_patch_paths
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.artifact import Artifact
-from app.infrastructure.models.attribution import FailureAttribution
+from app.infrastructure.models.attribution import FailureAttribution, HumanReview
 from app.infrastructure.models.benchmark import BenchmarkTask
 from app.infrastructure.models.evaluation import (
     EvaluationRun,
@@ -157,6 +158,10 @@ def save_rule_verdicts(session: Session, items: Iterable[tuple[int, RuleVerdict]
     before = existing_stages(session)
 
     insert = pg_insert(FailureAttribution).values(rows)
+    reviewed = sa.exists().where(
+        HumanReview.evaluation_task_run_id == FailureAttribution.evaluation_task_run_id,
+        HumanReview.action != HumanReviewAction.COMMENT,
+    )
     stmt = insert.on_conflict_do_update(
         index_elements=[FailureAttribution.evaluation_task_run_id],
         set_={
@@ -165,7 +170,11 @@ def save_rule_verdicts(session: Session, items: Iterable[tuple[int, RuleVerdict]
             "evidence": insert.excluded.evidence,
             "status": insert.excluded.status,
         },
-        where=FailureAttribution.stage == AttributionStage.RULE,
+        # 第一张有效人工标签落下后，自动结论就是盲检的对照基线，不能再改。
+        where=sa.and_(
+            FailureAttribution.stage == AttributionStage.RULE,
+            ~reviewed,
+        ),
     ).returning(FailureAttribution.evaluation_task_run_id)
 
     # `RETURNING` 只吐真正写成的行；被 WHERE 挡下来的（LLM / HUMAN 的结论）不在里面。
@@ -281,6 +290,10 @@ def save_llm_decisions(
 
     before = existing_stages(session)
     insert = pg_insert(FailureAttribution).values(rows)
+    reviewed = sa.exists().where(
+        HumanReview.evaluation_task_run_id == FailureAttribution.evaluation_task_run_id,
+        HumanReview.action != HumanReviewAction.COMMENT,
+    )
     stmt = insert.on_conflict_do_update(
         index_elements=[FailureAttribution.evaluation_task_run_id],
         set_={
@@ -295,7 +308,10 @@ def save_llm_decisions(
             "raw_response": insert.excluded.raw_response,
             "status": insert.excluded.status,
         },
-        where=FailureAttribution.stage == AttributionStage.LLM,
+        where=sa.and_(
+            FailureAttribution.stage == AttributionStage.LLM,
+            ~reviewed,
+        ),
     ).returning(FailureAttribution.evaluation_task_run_id)
     written = {row[0] for row in session.execute(stmt)}
     inserted = sum(

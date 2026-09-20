@@ -390,6 +390,9 @@ POST /api/reports  {scope, run_ids, format}   GET /api/reports/{id}
 ```
 认证：P0 用**单一管理员 Token**（`X-Bench-Token` header）保护写操作，读接口开放。完整用户体系属于 P2（§29）。
 
+> **E6-T3 的例外**：`/api/review/*` 的 GET 也要求管理员 Token。复核详情包含官方补丁
+> 的文件/行数摘要，提交后还会显示自动归因，不能作为普通开放读接口。
+
 ## 14.5 P0 子集实现落地（2026-09-12，E7-T0）
 
 上面那张表是设计时列的。真按 §16.2 的八个 P0 页面倒推一遍，落地的和它有四处不一样。
@@ -530,6 +533,25 @@ aider 的 $0.0175/题和 §18.6 第七节那张表**逐位相同**，
 被挡在榜外的：哨兵 #123/#129、门禁的 #115/#116（`dirty`）、
 探测跑 #117/#118/#124（分母不是 22）、诊断参赛者 #130–#132（`enabled=false`）、
 人工排除的 #119–#122。
+
+## 14.6 人工盲检端点落地（2026-09-20，E6-T3）
+
+§14.4 原来只有队列和提交两个端点，实际界面还需要一条受保护的详情读取：
+
+```text
+GET  /api/review/queue?reviewer=&seed=&target_size=&batch_id=
+GET  /api/review/{task_run_id}?batch_id=&reviewer=
+POST /api/review/{task_run_id}
+```
+
+三个端点都要求 `X-Bench-Token`。队列响应不含自动类别或类别分布；详情接口在当前
+reviewer 提交有效类别前，从 JSON 中彻底排除 `automatic_attribution`。提交接口接收
+人工所选类别，后端再派生 `ACCEPT` / `CORRECT` / `MARK_TASK_DEFECT`，避免前端在不知道
+自动答案时伪造比较结果。
+
+批次没有新表。固定种子、归因截止 ID、目标数和自动归因快照指纹编码在现有
+`human_reviews.sample_batch_id` 中；已有列足够保存双人独立标签和第三人仲裁。
+详细抽样、动作校验和 N2 隔离范围见 `06-judge-attribution.md` §12.8。
 
 ---
 
@@ -744,6 +766,16 @@ API 类型：从 FastAPI 的 OpenAPI 用 `openapi-typescript` 生成，避免手
 - **不做**：登录美化、暗黑模式切换动效、复杂设计系统、页面转场动画、自定义图表引擎。
 - **要做**：表格能筛能排、diff 能看清、日志能搜、长列表虚拟滚动、进度不刷屏。
 - 一条实用规则：**任何页面在 3 次点击内能到达"某个 Agent 在某道题上为什么失败"的完整证据。** 这是评测平台的核心用户旅程，也是答辩演示主线。
+
+## 16.4 Human Review 落地（2026-09-20，E6-T3）
+
+`/review` 已实现抽检工作台：先输入 reviewer、管理员 token 和固定种子，左侧显示待处理
+队列，右侧三栏分别显示题面与官方补丁摘要、Agent 补丁与轨迹入口、逐用例测试证据。
+下方提供 F1～F8/N1/N2 选择、备注、双人进度和第三人仲裁状态。
+
+自动归因对照区只渲染后端实际返回的字段；前端没有提前拿到答案再隐藏。管理员 token
+只保存在当前 React 内存状态，不写 localStorage/sessionStorage。准确率、kappa 和混淆
+矩阵属于 E6-T4，本卡只保存计算所需的原始标签。
 
 ---
 
