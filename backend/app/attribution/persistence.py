@@ -1,4 +1,4 @@
-"""归因的查库与落库（E6-T1）。
+"""归因的查库与落库（E6-T1 / E6-T2）。
 
 分工和 `app.analytics.leaderboard` 一样：**判定口径在纯函数里，这里只管取数和写数。**
 
@@ -6,6 +6,8 @@
     existing_stages(session)            → 已经有结论的运行，以及是哪一层给的
     save_rule_verdicts(session, items)  → upsert，不碰 LLM/HUMAN 的结论
     collect_features(session, store, …) → 一次运行的 Stage2 特征
+    load_llm_input(session, store, id)   → 裁剪后的 LLM 输入，不含官方代码
+    save_llm_decisions(session, items)  → upsert，不碰 RULE/HUMAN 的结论
 
 ## 为什么不覆盖 LLM / HUMAN 的结论
 
@@ -29,6 +31,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
+from decimal import Decimal
 
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -45,6 +48,7 @@ from app.attribution.features import (
     patch_overlap,
     trajectory_stats,
 )
+from app.attribution.llm import AttributionDecision, AttributionInput, FailedTest
 from app.attribution.rules import RuleVerdict, RunFacts
 from app.domain.enums import (
     AgentKind,
@@ -54,6 +58,7 @@ from app.domain.enums import (
     AttributionStatus,
     PatchKind,
     TestRole,
+    TestStatus,
 )
 from app.domain.patch_paths import derive_patch_paths
 from app.infrastructure.models.agent import Agent, AgentConfig
@@ -164,6 +169,134 @@ def save_rule_verdicts(session: Session, items: Iterable[tuple[int, RuleVerdict]
     ).returning(FailureAttribution.evaluation_task_run_id)
 
     # `RETURNING` 只吐真正写成的行；被 WHERE 挡下来的（LLM / HUMAN 的结论）不在里面。
+    written = {row[0] for row in session.execute(stmt)}
+    inserted = sum(
+        1
+        for row in rows
+        if row["evaluation_task_run_id"] in written and row["evaluation_task_run_id"] not in before
+    )
+    return SaveReport(
+        inserted=inserted,
+        updated=len(written) - inserted,
+        protected=len(rows) - len(written),
+    )
+
+
+def load_llm_input(
+    session: Session, store: ArtifactStore, task_run_id: int
+) -> AttributionInput | None:
+    """组装 §12.3 规定的裁剪输入。
+
+    官方补丁的正文只在这里用来数文件和行数，返回值里只有
+    `gold_summary`。`AttributionInput` 根本没有官方补丁正文字段，所以后续
+    拼 prompt 时不可能不小心把答案喂给模型。
+    """
+    task = session.execute(
+        sa.select(
+            BenchmarkTask.task_id,
+            BenchmarkTask.issue_title,
+            BenchmarkTask.issue_body,
+            BenchmarkTask.raw_definition,
+            BenchmarkTask.gold_patch_uri,
+        )
+        .join(EvaluationTaskRun, EvaluationTaskRun.benchmark_task_id == BenchmarkTask.id)
+        .where(EvaluationTaskRun.id == task_run_id)
+    ).one_or_none()
+    if task is None:
+        return None
+
+    agent_uri = session.scalar(
+        sa.select(PatchArtifact.uri)
+        .where(
+            PatchArtifact.evaluation_task_run_id == task_run_id,
+            PatchArtifact.kind == PatchKind.AGENT_NORMALIZED,
+        )
+        .order_by(PatchArtifact.id.desc())
+        .limit(1)
+    )
+    agent_patch = _read_text(store, agent_uri) if agent_uri else None
+    gold_patch = _gold_patch(store, task.raw_definition, task.gold_patch_uri)
+    failed_rows = session.execute(
+        sa.select(TestResult.test_id, TestResult.status, TestResult.message_excerpt)
+        .where(
+            TestResult.evaluation_task_run_id == task_run_id,
+            TestResult.role == TestRole.F2P,
+            TestResult.status != TestStatus.PASSED,
+        )
+        .order_by(TestResult.id)
+        .limit(3)
+    )
+    failed_tests = tuple(
+        FailedTest(
+            test_id=row.test_id,
+            status=row.status.value,
+            message=row.message_excerpt or "（无报错摘要）",
+        )
+        for row in failed_rows
+    )
+    return AttributionInput(
+        task_run_id=task_run_id,
+        task_id=task.task_id,
+        issue_title=task.issue_title,
+        issue_body=task.issue_body,
+        agent_patch=agent_patch or "",
+        gold_summary=_gold_summary(gold_patch),
+        failed_tests=failed_tests,
+        features=collect_features(session, store, task_run_id).to_dict(),
+    )
+
+
+def save_llm_decisions(
+    session: Session, items: Iterable[tuple[int, AttributionDecision]]
+) -> SaveReport:
+    """落 LLM 结论，只允许覆盖旧的 LLM 结论。
+
+    RULE 是确定性结论，HUMAN 是人工复核结论，两者优先级都高于 LLM。
+    保护条件放在 `ON CONFLICT ... WHERE` 里，防止模型调用期间恰好有人
+    提交复核、然后被迟到的 LLM 回答盖掉。
+    """
+    rows = []
+    for task_run_id, decision in items:
+        verdict = decision.verdict
+        rows.append(
+            {
+                "evaluation_task_run_id": task_run_id,
+                "stage": AttributionStage.LLM,
+                "category": verdict.category,
+                "secondary_category": verdict.secondary_category,
+                "confidence": Decimal(str(verdict.confidence)),
+                "judge_model": decision.judge_model,
+                "prompt_hash": decision.prompt_hash,
+                "evidence": {
+                    "citations": [item.model_dump(mode="json") for item in verdict.evidence],
+                    "vote_categories": decision.raw_response.get("vote_categories", []),
+                },
+                "reasoning_zh": verdict.reasoning_zh,
+                "raw_response": decision.raw_response,
+                "status": decision.status,
+            }
+        )
+    if not rows:
+        return SaveReport(inserted=0, updated=0, protected=0)
+
+    before = existing_stages(session)
+    insert = pg_insert(FailureAttribution).values(rows)
+    stmt = insert.on_conflict_do_update(
+        index_elements=[FailureAttribution.evaluation_task_run_id],
+        set_={
+            "stage": insert.excluded.stage,
+            "category": insert.excluded.category,
+            "secondary_category": insert.excluded.secondary_category,
+            "confidence": insert.excluded.confidence,
+            "judge_model": insert.excluded.judge_model,
+            "prompt_hash": insert.excluded.prompt_hash,
+            "evidence": insert.excluded.evidence,
+            "reasoning_zh": insert.excluded.reasoning_zh,
+            "raw_response": insert.excluded.raw_response,
+            "status": insert.excluded.status,
+        },
+        where=FailureAttribution.stage == AttributionStage.LLM,
+    ).returning(FailureAttribution.evaluation_task_run_id)
     written = {row[0] for row in session.execute(stmt)}
     inserted = sum(
         1
@@ -348,11 +481,31 @@ def _read_text(store: ArtifactStore, uri: str) -> str | None:
         return None
 
 
+def _gold_summary(diff: str | None) -> str:
+    """官方补丁只转成文件清单与规模，不泄露任何代码。"""
+    if not diff:
+        return "（不可用）"
+    paths = derive_patch_paths(diff)
+    added = 0
+    deleted = 0
+    for line in diff.splitlines():
+        if line.startswith("+++") or line.startswith("---"):
+            continue
+        if line.startswith("+"):
+            added += 1
+        elif line.startswith("-"):
+            deleted += 1
+    listed = "\n".join(f"- {path}" for path in paths) or "- （无可识别文件）"
+    return f"文件数：{len(paths)}\n新增行：{added}\n删除行：{deleted}\n文件：\n{listed}"
+
+
 __all__ = [
     "RunRow",
     "SaveReport",
     "collect_features",
     "existing_stages",
     "load_facts",
+    "load_llm_input",
+    "save_llm_decisions",
     "save_rule_verdicts",
 ]

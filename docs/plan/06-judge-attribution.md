@@ -404,3 +404,87 @@ F8 归因结果都不改（旧结果不重算，只注明差异），#119–#122
 另一层原因是 E6-T2 的大模型归因必然要异步（缓存、低置信投票、失败退避），
 两层归因应该共用一个入口。那个入口连同 `LifecycleStatus.ANALYZING`
 一起留给 E6-T2，这一版不占坑。
+
+---
+
+# 12.7 LLM-as-Judge 归因落地实录（2026-09-20，E6-T2）
+
+实现落在 `app/attribution/llm.py` 和 `app/attribution/persistence.py`，批处理入口是：
+
+```bash
+python -m cli.attribute llm --model deepseek/deepseek-chat --dry-run
+python -m cli.attribute llm --model deepseek/deepseek-chat --limit 1  # 首次付费试跑
+python -m cli.attribute llm --model deepseek/deepseek-chat            # 确认后才跑全量
+```
+
+`--dry-run` 不是“调了模型但不写库”，而是**根本不创建模型客户端**：
+它只列出候选运行和 prompt SHA-256。这样先估数量不会意外花钱。
+
+## 一、大模型只能看到裁剪材料
+
+`load_llm_input()` 组装六个有名字的输入段：
+
+| 段名 | 内容 | 上限 |
+|:---|:---|---:|
+| `issue` | 标题和正文 | 正文 3000 字符 |
+| `patch` | AI 的归一化补丁 | 6000 字符 |
+| `gold_summary` | 官方补丁的文件清单、新增/删除行数 | **不含代码** |
+| `test_log` | 失败 F2P 用例名和报错摘要 | 最多 3 条，每条 2000 字符 |
+| `features` | E6-T1 的文件重合、报错变化、错误类型 | 结构化 JSON |
+| `trajectory` | 工具调用数、错误率和尾部轨迹 | 最后 10 次工具调用 |
+
+`AttributionInput` 刻意**没有** `gold_patch` 字段。官方补丁正文只在查库层
+短暂出现，立即转成 `gold_summary`。对应的集成测试在官方补丁里放了
+`SECRET_GOLD_IMPLEMENTATION`，然后断言最终 prompt 里找不到它。
+
+## 二、“强制 evidence”不只是 prompt 里的一句话
+
+回答先过 Pydantic 生成的 JSON Schema：
+
+- `category` 的 schema 枚举只有 F1～F5，F6/F7/F8/N1/N2 都进不来；
+- 置信度只能在 0～1；
+- `evidence` 至少一条；
+- 多出的字段也拒绝，所以模型想带一个 `agent_outcome` 回来都过不了。
+
+结构通过后还要做第二道检查：每条 `evidence.quote` 必须逐字出现在
+它声称的 `source` 段里。模型如果改写了报错、引用错段或自己编了一句，
+都当成坏回答重试，不落库。
+
+## 三、低置信投票与重试是两件事
+
+第一票 `confidence >= 0.6` 就直接采纳。低于 0.6 时再要两票，总数固定为 3：
+
+- 至少 2 票同类，落 `OK`；
+- 三票分属三类，或调用/校验失败导致不足 3 张有效票，落 `NEEDS_HUMAN`。
+
+“重试 3 次”分两层：HTTP 429/5xx 在公用 `LLMClient` 里退避；HTTP 成功但
+JSON 或 evidence 坏了，E6-T2 才另要一份回答。前者已经失败 3 次时，
+上层不再把整段请求重跑 3 遍，否则一次持续 503 会放大成 12 次 HTTP 请求。
+
+如果第一票经过结构重试仍完全无法解析，命令记一次失败并继续下一条。
+它**不写一行假 category**：现有表的 `category` 非空，而模型连类别都没给时，
+硬塞 F1 或任何其他类别都是猜。命令最终返回非零，下次可以直接重跑。
+
+## 四、缓存与落库各有一道保护
+
+公用文件缓存的基础身份是
+`(evaluation_task_run_id, prompt_hash, judge_model)`。低置信投票另加票号，
+坏结构重试另加重试号，避免三票实际上连读三次同一份缓存。
+数据库里已经有相同三元组的结果时，CLI 在建客户端之前就跳过。
+
+LLM 结论的 upsert 只允许更新 `stage = LLM` 的旧行。条件写在 PostgreSQL
+`ON CONFLICT ... DO UPDATE ... WHERE` 上，所以模型调用期间如果恰好有人提交
+复核结论，迟到的 LLM 回答也盖不掉 `HUMAN`。`RULE` 同样受保护。
+
+## 五、为什么还是主流程外批处理
+
+E6-T1 曾把 `ANALYZING` 留给本卡，但真接历史数据时发现不能这么改：
+这 71 次运行已经是 `COMPLETED + agent_outcome`。把它们临时改成 `ANALYZING`，
+会立即违反协议 C-29（只有 `COMPLETED` 允许 `agent_outcome` 非空）和数据库的
+`legal_combination` 约束。
+
+所以这一版仍是主流程外批处理，并用 SQL 录制测试证明整条归因路径
+不对 `evaluation_task_runs` 发 `INSERT/UPDATE/DELETE`。归因失败只会让归因命令失败，
+不会把已有判定改掉，也不会阻塞评测主流程。
+
+本卡没有改冻结协议、数据库枚举、迁移、后端 API 或前端，也没有调真实模型。
