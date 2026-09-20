@@ -34,7 +34,7 @@ GOLDEN_TASK = (
     Path(__file__).resolve().parents[3] / "datasets" / "golden" / "bench-golden__textkit-1.json"
 )
 
-#: 全部 12 份 fixture。新增 fixture 时这里也要加 —— 有几条通用不变量对每一份都跑。
+#: 全部 13 份 fixture。新增 fixture 时这里也要加 —— 有几条通用不变量对每一份都跑。
 ALL_FIXTURES = (
     "shapes_xunit2.xml",
     "shapes_xunit1.xml",
@@ -42,6 +42,7 @@ ALL_FIXTURES = (
     "shapes_quiet_stdout.txt",
     "collection_error_xunit2.xml",
     "collection_error_stdout.txt",
+    "conftest_import_failure_stdout.txt",
     "empty_xunit2.xml",
     "truncated_xunit2.xml",
     "golden_textkit_base_xunit2.xml",
@@ -302,6 +303,33 @@ def test_collection_error_from_text() -> None:
     """短摘要里的 `ERROR <文件路径>`（没有 `::`）也是收集失败。"""
     report = parse_pytest_text(read("collection_error_stdout.txt"))
     assert [e.module_path for e in report.collection_errors] == ["brk/test_broken.py"]
+
+
+def test_conftest_import_failure_is_a_collection_error_and_not_the_harness_fault() -> None:
+    """pytest 在收集**之前**就死了（conftest 导入失败，退出码 4）也要认成收集错误。
+
+    这份 fixture 是 2026-09-21 E10-T4 第 1 轮 #160 的真实输出：AI 删了
+    `click/types.py` 里的 `BOOL`，conftest 一句 import 就挂。没有摘要行、没有
+    junitxml，原来会被当成"平台没收回报告"记 HARNESS_ERROR 并重试。
+    """
+    report = parse_pytest_text(read("conftest_import_failure_stdout.txt"), repo_root="/workspace")
+    assert report.cases == {}
+    assert report.source is ReportSource.STDOUT
+    assert [e.module_path for e in report.collection_errors] == ["tests/conftest.py"]
+    assert "cannot import name 'BOOL'" in (report.collection_errors[0].message_excerpt or "")
+
+    check = report.check_integrity(["tests/test_types.py::test_bool"])
+    assert check.report_complete is False, "文本兜底来的报告仍然不算完整"
+    assert check.collection_aborted is True
+    assert check.blames_harness is False, "没有 XML 是收集失败的必然结果，不是平台的锅"
+    assert check.missing_ids == ("tests/test_types.py::test_bool",)
+
+
+def test_an_empty_text_report_still_blames_the_harness() -> None:
+    """真的一无所获（没用例、没收集错误）时才是平台没收回报告，照旧按 (a) 走。"""
+    check = parse_pytest_text("exit_code=1\nnothing useful here\n").check_integrity(["t.py::a"])
+    assert check.collection_aborted is False
+    assert check.blames_harness is True
 
 
 def test_collection_error_alone_does_not_blame_harness() -> None:

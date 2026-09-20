@@ -2066,6 +2066,14 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   比对结果在 `03-benchmark-spec.md` §8.13。两版都不用重新 stage。
 - **开跑前还差**：DeepSeek 余额（2026-09-20 晚查是 ¥19.97，一轮估 ¥85 / 夜间半价 ¥45，用户去充值）；
   轮数拍板（口径写"各一次"，E9-T1 说必须多轮报离散度——建议 2 轮、夜间跑）。
+- **第 1 轮中文集实录（2026-09-20 晚 → 21 日凌晨，main `702ca7a` → `cd9ccdc`）**，两件半路发现的事：
+  1. **deepseek-flash 对 aider 默认开思考**：#157 aider 41 题平均每题输出 38.7K token（pilot 时 924），
+     输出占其账单 82%，而 claude-code / MiniAgent 没开。#118 给 aider 挂模型设置文件关掉（`images/aider/model-settings/`），
+     #157 用 `cli.experiment exclude` 排除、留作开/关思考对照；关思考重跑为 #160。
+  2. **判定引擎漏网一种形态**：AI 改坏源码导致 conftest 导入失败（pytest 退出码 4、无 junitxml）被记成
+     `HARNESS_ERROR` 平台故障并重试，#160 里 5/41 道，故障率 12% 推过 C-26 线。修在解析器 + `IntegrityCheck.collection_aborted`
+     （06 §11.3 实测回填），#160 作废重跑。
+  真实扣费对照：平台按美元牌价报的成本比 DeepSeek 人民币账单高约 1.3 倍（#157+#158 报 $2.9 ≈ ¥21，实扣 ¥15.6）。
 ### E10-T5 Harness Replay 校准实验（MET-01） · **P1 · C:M · E:1d**
 ### E10-T6 部署文档 / 使用文档 / 架构文档 · **P0 · C:M · E:1.5d**
 ### E10-T7 答辩演示脚本与录屏兜底 · **P0 · C:S · E:0.5d**

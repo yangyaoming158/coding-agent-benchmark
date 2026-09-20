@@ -137,6 +137,17 @@ E4-T1 实现时在开发机上用 pytest 9.1.1 跑出来的结论（2026-09-05�
 
 **收集错误不算进 `blames_harness`**：它既可能是 AI 改坏了 import（分支 b），也可能是题目坏了（分支 a），解析器分不出来。那一步归 E4-T3——它手里有"补丁改了哪些文件"，能拿 C-13c 要求的实际证据去判。
 
+> **实测回填（2026-09-21，E10-T4 第 1 轮 #160）**：上面那条有一个漏网的形态——**pytest 死在收集之前**。
+> AI 删了 `click/types.py` 里的 `BOOL`，`tests/conftest.py` 一句 `from click.testing import CliRunner` 就挂，
+> pytest 打印 `ImportError while loading conftest '…'`、退出码 4：没有 ERRORS 一节、没有摘要行、也不写 junitxml。
+> 文本兜底只认摘要里的 `ERROR <模块>`，认不出这形态 → `source=NONE`；而 `blames_harness` 又把"没有完整 XML"
+> 一律算平台的锅 → 记 `HARNESS_ERROR` 并重试，41 题里 5 道这样，平台故障率 12%，整个实验推过 C-26 的 5% 线。
+> 修法两处（PR 见 E10-T4 卡）：① 解析器把 `while loading conftest '<path>'` 连同后面的 `E   …` 行认成
+> `CollectionError(module=conftest 路径)`；② `IntegrityCheck` 加 `collection_aborted`（文本兜底 + 零用例 + 有收集错误），
+> 这种"没有报告"是收集失败的必然结果，`blames_harness` 不再据此怪平台，交给 (b) 按收集错误判 `UNRESOLVED`。
+> 前提没变：受保护路径已强制还原、当晚 Oracle ×3 / Noop ×1 刚验过 116 道题的 conftest 都能导入（03 §8.13），
+> 所以 import 挂掉只能是 AI 改的源码造成的。fixture `tests/fixtures/reports/conftest_import_failure_stdout.txt` 是那次的真实输出。
+
 ## 11.4 补丁归一化
 
 - **输入**：`git diff` 的原始输出，或者 AI 自己打印出来的 diff
