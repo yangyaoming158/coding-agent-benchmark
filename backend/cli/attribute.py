@@ -1,10 +1,12 @@
-"""失败归因的命令行（E6-T1，`06-judge-attribution.md` §12.2）。
+"""失败归因的命令行（E6-T1 / E6-T2，`06-judge-attribution.md` §12.2）。
 
     python -m cli.attribute rules                     # 给全库的失败跑一遍规则分类
     python -m cli.attribute rules --redo              # 连已经判过的也重判
     python -m cli.attribute rules --dry-run           # 只看分布，不写库
     python -m cli.attribute rules --run-id 331        # 只判这一次
     python -m cli.attribute features --run-id 331     # 看一次运行的 Stage2 特征
+    python -m cli.attribute llm --model deepseek/deepseek-chat --dry-run
+    python -m cli.attribute llm --model deepseek/deepseek-chat
 
 ## 为什么是批量命令，不接进评测主流程
 
@@ -30,17 +32,26 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections import Counter
 
+import sqlalchemy as sa
+
+from app.attribution.llm import AttributionRunError, attribute_failure, result_cache_hit
 from app.attribution.persistence import (
     collect_features,
     existing_stages,
     load_facts,
+    load_llm_input,
+    save_llm_decisions,
     save_rule_verdicts,
 )
-from app.attribution.rules import RuleSkip, RuleVerdict, classify
+from app.attribution.rules import RuleSkip, RuleVerdict, SkipReason, classify
 from app.domain.enums import AttributionStage
+from app.infrastructure.config import get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
+from app.infrastructure.llm import LLMClient, LLMConfigError
+from app.infrastructure.models.attribution import FailureAttribution
 from app.storage import create_artifact_store
 
 #: 规则层至少要判死这么多失败，低于这条线说明分类器坏了（§12.2 给的下限）。
@@ -99,6 +110,127 @@ def cmd_features(args: argparse.Namespace) -> int:
         features = collect_features(session, store, args.run_id)
         print(json.dumps(features.to_dict(), ensure_ascii=False, indent=2))
     return 0
+
+
+def cmd_llm(args: argparse.Namespace) -> int:
+    """给规则层留下的 F1～F5 失败做批量归因。
+
+    `--dry-run` 只组装 prompt 和显示指纹，**不创建客户端、不调模型**。
+    这是为了让“先看会花多少钱”和“真的花钱”成为两个明确动作。
+    """
+    if args.limit is not None and args.limit < 1:
+        print("--limit 必须大于等于 1", file=sys.stderr)
+        return 2
+    model = args.model or get_settings().judge_model
+    if not model:
+        print("没配模型：用 --model 指定，或在 .env 里设 JUDGE_MODEL", file=sys.stderr)
+        return 1
+
+    engine = create_db_engine()
+    factory = create_session_factory(engine)
+    store = create_artifact_store()
+    prepared = []
+    skipped: Counter[str] = Counter()
+    try:
+        with session_scope(factory) as session:
+            rows = load_facts(session, task_run_ids=args.run_id or None)
+            existing = {
+                row.evaluation_task_run_id: row
+                for row in session.scalars(sa.select(FailureAttribution))
+            }
+            for row in rows:
+                routing = classify(row.facts)
+                if not isinstance(routing, RuleSkip) or routing.reason is not SkipReason.NEEDS_LLM:
+                    skipped["NOT_F1_TO_F5"] += 1
+                    continue
+                old = existing.get(row.task_run_id)
+                if old is not None and old.stage in (AttributionStage.RULE, AttributionStage.HUMAN):
+                    skipped[f"PROTECTED_{old.stage.value}"] += 1
+                    continue
+                payload = load_llm_input(session, store, row.task_run_id)
+                if payload is None:
+                    skipped["MISSING_INPUT"] += 1
+                    continue
+                prompt_hash = payload.prompt_hash()
+                if (
+                    old is not None
+                    and old.stage is AttributionStage.LLM
+                    and result_cache_hit(
+                        old.judge_model,
+                        old.prompt_hash,
+                        model=model,
+                        prompt_hash=prompt_hash,
+                    )
+                    and not args.redo
+                ):
+                    skipped["CACHED_DB"] += 1
+                    continue
+                prepared.append(payload)
+    finally:
+        engine.dispose()
+
+    if args.limit is not None:
+        prepared = prepared[: args.limit]
+
+    print(f"待 LLM 归因 {len(prepared)} 次，模型 {model}")
+    for name, count in sorted(skipped.items()):
+        print(f"  跳过 {name:20} {count:>5}")
+    if args.dry_run:
+        for payload in prepared:
+            print(f"  task_run={payload.task_run_id} prompt_sha256={payload.prompt_hash()}")
+        print("\n--dry-run：没有调模型，没有写库")
+        return 0
+    if not prepared:
+        return 0
+
+    try:
+        client = LLMClient.from_settings(model=model)
+    except LLMConfigError as exc:
+        print(f"没法调模型：{exc}", file=sys.stderr)
+        return 1
+
+    decisions = []
+    failures = 0
+    by_status: Counter[str] = Counter()
+    by_category: Counter[str] = Counter()
+    with client:
+        for payload in prepared:
+            try:
+                decision = attribute_failure(payload, client, refresh=args.redo)
+            except AttributionRunError as exc:
+                failures += 1
+                print(f"  ! task_run={payload.task_run_id} 归因失败：{exc}", file=sys.stderr)
+                continue
+            decisions.append((payload.task_run_id, decision))
+            by_status[decision.status.value] += 1
+            by_category[decision.verdict.category.value] += 1
+            print(
+                f"  {decision.status.value:11} {decision.verdict.category.value:38} "
+                f"task_run={payload.task_run_id} confidence={decision.verdict.confidence:.3f}"
+            )
+
+    write_engine = create_db_engine()
+    write_factory = create_session_factory(write_engine)
+    try:
+        with session_scope(write_factory) as session:
+            report = save_llm_decisions(session, decisions)
+    finally:
+        write_engine.dispose()
+
+    print("\n归因分布")
+    for name, count in sorted(by_category.items()):
+        print(f"  {name:40} {count:>5}")
+    for name, count in sorted(by_status.items()):
+        print(f"  status={name:32} {count:>5}")
+    print(
+        f"\n落库：新增 {report.inserted} 条、更新 {report.updated} 条、"
+        f"保护 {report.protected} 条；失败 {failures} 条"
+    )
+    print(
+        f"模型调用：{client.usage.calls} 次，文件缓存命中 "
+        f"{client.usage.cached_calls} 次，计费调用 {client.usage.billed_calls} 次"
+    )
+    return 1 if failures else 0
 
 
 def _print_table(
@@ -163,6 +295,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_features.add_argument("--run-id", type=int, required=True)
     p_features.set_defaults(func=cmd_features)
 
+    p_llm = sub.add_parser("llm", help="LLM-as-Judge 归因（F1～F5）")
+    p_llm.add_argument("--model", help="判定模型；缺省读 JUDGE_MODEL")
+    p_llm.add_argument("--run-id", type=int, action="append", help="只判这次运行，可以给多个")
+    p_llm.add_argument("--limit", type=int, help="最多处理多少次；首次付费试跑建议设 1")
+    p_llm.add_argument(
+        "--redo",
+        action="store_true",
+        help="重新调模型并覆盖旧 LLM 结论（可能产生费用）",
+    )
+    p_llm.add_argument(
+        "--dry-run", action="store_true", help="只列出任务和 prompt 指纹，不调模型不写库"
+    )
+    p_llm.set_defaults(func=cmd_llm)
+
     return parser
 
 
@@ -176,4 +322,4 @@ if __name__ == "__main__":
     raise SystemExit(main())
 
 
-__all__ = ["COVERAGE_FLOOR", "build_parser", "cmd_features", "cmd_rules", "main"]
+__all__ = ["COVERAGE_FLOOR", "build_parser", "cmd_features", "cmd_llm", "cmd_rules", "main"]

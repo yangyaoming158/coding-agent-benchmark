@@ -16,10 +16,13 @@ import pytest
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from app.attribution.llm import AttributionDecision, AttributionVerdict, EvidenceCitation
 from app.attribution.persistence import (
     collect_features,
     existing_stages,
     load_facts,
+    load_llm_input,
+    save_llm_decisions,
     save_rule_verdicts,
 )
 from app.attribution.rules import RuleName, RuleVerdict, classify
@@ -232,6 +235,28 @@ def rule_items(session: Session) -> list[tuple[int, RuleVerdict]]:
     return out
 
 
+def llm_decision(
+    *,
+    category: FailureCategory = FailureCategory.F3_INCOMPLETE_FIX,
+    status: AttributionStatus = AttributionStatus.OK,
+    model: str = "fake/judge",
+    prompt_hash: str = "a" * 64,
+) -> AttributionDecision:
+    """造一个已经过纯逻辑层校验的 LLM 结论。"""
+    return AttributionDecision(
+        verdict=AttributionVerdict(
+            category=category,
+            confidence=0.82,
+            evidence=[EvidenceCitation(source="test_log", quote="AssertionError")],
+            reasoning_zh="修改了正确文件，但失败用例仍未全部通过。",
+        ),
+        status=status,
+        judge_model=model,
+        prompt_hash=prompt_hash,
+        raw_response={"votes": [{"category": category.value}]},
+    )
+
+
 def test_rule_verdict_is_saved(world: World, session: Session) -> None:
     task_run_id = world.task_run(agent_outcome=AgentOutcome.EMPTY_PATCH)
     session.commit()
@@ -381,6 +406,101 @@ def test_gold_patch_comes_from_raw_definition(
     assert features.patch_overlap.hit_any is False, "改的文件和官方补丁没交集，这是 F2"
 
 
+def test_llm_input_contains_gold_summary_but_never_gold_code(
+    world: World, session: Session, artifact_store: ArtifactStore
+) -> None:
+    agent_run = world.task_run()
+    world.with_patches(
+        agent_run,
+        artifact_store,
+        agent_diff=(
+            "diff --git a/src/click/core.py b/src/click/core.py\n+agent_implementation()\n"
+        ),
+        gold_diff=(
+            "diff --git a/src/click/core.py b/src/click/core.py\n"
+            "--- a/src/click/core.py\n"
+            "+++ b/src/click/core.py\n"
+            "+SECRET_GOLD_IMPLEMENTATION()\n"
+        ),
+    )
+    world.f2p_message(agent_run, "tests/test_core.py::test_x", "AssertionError: still broken")
+    session.commit()
+
+    payload = load_llm_input(session, artifact_store, agent_run)
+
+    assert payload is not None
+    prompt = payload.messages()[1]["content"]
+    assert "src/click/core.py" in payload.gold_summary
+    assert "新增行：1" in payload.gold_summary
+    assert "agent_implementation()" in prompt
+    assert "AssertionError: still broken" in prompt
+    assert "SECRET_GOLD_IMPLEMENTATION" not in prompt, "官方补丁代码泄露进 prompt 了"
+
+
+def test_llm_decision_is_saved_and_can_refresh_an_old_llm_row(
+    world: World, session: Session
+) -> None:
+    task_run_id = world.task_run()
+    session.commit()
+
+    first = save_llm_decisions(session, [(task_run_id, llm_decision())])
+    session.commit()
+    second = save_llm_decisions(
+        session,
+        [
+            (
+                task_run_id,
+                llm_decision(
+                    category=FailureCategory.F4_INCORRECT_LOGIC,
+                    model="fake/judge-v2",
+                    prompt_hash="b" * 64,
+                ),
+            )
+        ],
+    )
+    session.commit()
+
+    assert first.inserted == 1
+    assert second.updated == 1
+    row = session.scalar(
+        select(FailureAttribution).where(FailureAttribution.evaluation_task_run_id == task_run_id)
+    )
+    assert row is not None
+    assert row.stage is AttributionStage.LLM
+    assert row.category is FailureCategory.F4_INCORRECT_LOGIC
+    assert row.judge_model == "fake/judge-v2"
+    assert row.prompt_hash == "b" * 64
+    assert row.evidence["citations"][0]["quote"] == "AssertionError"
+
+
+@pytest.mark.parametrize("protected_stage", [AttributionStage.RULE, AttributionStage.HUMAN])
+def test_llm_never_overwrites_rule_or_human(
+    world: World, session: Session, protected_stage: AttributionStage
+) -> None:
+    task_run_id = world.task_run()
+    session.add(
+        FailureAttribution(
+            evaluation_task_run_id=task_run_id,
+            stage=protected_stage,
+            category=FailureCategory.F6_REGRESSION,
+            evidence={"protected": True},
+            status=AttributionStatus.OK,
+        )
+    )
+    session.commit()
+
+    report = save_llm_decisions(session, [(task_run_id, llm_decision())])
+    session.commit()
+
+    assert report.protected == 1
+    row = session.scalar(
+        select(FailureAttribution).where(FailureAttribution.evaluation_task_run_id == task_run_id)
+    )
+    assert row is not None
+    assert row.stage is protected_stage
+    assert row.category is FailureCategory.F6_REGRESSION
+
+
 # ── 归因挂了不能影响判定（§12.4 最后一条）────────────────────
 
 
@@ -419,6 +539,7 @@ def test_attribution_never_writes_to_the_verdict_table(
 
     with count_queries(engine) as counter:
         save_rule_verdicts(session, rule_items(session))
+        save_llm_decisions(session, [(agent_run, llm_decision())])
         collect_features(session, artifact_store, agent_run)
         session.flush()
 

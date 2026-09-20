@@ -1299,7 +1299,40 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   **根因在适配器的错误映射（E3-T4/E3-T5），不在归因层**，本卡不改 ——
   已单开 **E3-T9（#96）**，定为 P0，挡在 E10-T4 最终实验前面。
   留给 E6-T3 抽检时重点看这一格。
-### E6-T2 LLM-as-Judge 归因 · **P1 · C:L · E:2d · 🔑**（结构化输出、evidence 强制、缓存、低置信投票）
+### E6-T2 LLM-as-Judge 归因 ✅ 已于 2026-09-20 完成 · **P1 · C:L · E:2d · 🔑**（结构化输出、evidence 强制、缓存、低置信投票）
+- **Goal**：只处理规则层分不出的 F1～F5；用可复现、可核对的结构化回答
+  补齐自动归因，但绝不回写判定结果
+- **Req**：MET-04 · **Deps**：E6-T1 · **Modules**：`attribution`
+- **Output**：`app/attribution/llm.py` + `python -m cli.attribute llm` +
+  `failure_attributions(stage=LLM)`
+- **AC**（卡片原本只有标题一行，10 条是 2026-09-20 开工前按 §12.3～12.4 定的）：
+  1. 只接收 E6-T1 返回 `NEEDS_LLM` 的运行；F6/F7/F8/N1、成功、取消和
+     `TEST_TIMEOUT` 都不调模型
+  2. 输入按 §12.3 裁剪：issue 正文 3000 字符、AI 补丁 6000 字符、
+     最多 3 条失败用例（每条 2000 字符）、Stage2 特征和最后 10 次工具调用
+  3. 官方补丁只给文件清单与新增/删除行数，prompt 里不得出现官方代码；
+     输入类本身不设 `gold_patch` 字段
+  4. 模型只能输出 F1～F5；JSON Schema 拒绝缺字段、多字段、越界置信度和
+     F6～N2，`temperature=0`
+  5. `evidence` 至少一条，且每条 `quote` 必须逐字出现在它声称的输入段；
+     对不上就视为坏回答，不落库
+  6. `confidence < 0.6` 时总共取 3 票；两票同类才采纳，三类各一票或
+     不足 3 张有效票就落 `NEEDS_HUMAN`，不猜
+  7. 结构/证据坏回答最多重试 3 次；429/5xx 由公用 `LLMClient` 退避 3 次，
+     上层不再整体套 3 遍，避免一次故障放大成 12 次请求
+  8. 缓存身份包含 `(evaluation_task_run_id, prompt_hash, judge_model)`；低置信的
+     票号和结构重试号另外入 key。同一结果已在库里时直接跳过
+  9. LLM upsert 只能覆盖 `stage=LLM` 的旧行，并发时也不能覆盖 RULE/HUMAN；
+     完整保存类别、置信度、证据、中文理由、模型、prompt hash 和投票原始回答
+  10. `llm --dry-run` 只列候选与 prompt hash，不创建模型客户端、不写库；
+      全链路没有修改 `evaluation_task_runs` 的 SQL，不改冻结件、枚举或数据库结构
+- **实际交付**（2026-09-20）：`app/attribution/llm.py` 实现严格输入裁剪、
+  JSON Schema + 本地校验、证据原文核对、低置信三票投票和独立缓存键；
+  `app/attribution/persistence.py` 组装输入并原子落库；
+  `python -m cli.attribute llm [--model ...] [--run-id ...] [--limit N] [--dry-run] [--redo]`
+  提供批处理入口。全部模型测试用假回答，本卡没有调真实模型、没有运行
+  付费实验。不改 API / `frontend/` / 数据库迁移；完整设计与边界见
+  `06-judge-attribution.md` §12.7。
 ### E6-T3 抽检队列与盲检界面 · **P1 · C:M · E:1.5d**（分层抽样、双人标注、仲裁）
 ### E6-T4 准确率与 κ 统计 · **P1 · C:S · E:0.5d**（MET-04 的报表）
 
