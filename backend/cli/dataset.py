@@ -61,12 +61,13 @@ from app.domain.enums import (
     EvaluationRunStatus,
     TaskValidationState,
 )
+from app.evaluation.agent_configs import AgentConfigError, resolve_agent_config
 from app.evaluation.manifest import ProvenanceError, collect_provenance
 from app.evaluation.orchestrator import OrchestrationError, create_runs
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
 from app.infrastructure.gitmeta import git_state
-from app.infrastructure.models.agent import Agent, AgentConfig
+from app.infrastructure.models.agent import AgentConfig
 from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationRun
 
@@ -166,12 +167,11 @@ def _counts(counts: dict[str, int] | object) -> str:
 
 
 def _agent_config(session: Session, name: str) -> AgentConfig:
-    config = session.execute(
-        sa.select(AgentConfig).join(Agent).where(Agent.name == name)
-    ).scalar_one_or_none()
-    if config is None:
-        raise DatasetError(f"找不到 Agent {name} 的配置，先跑 `make seed`")
-    return config
+    """门禁只用 oracle / noop，各只有一份配置，按名字就能唯一选到。"""
+    try:
+        return resolve_agent_config(session, agent=name)
+    except AgentConfigError as exc:
+        raise DatasetError(str(exc)) from exc
 
 
 def cmd_gate(args: argparse.Namespace) -> int:

@@ -439,6 +439,10 @@ make gen-api         # 从后端 OpenAPI 生成前端类型（需要后端在跑
 ```bash
 make migrate                       # 表结构
 make seed && make seed-tasks       # 哨兵 Agent + 四道 Golden 题
+# ⚠ `make seed` 也是**改了 cli/seed.py 之后必须重跑**的：它按 label 更新已有配置行的单价和 params。
+# 2026-09-20 起 aider / claude-code 各有两份配置（旧 @deepseek-chat 留给 pilot 历史，新 @deepseek-flash
+# 跑最终实验），`--agent aider` 不再唯一，实验命令要带 `--config aider@deepseek-flash`（Makefile 用 CONFIG=）。
+# deepseek-chat 已是 deepseek-flash 的别名（2026-09-20 实测），别再拿旧配置跑新实验。
 # Golden 四个镜像的 digest 写回库
 cd backend && uv run python -m cli.images build --force --env bench-golden__auth__py311 --env bench-golden__cart__py311 --env bench-golden__pager__py311 --env bench-golden__textkit__py311
 # 候选：全走文件缓存，不联网不花钱

@@ -56,17 +56,26 @@ DEEPSEEK_FLASH_PRICES = TokenPrices(
     cache_read_per_mtok=Decimal("0.006"),
 )
 #: 2026-09-10 以前 pilot 使用的 deepseek-chat 价目，只服务历史同条件配置。
+#: ⚠ 2026-09-20 实测：`deepseek-chat` 已从 `/models` 下线，但两个端点仍返回 200 —— 它成了
+#: **别名，实际路由到 deepseek-flash**（响应 model 字段 = deepseek-flash / deepseek-v4-flash）。
+#: 所以 `@deepseek-chat` 两份配置只留给 pilot（#125–#128）的历史记录用；再拿它们跑实验，
+#: manifest 里的 model_name 和价目都会和实际不符。最终实验用下面的 `@deepseek-flash`。
 DEEPSEEK_CHAT_PRICES = TokenPrices(
     input_per_mtok=Decimal("0.27"),
     output_per_mtok=Decimal("1.10"),
     cache_read_per_mtok=Decimal("0.07"),
 )
 
+#: 2026-09-20 起 max_tokens_budget 30_000 → 300_000、max_turns 20 → 30。
+#: 30_000 是 E3-T6 验收 Golden 一题时定的；runtime 按"消息历史字节数 + 1024"预留下一轮
+#: 输入，字节数比 token 数多约 3 倍，30_000 实际只够 4–5 轮，真题上连定位 bug 都不够，
+#: 而 aider / claude-code 没有这个上限（平台侧 `max_tokens_budget=None`）。
+#: 300_000 按 flash 高峰价最坏 $0.09 / 题（缓存命中后远低于此），116 题 × 2 轮个位数美元。
 MINIAGENT_PARAMS: dict[str, Any] = {
     "image": "bench-base:py311",
-    "max_turns": 20,
+    "max_turns": 30,
     "max_output_tokens": 2048,
-    "max_tokens_budget": 30_000,
+    "max_tokens_budget": 300_000,
     "thinking": "disabled",
     "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
 }
@@ -145,6 +154,41 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         },
         token_prices=DEEPSEEK_CHAT_PRICES,
     ),
+    # ── 最终实验（E10-T4）用的两份：同一个 Agent 的第二份配置 ──
+    # `name` 和上面相同，`seed_agents()` 会找到已有的 Agent 行、只新建配置行。
+    # 三个参赛者（aider / claude-code / miniagent）底座模型全是 deepseek-flash，
+    # 对比的就纯粹是 Agent 框架本身的差异。
+    # 跑的时候要给 --config，见 `app.evaluation.agent_configs`。
+    SeedAgent(
+        name="aider",
+        display_name="Aider",
+        kind=AgentKind.CLI,
+        adapter_class="app.runner.adapters.aider.AiderRunner",
+        config_label="aider@deepseek-flash",
+        note="最终实验配置（2026-09-20）：底座 deepseek-flash，价目按 flash 高峰价",
+        model_name="deepseek/deepseek-flash",
+        params={
+            "image": "bench-agent:py311-aider",
+            "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
+        },
+        token_prices=DEEPSEEK_FLASH_PRICES,
+    ),
+    SeedAgent(
+        name="claude-code",
+        display_name="Claude Code",
+        kind=AgentKind.CLI,
+        adapter_class="app.runner.adapters.claude_code.ClaudeCodeRunner",
+        config_label="claude-code@deepseek-flash",
+        note="最终实验配置（2026-09-20）：底座 deepseek-flash，价目按 flash 高峰价",
+        model_name="deepseek-flash",
+        params={
+            "image": "bench-agent:py311-claude-code",
+            "base_url": "https://api.deepseek.com/anthropic",
+            "max_turns": 40,
+            "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
+        },
+        token_prices=DEEPSEEK_FLASH_PRICES,
+    ),
 )
 
 
@@ -152,6 +196,8 @@ def seed_agents(session: Session) -> tuple[int, int]:
     """写入哨兵 Agent 与配置，返回（新建数，更新数）。
 
     按 name / label 查重，不靠固定主键 —— 固定主键在多人各自建库时会撞上。
+    同一个 `name` 出现多次表示同一个 Agent 的多份配置：Agent 行只建一次（后面的
+    条目算"更新"），配置行按 label 各建一份。
     """
     created = 0
     updated = 0

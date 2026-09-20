@@ -2021,6 +2021,40 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **范围声明**：生成器完成不等于 DEL-03/DEL-04 已有足够实验事实。最终报告仍需
   E10-T4 的第三个真实 Agent 和 E6-T2～T4 的 LLM 归因/人工盲检；本卡没有运行付费实验。
 ### E10-T4 最终实验（100×3）与对比报告 · **P1 · C:L · E:2d**
+- **口径（2026-09-18 定，卡片原本只有标题这一行）**：
+  1. **"100 道"是两个数据集，不是一个。** `benchmark-cn-v1@v2`（自建题，中文题面，§8.5 Plan B）
+     + `swebench-verified-subset@v3`（官方校准集）。**每个 Agent 跑两个实验**（一个数据集一个），
+     **排行榜分开出**，报告里再给一张合并表（分母 = 两版发布版的题数之和，来源分列）。
+     §8.6 明写官方题只用于校准、**不混进 `benchmark-cn-v1` 的解决率统计**，合并表只是并排放，不是加权。
+  2. **实验前先做一条质量检查（AC 1）：两套发布版各跑 Oracle 3 轮。** 确定性哨兵（§9 第三条）
+     原来只在单题上跑 3 次，这里放大到整个数据集：三轮每道题的 `agent_outcome` 和逐用例状态必须
+     完全一致。不一致的题按 E1-T6 剔 pager（§7.11 十）/ E8-T3 剔 `test_init_creates_migrations_package`
+     （§8.12 三）的精神处置 —— 找到会飘或依赖顺序的用例，从 P2P 剔掉，重新 stage → gate → publish 出
+     新版本，**不为了过检查改判定**（C-50 的规矩）。Noop 各跑 1 轮，0%。
+  3. 工作区必须干净（C-27）；`dirty=true` 的实验按 C-28 不进排行榜。
+- **AC**：
+  1. 质量检查：`benchmark-cn-v1@v2` 和 `swebench-verified-subset@v3` 各 Oracle ×3 全部 100% 且逐题一致，
+     Noop ×1 全部 0%；实验号和命令回填 `03-benchmark-spec.md`
+  2. 每个 Agent（Oracle 对照 + 真实 Agent）× 两个数据集各一次完整实验，`evaluation_runs.dirty = false`
+  3. 排行榜按数据集分开；报告里的合并表标明每道题来自哪一版
+  4. 每题有轨迹链接（E10-T3 出报告）
+  5. 平台故障率、`container_sigkilled_without_oom_flag` 次数、重试次数写进报告（MET-03）
+- **开跑前的准备（2026-09-20，复核 Codex 交付时发现，都已落 main）**：
+  1. **`make seed` 必须重跑一次**。E5-T5（#111）把三档单价写进种子，但开发库的
+     `agent_configs` 没重灌，价格全 NULL；实验一启动 `collect_provenance()` 就把 null 冻进
+     manifest，`pinned_token_prices()` 设计上不回退数据库现值，事后补价格救不回来。
+  2. **底座模型统一用 `deepseek-flash`，配置标签 `aider@deepseek-flash` /
+     `claude-code@deepseek-flash` / `miniagent@deepseek-flash`**。2026-09-20 实测 `deepseek-chat`
+     已从 `/models` 下线但仍返回 200 —— 它成了别名，实际路由到 deepseek-flash；旧 `@deepseek-chat`
+     两份配置只留给 pilot（#125–#128）的历史记录，再拿它们跑 manifest 的 model_name 和价目都会不符。
+     同一个 Agent 有两份启用配置后 `--agent` 不再唯一，`cli.experiment start` / `cli.queue enqueue`
+     加了 `--config <标签>`（`app/evaluation/agent_configs.py`），Makefile 用 `CONFIG=`。
+     三个参赛者同底座，对比的就纯粹是 Agent 框架本身。
+  3. **MiniAgent `max_tokens_budget` 30_000 → 300_000，`max_turns` 20 → 30**。runtime 按"消息历史
+     字节数 + 1024"预留下一轮输入，字节数比 token 多约 3 倍，30_000 实际只够 4–5 轮；aider /
+     claude-code 没有这个上限（平台侧 `max_tokens_budget=None`）。按 flash 高峰价最坏 $0.09 / 题。
+  4. 先用新配置各跑 1 道 Golden 题：看 `cost_source` 是 `reported` 还是 `estimated`（aider 走
+     litellm，它的价格表未必有 deepseek-flash），token 用量是否合理，再开全量。
 ### E10-T5 Harness Replay 校准实验（MET-01） · **P1 · C:M · E:1d**
 ### E10-T6 部署文档 / 使用文档 / 架构文档 · **P0 · C:M · E:1.5d**
 ### E10-T7 答辩演示脚本与录屏兜底 · **P0 · C:S · E:0.5d**

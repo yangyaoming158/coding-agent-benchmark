@@ -287,8 +287,8 @@ stress-oom:          ## 故意制造 OOM，数 OOMKilled 漏报率（要 Docker�
 worker:              ## 起一个 Worker 进程（Ctrl-C 优雅停机）
 	$(UV) python -m app.worker
 
-enqueue:             ## 建一次实验，把某一版数据集的题投进队列（AGENT=oracle NAME=adhoc）
-	$(UV) python -m cli.queue enqueue --agent $(AGENT) --name $(NAME) --set $(SLUG) $(DIRTY_FLAG)
+enqueue:             ## 建一次实验，把某一版数据集的题投进队列（AGENT=oracle NAME=adhoc；同名 Agent 多份配置时给 CONFIG=<标签>）
+	$(UV) python -m cli.queue enqueue --agent $(AGENT) $(if $(CONFIG),--config $(CONFIG)) --name $(NAME) --set $(SLUG) $(DIRTY_FLAG)
 
 queue:               ## 看作业队列现状
 	$(UV) python -m cli.queue status

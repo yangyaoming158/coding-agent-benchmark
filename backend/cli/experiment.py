@@ -72,6 +72,7 @@ from app.domain.protocol import PROTOCOL_VERSION
 from app.evaluation import concurrency as concurrency_mod
 from app.evaluation import progress as progress_mod
 from app.evaluation import timing as timing_mod
+from app.evaluation.agent_configs import AgentConfigError, resolve_agent_config
 from app.evaluation.manifest import (
     ManifestDiff,
     ProvenanceError,
@@ -106,11 +107,10 @@ def cmd_start(args: argparse.Namespace) -> int:
     settings = get_settings()
     factory = create_session_factory(create_db_engine(settings.database_url))
     with session_scope(factory) as session:
-        config = session.execute(
-            sa.select(AgentConfig).join(Agent).where(Agent.name == args.agent)
-        ).scalar_one_or_none()
-        if config is None:
-            print(f"找不到 Agent {args.agent} 的配置，先跑 `make seed`")
+        try:
+            config = resolve_agent_config(session, agent=args.agent, config=args.config)
+        except AgentConfigError as exc:
+            print(exc)
             return 1
 
         # 题从**数据集快照**（`benchmark_set_items`）里取。理由和 `cli.queue enqueue`
@@ -960,6 +960,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_start = sub.add_parser("start", help="建实验并把题投进队列")
     p_start.add_argument("--agent", default="oracle", help="Agent 名字，默认 oracle")
+    p_start.add_argument(
+        "--config",
+        help="配置标签（agent_configs.label）。该 Agent 有多份启用配置时必须给",
+    )
     p_start.add_argument("--set", default=GOLDEN_SET_SLUG, help="数据集 slug，默认 golden")
     p_start.add_argument("--version", help="数据集版本，默认取最新已发布的那一版")
     p_start.add_argument("--name", default="adhoc", help="实验名")

@@ -28,11 +28,11 @@ from sqlalchemy.orm import Session
 from app.benchmark.dataset import DatasetError, items_of, resolve_set, snapshot_digest
 from app.benchmark.schema import TaskDefinition
 from app.domain.enums import JobState, TaskValidationState
+from app.evaluation.agent_configs import AgentConfigError, resolve_agent_config
 from app.evaluation.manifest import ProvenanceError, collect_provenance
 from app.evaluation.orchestrator import OrchestrationError, create_runs
 from app.infrastructure.config import REPO_ROOT, get_settings
 from app.infrastructure.db import create_db_engine, create_session_factory, session_scope
-from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.benchmark import (
     BenchmarkSet,
     BenchmarkTask,
@@ -192,11 +192,10 @@ def cmd_seed_golden(_args: argparse.Namespace) -> int:
 def cmd_enqueue(args: argparse.Namespace) -> int:
     engine = create_db_engine()
     with session_scope(create_session_factory(engine)) as session:
-        config = session.execute(
-            sa.select(AgentConfig).join(Agent).where(Agent.name == args.agent)
-        ).scalar_one_or_none()
-        if config is None:
-            print(f"找不到 Agent {args.agent} 的配置，先跑 `make seed`")
+        try:
+            config = resolve_agent_config(session, agent=args.agent, config=args.config)
+        except AgentConfigError as exc:
+            print(exc)
             return 1
 
         # 题从**数据集快照**里取，不是从整张 benchmark_tasks 表里取。
@@ -300,6 +299,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_enqueue = sub.add_parser("enqueue", help="建一次实验并把题投进队列")
     p_enqueue.add_argument("--agent", default="oracle", help="Agent 名字，默认 oracle")
+    p_enqueue.add_argument(
+        "--config",
+        help="配置标签（agent_configs.label）。该 Agent 有多份启用配置时必须给",
+    )
     p_enqueue.add_argument("--set", default=GOLDEN_SET_SLUG, help="数据集 slug，默认 golden")
     p_enqueue.add_argument("--version", help="数据集版本，默认取最新已发布的那一版")
     p_enqueue.add_argument("--name", default="adhoc", help="实验名")
