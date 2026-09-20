@@ -403,3 +403,55 @@ def test_extra_args_land_before_the_message() -> None:
     """`agent_configs.params` 里追加的参数要在 `--message` 之前，不能挤到题干后面。"""
     command = build_command(make_task_input(deadline_ms=1), "m", extra_args=("--map-tokens", "0"))
     assert command.index("--map-tokens") < command.index("--message")
+
+
+# ── 模型设置文件（2026-09-20，关 deepseek-flash 的思考模式）──────────────
+
+
+def test_model_settings_are_mounted_read_only_and_pointed_at_by_the_switch(tmp_path: Path) -> None:
+    """配了 `model_settings`，容器里要能看到那个文件，而且 aider 要被指过去。
+
+    aider 不会自己去找 `/opt` 下的文件；只挂不指、只指不挂，思考模式都关不掉，
+    而那不会报错 —— 只会让 aider 的成本悄悄高 3 倍。
+    """
+    from app.runner.adapters.aider import MODEL_SETTINGS_TARGET, AiderRunner
+    from app.runner.protocol import AgentConfig
+
+    runner = AiderRunner.from_params({"model_settings": "deepseek-flash-no-thinking.yml"})
+    spec = runner._spec(
+        make_task_input(deadline_ms=1), _FakeWorkspace(tmp_path), AgentConfig(), timeout_s=10
+    )
+    mount = next(m for m in spec.mounts if m.target == MODEL_SETTINGS_TARGET)
+    assert mount.read_only and mount.source.name == "deepseek-flash-no-thinking.yml"
+    assert "thinking" in mount.source.read_text(encoding="utf-8")
+    i = spec.command.index("--model-settings-file")
+    assert spec.command[i + 1] == MODEL_SETTINGS_TARGET
+    assert i < spec.command.index("--message")
+
+
+def test_no_model_settings_means_no_mount_and_no_switch(tmp_path: Path) -> None:
+    """没配就和以前一模一样：只挂工作区，命令里没有 `--model-settings-file`。"""
+    from app.runner.adapters.aider import AiderRunner
+    from app.runner.protocol import AgentConfig
+
+    spec = AiderRunner.from_params({})._spec(
+        make_task_input(deadline_ms=1), _FakeWorkspace(tmp_path), AgentConfig(), timeout_s=10
+    )
+    assert len(spec.mounts) == 1
+    assert "--model-settings-file" not in spec.command
+
+
+@pytest.mark.parametrize("bad", ["../x.yml", "/etc/passwd", ".hidden.yml", "nope.yml", ""])
+def test_model_settings_only_accept_a_bare_existing_filename(bad: str) -> None:
+    """写路径就能把宿主机任意文件挂进被测 AI 的容器，所以只认目录下的文件名；
+    不存在也要在构造时就报。
+    """
+    from app.runner.adapters.aider import AiderRunner
+
+    with pytest.raises(ValueError):
+        AiderRunner.from_params({"model_settings": bad})
+
+
+class _FakeWorkspace:
+    def __init__(self, path: Path) -> None:
+        self.path = path

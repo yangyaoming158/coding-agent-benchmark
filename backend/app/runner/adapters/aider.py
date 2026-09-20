@@ -47,6 +47,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -95,6 +96,10 @@ logger = get_logger(__name__)
 #: 装了 aider 的镜像。和 `images/aider/Dockerfile`、Makefile 的 `AIDER_IMAGE` 对齐。
 #: 只是默认值 —— 真实评测由 `agent_configs.params["image"]` 决定。
 DEFAULT_AIDER_IMAGE = "bench-agent:py311-aider"
+#: aider 模型设置文件（`--model-settings-file`）在仓库里的目录。只认这个目录下的
+#: **文件名**，不认路径 —— 配置里写路径就能把宿主机任意文件挂进被测 AI 的容器。
+MODEL_SETTINGS_DIR = Path(__file__).resolve().parents[4] / "images" / "aider" / "model-settings"
+MODEL_SETTINGS_TARGET = "/opt/aider.model.settings.yml"
 
 #: 镜像里钉死的 aider 版本。只在 stdout 里读不到 banner 时兜底，
 #: 读得到就以 stdout 为准（镜像和这个常量可能不同步，stdout 是现场事实）。
@@ -249,6 +254,22 @@ def build_trajectory(stdout: str, *, started_at: datetime) -> str:
     return "".join(json.dumps(event, ensure_ascii=False) + "\n" for event in events)
 
 
+def resolve_model_settings(name: str | None) -> Path | None:
+    """把配置里的文件名换成仓库内的绝对路径；不是裸文件名或文件不存在都拒绝。
+
+    在构造时就查而不是等到起容器：配置写错要在 `probe` / 建实验那一刻报出来，
+    不能等 100 道题跑起来才发现每一道都挂载失败。
+    """
+    if name is None:
+        return None
+    if not name or Path(name).name != name or name.startswith("."):
+        raise ValueError(f"model_settings 只能是 {MODEL_SETTINGS_DIR} 下的文件名，收到 {name!r}")
+    path = MODEL_SETTINGS_DIR / name
+    if not path.is_file():
+        raise ValueError(f"model_settings 文件不存在：{path}")
+    return path
+
+
 def build_command(
     task: AgentTaskInput, model: str, *, extra_args: tuple[str, ...] = ()
 ) -> list[str]:
@@ -295,12 +316,25 @@ class AiderRunner:
         *,
         image: str | None = None,
         model: str | None = None,
+        model_settings: str | None = None,
         run_container: Any = None,
     ) -> None:
         self._image = image
         self._model = model
         #: 测试用的接缝：传一个假的进来，不起容器也能验命令拼装和故障映射。
         self._run_container = run_container or _run_in_container
+        self._model_settings = resolve_model_settings(model_settings)
+
+    @classmethod
+    def from_params(cls, params: Mapping[str, Any]) -> AiderRunner:
+        """按 `agent_configs.params` 造一个。编排层走的就是这条路。
+
+        `image` 不在这里读，由 `AgentConfig.image` 送进来（理由同 Claude Code 那份）。
+        `model_settings` 是 `images/aider/model-settings/` 下的文件名，用来给某个模型
+        塞请求参数 —— 2026-09-20 起 `aider@deepseek-flash` 靠它关掉思考模式。
+        """
+        raw = params.get("model_settings")
+        return cls(model_settings=str(raw) if raw is not None else None)
 
     # ── 探活 ────────────────────────────────────────────────
 
@@ -373,15 +407,21 @@ class AiderRunner:
     def _spec(
         self, task: AgentTaskInput, workspace: Any, config: AgentConfig, *, timeout_s: int
     ) -> ContainerSpec:
+        mounts: list[BindMount] = [BindMount.workspace(Path(workspace.path))]
+        extra_args = tuple(config.extra_args)
+        if self._model_settings is not None:
+            # 只读挂进去，再用开关指过去：aider 不会自己去找 /opt 下的文件
+            mounts.append(BindMount(self._model_settings, MODEL_SETTINGS_TARGET, read_only=True))
+            extra_args = ("--model-settings-file", MODEL_SETTINGS_TARGET, *extra_args)
         return ContainerSpec(
             image=config.image or self._image or DEFAULT_AIDER_IMAGE,
-            command=build_command(task, self._model_for(task), extra_args=config.extra_args),
+            command=build_command(task, self._model_for(task), extra_args=extra_args),
             timeout_s=timeout_s,
             stage=Stage.AGENT,
             # 被测 AI 要连大模型 API，所以 Agent 阶段是联网的。测试阶段永远断网（C-31），
             # 那由测试执行器自己保证，两边互不影响
             network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
-            mounts=(BindMount.workspace(Path(workspace.path)),),
+            mounts=tuple(mounts),
             workdir=WORKSPACE_TARGET,
             # 限额显式给（E9-T2）。不给的话吃的是 ResourceLimits() 按测试容器定的
             # 1536 MB —— 那个数没人选过，而 8 个槽位全占上就是 12 GB

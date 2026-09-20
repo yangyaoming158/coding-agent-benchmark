@@ -165,10 +165,13 @@ SEED_AGENTS: tuple[SeedAgent, ...] = (
         kind=AgentKind.CLI,
         adapter_class="app.runner.adapters.aider.AiderRunner",
         config_label="aider@deepseek-flash",
-        note="最终实验配置（2026-09-20）：底座 deepseek-flash，价目按 flash 高峰价",
+        note="最终实验配置（2026-09-20）：底座 deepseek-flash，关思考，价目按 flash 高峰价",
         model_name="deepseek/deepseek-flash",
         params={
             "image": "bench-agent:py311-aider",
+            # deepseek-flash 默认开思考，aider 一题输出 37K token、成本 ×3，且和关了思考的
+            # claude-code / MiniAgent 不可比。文件在 images/aider/model-settings/，只认文件名
+            "model_settings": "deepseek-flash-no-thinking.yml",
             "price_source": "https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-19 peak)",
         },
         token_prices=DEEPSEEK_FLASH_PRICES,

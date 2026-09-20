@@ -1,0 +1,11 @@
+# aider 的模型设置文件（--model-settings-file）。2026-09-20 实测：
+# deepseek-flash 走 OpenAI 兼容口默认开思考模式，aider 一条回复能收 43K token
+# （pilot 时 deepseek-chat 每题输出 924），成本 ×3 且和关了思考的 MiniAgent、
+# claude-code 不可比。`--thinking-tokens 0` 对它无效（aider 报"不支持"），
+# 只有把 `thinking.type=disabled` 塞进请求体这条路管用（实测 1 token 回复、无 THINKING 段）。
+# `extra_body` 由 litellm 原样并进 OpenAI 兼容请求体。
+- name: deepseek/deepseek-flash
+  extra_params:
+    extra_body:
+      thinking:
+        type: disabled
