@@ -2177,6 +2177,21 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   写明未做项（MinIO、Replay）和原因（§26.2 的主动披露纪律）；
   ④ README / CONTRIBUTING / AGENTS.md 指向这三份；DEL-06 的验收方式是"未参与开发的同学照文档在干净环境部署成功"，
   部署文档末尾留一节验收记录，由那位同学填 —— 这一步不能由作者自己代替
+- **2026-09-21 实现记录**：三份文档落在 `docs/deployment.md`（9 节 + 验收记录表）、`docs/usage.md`（八步旅程 + 常见错误）、
+  `docs/architecture.md`（13 节，含"没做的和为什么"）。**AC 对账**：
+  ① ✅ 部署文档的每条命令在验证副本 `bench-deploy-test 部署验证`（带空格中文路径、无 .venv / node_modules）上按顺序重跑了一遍：
+  `down -v` 清空后 `check_env.py` 全过（.venv 一项 ⚠）→ `make compose-up` 19 秒全 healthy（镜像已缓存；E10-T1 从零建是 1 分 49 秒）
+  → `/api/health` ok / 0008 → `make compose-smoke` 50 秒 Oracle #1 4/4、Noop #2 0/4、故障 0、dirty=false → `compose-down` 再 `up` 22 秒两个实验都在；
+  回显贴进文档。四条约束各成一小节（§5.1 代理三处含本机三处文件的实际内容、§5.2 Desktop 共存、§5.3 端口、§5.4 DooD 含 1 号进程 uid=1000 的实测），
+  网络坑三条另成 §6；错误路径两条实测（缺 `BENCH_REPO_DIR` / 缺 `ADMIN_TOKEN` 的报错原文）；
+  ② ✅ 使用文档 §2～§9 覆盖八步，每条命令的参数对照过 `--help`（顺带发现 `cli.seed` 不接参数、`--help` 会被当成直接跑，已写进文档）；
+  回显用开发库真数据（`cli.dataset show` 七个版本、`cli.experiment status` E10-T4 第 2 轮）；
+  ③ ✅ 架构文档 §3 的分层逐行抄自 `pyproject.toml` 的 8 层 + 3 条禁止合同，§4 的 17 张表逐张对过 `models/` 五个文件，§9 的 20 个端点对过 `app/api/`；
+  §12 写明 MinIO（抽象层就绪、`minio` 配置明确报错不静默回退）、Replay（E3-T8 + E10-T5，替代证据是 §8.13 的确定性哨兵和补丁指纹比对）、
+  LLM 归因未付费运行、E6-T4、E7 各页、E3-T7 及 §29 清单；
+  ④ ✅ README（快速开始下加三份文档表，顺带把"制品存储 MinIO"改成事实）/ CONTRIBUTING §1 与 §8 / AGENTS.md §2 表与 §12 命令块都指过去；
+  **验收记录待填** —— 部署文档 §9 留了表，等未参与开发的同学在干净机器上走一遍，填完再打 ✅。
+  **范围声明**：没有从零重建两个平台镜像（依赖已缓存，重建要再过一次国内源，E10-T1 当天刚建过）；"从别的机器访问"那段（`NEXT_PUBLIC_API_BASE` 改 LAN IP）没有第二台机器可测，文档里标了未实测。
 ### E10-T7 答辩演示脚本与录屏兜底 · **P0 · C:S · E:0.5d**
 
 ---

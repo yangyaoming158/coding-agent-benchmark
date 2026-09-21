@@ -40,6 +40,9 @@ pre-commit、GitHub Actions）。业务逻辑（建题、跑沙箱、判定、�
 | 碰数据库 / 后端 / 前端 | `docs/plan/07-platform-architecture.md` |
 | 想知道"为什么这么设计" | `docs/plan/08-adr.md`（12 条架构决策记录） |
 | 领任务 | `docs/plan/10-tasks-plan.md`（任务树）· `docs/plan/11-acceptance-testing-risk.md` §31（首批任务） |
+| 部署平台（compose 一键起） | `docs/deployment.md`（每条命令本机跑过；代理三处、Docker Desktop 共存、端口、DooD 权限） |
+| 用平台（建镜像 → 灌题 → 配 Agent → 建实验 → 看进度 → 报告 → 归因 → 发布） | `docs/usage.md` |
+| 先看一眼整体（模块分层、17 张表、没做的和为什么） | `docs/architecture.md`（和 `pyproject.toml` 的 import-linter 合同、`models/` 对过） |
 
 `docs/plan/report.html` 是**自动生成**的，不要手工编辑。改完 md 之后跑 `python3 docs/plan/_build_report.py .` 重新生成。
 
@@ -428,6 +431,14 @@ make dev-web         # 只起前端
 make web-lint        # eslint + tsc
 make web-build       # 生产构建
 make gen-api         # 从后端 OpenAPI 生成前端类型（需要后端在跑）
+
+# docker compose 一键部署（E10-T1，细节见 docs/deployment.md）
+make compose-up      # 建两个镜像 + 起 postgres / migrate / api / worker / frontend，等到全部 healthy
+make compose-ps      # 五个服务的状态
+make compose-logs SERVICE=worker
+make compose-cli CMD="python -m cli.seed"   # 所有 python -m cli.* 在容器里跑
+make compose-down    # 停掉，数据卷保留
+# ⚠ make compose-smoke 别在开发主仓库跑：compose 起的新库实验号从 1 起，制品会写进现有的 var/artifacts/runs/1/
 ```
 
 ### 清库之后怎么重灌
