@@ -1463,11 +1463,31 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   限制进 OpenAPI，前端生成的类型里**根本没有 GOLD 这个选项**，
   比在函数里加一句 `if` 可靠（实测 GOLD/TEST → 422）。细账在 §14.5 第六节。
 
-### E7-T1 前端骨架 + API 类型生成 + 布局导航 · **P0 · C:M · E:1d**
-### E7-T2 Runs / Run Detail（进度、分组网格、取消重试） · **P0 · C:M · E:1.5d**
-### E7-T3 Task Run Detail（Patch Viewer + 测试结果表 + 日志 + 轨迹） · **P0 · C:L · E:2d**
-### E7-T4 Leaderboard（多指标排序 + 成本-解决率散点 + 分面） · **P0 · C:M · E:1.5d**
-### E7-T5 Benchmarks / Benchmark Detail / Task Detail · **P1 · C:M · E:1.5d**
+### E7-T1 前端骨架 + API 类型生成 + 布局导航 ✅ 已于 2026-09-21 完成 · **P0 · C:M · E:1d**
+### E7-T2 Runs / Run Detail（进度、分组网格、取消重试） ✅ 已于 2026-09-21 完成 · **P0 · C:M · E:1.5d**
+### E7-T3 Task Run Detail（Patch Viewer + 测试结果表 + 日志 + 轨迹） ✅ 已于 2026-09-21 完成 · **P0 · C:L · E:2d**
+### E7-T4 Leaderboard（多指标排序 + 成本-解决率散点 + 分面） ✅ 已于 2026-09-21 完成 · **P0 · C:M · E:1.5d**
+### E7-T5 Benchmarks / Benchmark Detail / Task Detail ✅ 已于 2026-09-21 完成 · **P1 · C:M · E:1.5d**
+- **实际交付**（五张卡一起，队友做页面、2026-09-21 复核合入）：`frontend/src/app/` 下 9 个页面
+  （`/`、`/benchmarks`、`/benchmarks/[slug]`、`/tasks/[taskId]`、`/runs`、`/runs/[id]`、
+  `/task-runs/[id]`、`/agents`、`/leaderboard`）+ 18 个组件；展示语义（枚举翻译、格子判定、
+  排行榜数字怎么读、门禁证据怎么解析）集中在 `src/lib/*.ts` 的纯函数里，四个断言脚本
+  （`npm run check`，169 条）钉住。轮询不用 WebSocket（Run Detail 3s、列表 10s，只在有活着的实验时开）。
+- **复核时改掉的**（2026-09-21，连真实库跑 17 个 URL 抓出来的）：
+  ① 数据集列表链接不带版本，`benchmark-cn-v1@v1` 点进去打开 v2、`swebench@v1` 打开 v3
+  （`/api/benchmark-sets/{slug}` 不给 `version` 就取最新已发布）——列表、详情、排行榜链接全部带 `version`；
+  ② 日志前 1500 行平铺把 `/task-runs/2612` 撑到 31,511 像素，"Agent 轨迹"和"失败归因"在三万像素之下——
+  日志/补丁/轨迹/用例表全部 `max-h-[70vh]` 内滚，单题页 P2P（click 单题 599 条）同理；
+  ③ 表格短列折行（状态"已/完/成"竖排、语言"中/文"）——`whitespace-nowrap` + 容器横向滚动；
+  ④ 管理员令牌原来是构建期 `NEXT_PUBLIC_ADMIN_TOKEN`（打进 JS，而且 compose 只传 `NEXT_PUBLIC_API_BASE`，
+  部署环境写按钮一律 401）——改成运行时输入、存 sessionStorage（`lib/admin-token.ts`），和 `/review` 共用；
+  ⑤ 排行榜加数据集下拉（原来从侧栏进只能看后端默认那版）；⑥ 逐题记录按后端单页上限翻页拉全，不再赌 200 够用；
+  ⑦ "复制补丁"在非 HTTPS 下兜底到 `execCommand`；⑧ issue 正文按 Markdown 渲染（react-markdown，不渲染原始 HTML）；
+  ⑨ 实验列表显示 `dirty` / 已排除标记。
+- **顺带改了后端**：排行榜每题成本"有一次报不出就 None"放宽为下界（`cost_lower_bound`），
+  细账在 `07-platform-architecture.md` §14.5 第五条；不改判定、不碰冻结件。
+- **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
+  归因结果在单题运行页只留了一段说明——后端没有归因端点（E7-T6 的活）。
 ### E7-T6 Failure Analysis（分布图/热力图/Top 案例） · **P1 · C:M · E:1.5d**
 ### E7-T7 Human Review 页 · **P1 · C:M · E:1.5d**
 ### E7-T8 Dashboard · **P1 · C:S · E:0.5d**

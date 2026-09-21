@@ -103,6 +103,8 @@ class AgentSummary(ReportModel):
     task_outcome_flip_rate: Decimal | None
     cost_usd_total: Decimal
     cost_per_task: Decimal | None
+    #: `cost_per_task` 是下界（有 attempt 报不出成本）。渲染时数字前加 "≥"。
+    cost_lower_bound: bool
     cost_reported_attempts: int
     cost_estimated_attempts: int
     cost_unavailable_attempts: int

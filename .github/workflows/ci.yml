@@ -91,6 +91,12 @@ jobs:
         working-directory: frontend
         run: npm run typecheck
 
+      # 展示语义的断言脚本（src/lib/*.ts 的纯函数）：判错了页面照常渲染、只是数字安静地错，
+      # 所以单独钉住；零额外依赖，不用起服务
+      - name: 展示语义断言
+        working-directory: frontend
+        run: npm run check
+
       - name: 生产构建
         working-directory: frontend
         run: npm run build

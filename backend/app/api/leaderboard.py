@@ -73,9 +73,13 @@ class LeaderboardRowOut(BaseModel):
     resolved_mean: Decimal
 
     cost_usd_total: Decimal
+    #: 一次都报不出成本时是 null；部分报不出时是下界（见 `cost_lower_bound`）。
     cost_per_task: Decimal | None
+    #: `cost_per_task` 是下界：有 attempt 报不出成本，只加了报得出的部分。
+    #: 前端要标 "≥"，散点图画成空心点，不能和完整成本一样读。
+    cost_lower_bound: bool
     #: 成本来源构成（协议纪律 3）。`cost_unavailable_attempts` 大于 0 时，
-    #: 上面那个金额是**偏低的** —— 前端要显示"成本不可用"而不是显示 0。
+    #: 上面那个金额是**偏低的** —— 前端要说出来而不是显示 0。
     cost_reported_attempts: int
     cost_estimated_attempts: int
     cost_unavailable_attempts: int
@@ -214,6 +218,7 @@ def _row_out(row: agg.LeaderboardRow) -> LeaderboardRowOut:
         resolved_mean=row.resolved_mean,
         cost_usd_total=row.cost_usd_total,
         cost_per_task=row.cost_per_task,
+        cost_lower_bound=row.cost_lower_bound,
         cost_reported_attempts=row.cost_reported_attempts,
         cost_estimated_attempts=row.cost_estimated_attempts,
         cost_unavailable_attempts=row.cost_unavailable_attempts,

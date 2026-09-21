@@ -36,6 +36,14 @@ def _money(value: Decimal | None) -> str:
     return f"${value:.4f}"
 
 
+def _per_task_cost(agent: AgentSummary) -> str:
+    """每题成本；是下界时前面加 "≥"，读的人一眼知道真实数只会更高。"""
+    text = _money(agent.cost_per_task)
+    if agent.cost_per_task is not None and agent.cost_lower_bound:
+        return f"≥ {text}"
+    return text
+
+
 def _seconds(value: float | None) -> str:
     return _MISSING if value is None else f"{value:.2f}s"
 
@@ -240,7 +248,7 @@ def render_markdown(report: ReportData) -> str:
                     agent.label,
                     agent.dataset_label,
                     _pct(agent.resolve_rate_mean),
-                    _money(agent.cost_per_task),
+                    _per_task_cost(agent),
                     _money(agent.cost_distribution.p50_usd),
                     _money(agent.cost_distribution.p95_usd),
                     _cost_note(agent),
@@ -415,7 +423,7 @@ def _scatter(report: ReportData) -> str:
         color = ("#36c5b0", "#ffb454", "#8da2fb", "#f07178")[index % 4]
         circles.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" fill="{color}"><title>'
-            f"{escape(agent.label)} × {escape(agent.dataset_label)}：{escape(_money(agent.cost_per_task))} / {escape(_pct(agent.resolve_rate_mean))}"
+            f"{escape(agent.label)} × {escape(agent.dataset_label)}：{escape(_per_task_cost(agent))} / {escape(_pct(agent.resolve_rate_mean))}"
             "</title></circle>"
             f'<text x="{x + 11:.1f}" y="{y + 4:.1f}">{escape(agent.label)} · {escape(agent.dataset_label)}</text>'
         )
@@ -492,7 +500,7 @@ def render_html(report: ReportData) -> str:
             a.label,
             a.dataset_label,
             _pct(a.resolve_rate_mean),
-            _money(a.cost_per_task),
+            _per_task_cost(a),
             _money(a.cost_distribution.p50_usd),
             _money(a.cost_distribution.p95_usd),
             _cost_note(a),

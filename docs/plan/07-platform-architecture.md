@@ -485,11 +485,25 @@ claude-code 走中转端点，44 次全报 `cost_source=unavailable`（E3-T5 定
 `total_cost_usd` 因此是 0。用"已知部分 ÷ 全部题数"算，每题就是 $0，于是它以"免费"夺冠。
 而 §18.6 第七节手算出来它是 **$0.042/题，比 aider 贵 2.4 倍**。
 
-改法：**只要有一次 attempt 报不出成本，`cost_per_task` 就是 `None`**，排序时垫到最后。
+改法（第一版）：**只要有一次 attempt 报不出成本，`cost_per_task` 就是 `None`**，排序时垫到最后。
 金额本身照样放在 `cost_usd_total` 里，配上 reported / estimated / unavailable
 三个计数，看的人自己判断那笔钱有多少水分（协议纪律 3 要求三种来源区分显示）。
 
 这不是一个边角情况：库里两个真参赛者，有一个就是全程报不出成本。
+
+**2026-09-21 放宽为"下界"**（E7 前端页面接上真实数据时发现）：E10-T4 两轮里 claude-code
+84 次 attempt 缺 2 次（两次 `AGENT_AUTH_ERROR` 的重试，没花钱）、aider 缺 2 次（两次
+`AGENT_TIMEOUT`，被平台掐掉、没来得及报），按第一版规则三个参赛者两个没有每题成本、
+散点图只剩一个点 —— 为 2/84 把整列抹掉，比给一个标明"只会更高"的下界更误导。现在的规则：
+
+- **一次都报不出**（`reported + estimated == 0` 且 `unavailable > 0`）：仍是 `None`，垫底；
+- **部分报不出**：`cost_per_task = 已知部分 ÷ 全部题数`，并置 `cost_lower_bound = true`；
+  按成本排名时这样的行排在成本完整的行**后面**（`_sort_key` 的首键），
+  "报不出成本 ≠ 最便宜"这条仍然成立；
+- 前端把下界显示成 "≥ $x"，散点图画成空心点；报告生成器同样加 "≥"。
+
+代码在 `app/analytics/leaderboard.py:_cost_per_task`，真值在 `tests/unit/test_leaderboard.py`
+（`test_partially_unavailable_cost_is_a_flagged_lower_bound` 等四条）。
 
 ### 六、补丁正文在另一张表里，端点要跨两张表找
 

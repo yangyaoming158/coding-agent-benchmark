@@ -104,7 +104,9 @@ def sample_report() -> ReportData:
                 task_outcome_flip_count=3,
                 task_outcome_flip_rate=Decimal("0.0732"),
                 cost_usd_total=Decimal("1.25"),
-                cost_per_task=None,
+                # 12 次报不出成本：每题成本是下界（1.25 / 82），不是 None
+                cost_per_task=Decimal("0.0152"),
+                cost_lower_bound=True,
                 cost_reported_attempts=20,
                 cost_estimated_attempts=50,
                 cost_unavailable_attempts=12,
@@ -203,9 +205,12 @@ def test_three_formats_share_semantics_and_keep_missing_cost_visible() -> None:
     html = render_html(report)
 
     assert body["schema_version"] == "2.0"
-    assert body["agents"][0]["cost_per_task"] is None
+    assert body["agents"][0]["cost_per_task"] == "0.0152"
+    assert body["agents"][0]["cost_lower_bound"] is True
     for output in (markdown, html):
         assert "reported 20 / estimated 50 / unavailable 12" in output
+        # 下界要带 "≥"，不能长得和完整成本一样
+        assert "≥ $0.0152" in output
         assert "不可用" in output
         assert "$0.0000" not in output
         assert "逐题翻转率" in output
