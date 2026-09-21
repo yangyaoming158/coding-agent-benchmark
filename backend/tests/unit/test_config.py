@@ -42,7 +42,7 @@ def _fake_secret(prefix: str, body: str) -> str:
 FAKE_KEY = _fake_secret("sk-ant-", "api03-FAKEFAKEFAKEFAKEFAKEFAKEFAKE")
 
 #: 别名和字段名对不上的那几个。
-ALIASES = ("BENCH_DATABASE_URL", "BENCH_DEV_FRONTEND_ORIGINS")
+ALIASES = ("BENCH_DATABASE_URL", "BENCH_DEV_FRONTEND_ORIGINS", "BENCH_BLIND_REVIEW")
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +100,17 @@ def test_blank_secret_becomes_none(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = make_settings()
     assert settings.openai_api_key is None
     assert settings.github_token is None
+
+
+def test_blind_review_switch_defaults_off_and_blank_means_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """盲检开关默认关；`.env.example` 里留空也算关，不能把 api 拦在启动上。"""
+    assert make_settings().blind_review is False
+    monkeypatch.setenv("BENCH_BLIND_REVIEW", "")
+    assert make_settings().blind_review is False
+    monkeypatch.setenv("BENCH_BLIND_REVIEW", "true")
+    assert make_settings().blind_review is True
 
 
 def test_secret_not_exposed_in_repr(monkeypatch: pytest.MonkeyPatch) -> None:

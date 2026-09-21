@@ -311,6 +311,8 @@ curl -s http://localhost:8000/api/task-runs/4321/artifacts/AGENT_STDOUT # 制品
 ```
 
 "某个 Agent 在某道题上为什么失败"的完整证据 = 最后三条：AI 的补丁（`AGENT_NORMALIZED` 是过滤掉测试文件改动之后真正打上去的那份，`AGENT_RAW` 是它原始交的）、逐条用例、日志和轨迹。
+`/api/task-runs/{id}` 的 JSON 里还带 `failure_attribution`（§8.1 的自动归因：类别、哪一层判的、置信度、证据、中文理由；没有结论是 `null`），
+前端单题页的"失败归因"区块就是它。盲检开关开着时它一律是 `null` 且 `attribution_withheld=true`，见 §8.2。
 
 Worker 日志：`make compose-logs SERVICE=worker`（开发模式看 `make worker` 的终端）。两条要认识的告警：
 `container_sigkilled_without_oom_flag`（容器被 137 杀掉但没有 OOM 标志，并发下有 3–5% 概率是漏报的内存超限）和 `startup_reaped_containers`（另一个 Worker 起来了，它把别人的容器当孤儿杀了）。
@@ -390,6 +392,12 @@ python -m cli.attribute llm --limit 1                # **花钱**。首次付费
 打开前端 `http://localhost:3000/review`，输入自己的名字、管理员令牌（`.env` 的 `ADMIN_TOKEN`）和随机种子，
 左边是分层抽出来的待标注队列（每个自动类别至少 5 条、总计 50 条，固定种子每次抽出同一批），右边三栏：题面与官方补丁摘要、AI 的补丁与轨迹、逐条用例。
 选 F1～F8 / N1 / N2，提交。**提交之前看不到机器给的答案**（这就是"盲"），提交后才显示对照。两人独立标，不一致由第三人仲裁。
+
+**抽检前先打开盲检开关。** 单题页 `/task-runs/{id}` 和它背后的 `GET /api/task-runs/{id}` 不要令牌、平时直接显示机器归因，
+而队列里就写着 `task_run_id`——不藏的话标注的人在地址栏敲一下就能提前看到答案。`.env` 里设 `BENCH_BLIND_REVIEW=true`、重启 api
+（开发模式重起 `make dev-api`；compose 是 `make compose-down && make compose-up`），这个接口就把 `failure_attribution` 置空、
+标 `attribution_withheld=true`，页面显示"盲检进行中"。标完改回 `false` 再重启。`/review` 的三个接口不受它影响，它们自己有"提交前不返回"的规则。
+报告里要写明抽检是在开关打开的状态下做的（`06-judge-attribution.md` §12.5 的要求）。
 
 HTTP 同款：`GET /api/review/queue?reviewer=你的名字&seed=20260920&target_size=50`、`GET /api/review/{task_run_id}`、`POST /api/review/{task_run_id}`，都要 `X-Bench-Token` 头（复核详情含官方补丁摘要，不能开放读）。
 

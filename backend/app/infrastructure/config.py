@@ -252,6 +252,15 @@ class Settings(BaseSettings):
     sandbox_http_proxy: str | None = None
     admin_token: SecretStr | None = None
 
+    # ── 盲检期间藏起机器归因（E6-T3 / E7-T3）──
+    #: 为 true 时，开放读接口 `GET /api/task-runs/{id}` 不返回 `failure_attribution`
+    #: （置空并标 `attribution_withheld=true`）。人工抽检那几天打开：盲检队列里就写着
+    #: task_run_id，标注的人在地址栏敲一下单题页就能提前看到答案，E6-T3 AC 4
+    #: 说的"不能只靠前端隐藏"对这一页同样成立。标完关掉，改完要重启 api。
+    #: 没做成"按 human_reviews 自动推断"：批次刚建、还没人提交时库里没有任何痕迹，
+    #: 正好在最需要盲的时候露答案。
+    blind_review: bool = Field(default=False, alias="BENCH_BLIND_REVIEW")
+
     # ── 日志 ──
     log_level: str = "INFO"
     #: console 带颜色适合盯着终端看，json 适合被工具消费。开发默认 console，
@@ -290,6 +299,16 @@ class Settings(BaseSettings):
         更自然，`.env.example` 里写的也是小写。在这里转一次，省得两边打架。
         """
         return value.upper() if isinstance(value, str) else value
+
+    @field_validator("blind_review", mode="before")
+    @classmethod
+    def _blank_blind_review_is_off(cls, value: Any) -> Any:
+        """`.env` 里 `BENCH_BLIND_REVIEW=` 留空等于关。
+
+        `.env.example` 的习惯是每一项都列出来、没用的留空；空串解析不成 bool 会把
+        api 拦在启动上，而这个开关平时就该是关的。
+        """
+        return False if isinstance(value, str) and not value.strip() else value
 
     @field_validator("artifact_local_root", "mirror_root", "workspace_root")
     @classmethod

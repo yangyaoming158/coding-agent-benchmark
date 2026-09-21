@@ -266,7 +266,7 @@ Agent 容器走桥接网络、环境变量按白名单注入（`AGENT_ENV_ALLOWL
 | 题 | `GET /api/tasks`（`set` / `state` / `repo` / `difficulty` / `language` / `q` 过滤）、`GET /api/tasks/{task_id}`（不透出 `gold_patch_uri` 和 `test_patch_paths`） | |
 | Agent | `GET /api/agents`、`GET /api/agent-configs` | |
 | 实验 | `GET /api/runs`、`GET /api/runs/{id}`、`GET /api/runs/{id}/task-runs`、**`POST /api/runs`**、**`POST /api/runs/{id}/cancel`**、**`POST /api/runs/{id}/retry-failed`** | ✔ |
-| 单次执行 | `GET /api/task-runs/{id}`、`GET /api/task-runs/{id}/tests`、`GET /api/task-runs/{id}/artifacts/{kind}`（流式返回制品；kind 收制品种类和 `AGENT_RAW` / `AGENT_NORMALIZED` 两套枚举） | |
+| 单次执行 | `GET /api/task-runs/{id}`（带 `failure_attribution`；`BENCH_BLIND_REVIEW=true` 时置空、标 `attribution_withheld`，盲检期间用）、`GET /api/task-runs/{id}/tests`、`GET /api/task-runs/{id}/artifacts/{kind}`（流式返回制品；kind 收制品种类和 `AGENT_RAW` / `AGENT_NORMALIZED` 两套枚举） | |
 | 排行榜 | `GET /api/leaderboard`（`set` / `version` / `metric` / `facet`；响应带准入规则原文和被排除实验） | |
 | 人工复核 | `GET /api/review/queue`、`GET /api/review/{task_run_id}`、**`POST /api/review/{task_run_id}`** | ✔（GET 也要令牌） |
 

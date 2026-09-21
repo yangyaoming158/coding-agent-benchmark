@@ -2,7 +2,8 @@
 
 §16.2 的 Task Run Detail 页是整个平台的核心用户旅程 ——
 "任何页面在 3 次点击内能到达某个 Agent 在某道题上为什么失败"（§16.3）。
-这三个端点就是那一页的全部数据源（归因结果除外，那跟着 E6 走）。
+这三个端点就是那一页的全部数据源。归因结果（E6 的 `failure_attributions`）
+2026-09-21 起也从详情里带出来，见下面"归因随详情走，但盲检期间藏起来"。
 
 ## 制品不塞进 JSON（AC-6）
 
@@ -35,6 +36,20 @@
 所以端点按名字去两张表里找，找不到才 404。不这么做的话，
 §16.2 的 Task Run Detail 页那个 **Patch Viewer 根本取不到 diff 正文** ——
 详情接口只给补丁的统计（AC-6：正文不进 JSON），正文只能从这里拿。
+
+## 归因随详情走，但盲检期间藏起来
+
+`failure_attributions` 上 `evaluation_task_run_id` 是唯一约束，一次执行最多一条结论，
+所以详情里是单数的 `failure_attribution`，没有就是 None（修好了的、规则分不出又没跑
+LLM 的都是 None，前端按 `agent_outcome` 区分这两种"没有"）。`raw_response`（低置信三票
+的原始回答）不透出：大而没人看，页面要的是类别、置信度、证据和中文理由。
+
+**这是个不要 token 的开放读接口**，而 E6-T3 的盲检要求标注者提交前看不到机器答案
+（AC 4："不能只靠前端隐藏"）。盲检队列里就写着 task_run_id，在地址栏敲一下单题页
+就能看到。所以配置 `BENCH_BLIND_REVIEW=true` 时，这里把 `failure_attribution` 置空、
+并标 `attribution_withheld=true` —— 字段在 JSON 里根本不存在内容，不是前端藏起来的。
+抽检那几天打开，标完关掉，改完重启 api。`/api/review/*` 那三个端点不受它影响，
+它们自己有"提交前不返回"的规则。
 """
 
 from __future__ import annotations
@@ -57,14 +72,19 @@ from app.domain.enums import (
     AgentOutcome,
     ArtifactKind,
     ArtifactOwnerType,
+    AttributionStage,
+    AttributionStatus,
     CostSource,
+    FailureCategory,
     InfraOutcome,
     LifecycleStatus,
     PatchKind,
     TestRole,
     TestStatus,
 )
+from app.infrastructure.config import get_settings
 from app.infrastructure.models.artifact import Artifact
+from app.infrastructure.models.attribution import FailureAttribution
 from app.infrastructure.models.benchmark import BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationTaskRun, PatchArtifact, TestResult
 from app.storage import ArtifactNotFoundError, create_artifact_store, key_from_uri
@@ -122,6 +142,34 @@ class ArtifactSummary(BaseModel):
     #: 原始内容的字节数（不是压缩后占的磁盘）。
     size_bytes: int
     sha256: str
+    created_at: datetime
+
+
+class FailureAttributionSummary(BaseModel):
+    """这次失败"为什么没修好"的自动结论（`failure_attributions` 一行）。
+
+    协议 C-40：它只解释原因，**不回写判定**。`agent_outcome` 说的是"修没修好"，
+    这里说的是"没修好是哪一类"，两者独立。
+    """
+
+    #: 哪一层给的结论：RULE 规则、LLM 大模型、HUMAN 人工。枚举原样透出（AC-10）。
+    stage: AttributionStage
+    #: F1～F8 是 AI 的问题，N1 平台故障，N2 题目缺陷（`06-judge-attribution.md` §12.1）。
+    category: FailureCategory
+    #: 候选解释，只有 LLM 层会给。
+    secondary_category: FailureCategory | None
+    #: 0～1。规则层没有置信度（它是确定性判定），这里是 None，**不是 0**。
+    confidence: Decimal | None
+    #: OK 可信；NEEDS_HUMAN 自动归因给不出可信结论；FAILED 归因本身失败。
+    status: AttributionStatus
+    judge_model: str | None
+    #: 提示词指纹。换了提示词，历史结果就不再可比，靠它能查出来。
+    prompt_hash: str | None
+    #: 支撑结论的证据。规则层是 `{rule, facts}`，
+    #: LLM 层是 `{citations: [{source, quote}], vote_categories}`。
+    #: 形状随层级不同，原样透出，翻译是展示层的事。
+    evidence: dict[str, Any]
+    reasoning_zh: str | None
     created_at: datetime
 
 
@@ -194,6 +242,13 @@ class TaskRunDetail(BaseModel):
     patches: list[PatchSummary]
     artifacts: list[ArtifactSummary]
 
+    #: 自动归因。None 有两种意思：修好了没有失败，或者失败了但还没有结论
+    #: （规则分不出、LLM 没跑）；前端按 `agent_outcome` 区分。
+    failure_attribution: FailureAttributionSummary | None
+    #: 为 true 时上面那个 None 是**被藏起来的**（配置 `BENCH_BLIND_REVIEW`，盲检期间），
+    #: 不代表没有结论。见模块开头最后一节。
+    attribution_withheld: bool
+
 
 class TestResultRow(BaseModel):
     """一条用例的结果 —— 判定的证据。"""
@@ -221,11 +276,22 @@ def _load(session: SessionDep, task_run_id: int) -> tuple[EvaluationTaskRun, str
 
 @router.get("/{task_run_id}", response_model=TaskRunDetail, responses=READ_ERROR_RESPONSES)
 def get_task_run(task_run_id: int, session: SessionDep) -> TaskRunDetail:
-    """一次执行的详情，带补丁统计和制品清单。
+    """一次执行的详情，带补丁统计、制品清单和自动归因。
 
-    三条 SQL（本体 + 补丁 + 制品），**条数不随制品数量增长**（AC-7）。
+    四条 SQL（本体 + 补丁 + 制品 + 归因），**条数不随制品数量增长**（AC-7）。
+    盲检开关开着时归因那条不发，直接置空。
     """
     task_run, task_id, issue_title = _load(session, task_run_id)
+    withheld = get_settings().blind_review
+    attribution = (
+        None
+        if withheld
+        else session.execute(
+            sa.select(FailureAttribution).where(
+                FailureAttribution.evaluation_task_run_id == task_run_id
+            )
+        ).scalar_one_or_none()
+    )
     patches = (
         session.execute(
             sa.select(PatchArtifact)
@@ -293,6 +359,12 @@ def get_task_run(task_run_id: int, session: SessionDep) -> TaskRunDetail:
         filtered_change_reasons=task_run.filtered_change_reasons,
         patches=[PatchSummary.model_validate(p, from_attributes=True) for p in patches],
         artifacts=[ArtifactSummary.model_validate(a, from_attributes=True) for a in artifacts],
+        failure_attribution=(
+            FailureAttributionSummary.model_validate(attribution, from_attributes=True)
+            if attribution is not None
+            else None
+        ),
+        attribution_withheld=withheld,
     )
 
 
@@ -439,6 +511,7 @@ def _chunks(stream: IO[bytes]) -> Iterator[bytes]:
 __all__ = [
     "AgentPatchKind",
     "ArtifactSummary",
+    "FailureAttributionSummary",
     "PatchSummary",
     "TaskRunDetail",
     "TestResultRow",

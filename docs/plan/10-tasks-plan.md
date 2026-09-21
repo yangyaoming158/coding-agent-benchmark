@@ -1488,6 +1488,15 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   细账在 `07-platform-architecture.md` §14.5 第五条；不改判定、不碰冻结件。
 - **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
   归因结果在单题运行页只留了一段说明——后端没有归因端点（E7-T6 的活）。
+- **单题页接上归因**（2026-09-21 晚，E7-T3 的补丁）：`GET /api/task-runs/{id}` 多带 `failure_attribution`
+  （`failure_attributions` 一行：类别、层级、置信度、状态、证据、中文理由；`raw_response` 不透出）和
+  `attribution_withheld`，四条 SQL、条数不随制品数增长。`/task-runs/[id]` 的"失败归因"区块按证据形状渲染
+  （规则层 = 规则名 + 判据表，LLM 层 = 逐字引文 + 投票，认不出的原样 JSON），类别中文名和 `/review` 共用
+  `lib/display.ts` 一份。**盲检怎么保**：这是个开放读接口，队列里就写着 task_run_id，所以加了后端开关
+  `BENCH_BLIND_REVIEW`（默认关）——开着时该接口把归因置空并标 `attribution_withheld=true`，字段内容根本不出后端；
+  没做成按 `human_reviews` 自动推断，因为批次刚建、还没人提交时库里没有任何痕迹。细账在
+  `07-platform-architecture.md` §16.5。实测：#2562（F6，规则层）显示类别 + 判据，#2544（规则分不出、没跑 LLM）
+  显示"还没有归因结论"，开关开着时 JSON 里搜不到类别字符串。
 ### E7-T6 Failure Analysis（分布图/热力图/Top 案例） · **P1 · C:M · E:1.5d**
 ### E7-T7 Human Review 页 · **P1 · C:M · E:1.5d**
 ### E7-T8 Dashboard · **P1 · C:S · E:0.5d**

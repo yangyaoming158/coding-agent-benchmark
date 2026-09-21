@@ -19,7 +19,10 @@ from app.domain.enums import (
     ArtifactBackend,
     ArtifactKind,
     ArtifactOwnerType,
+    AttributionStage,
+    AttributionStatus,
     CostSource,
+    FailureCategory,
     InfraOutcome,
     LifecycleStatus,
     PatchKind,
@@ -28,6 +31,7 @@ from app.domain.enums import (
 )
 from app.evaluation.orchestrator import create_runs
 from app.infrastructure.models.artifact import Artifact
+from app.infrastructure.models.attribution import FailureAttribution
 from app.infrastructure.models.evaluation import EvaluationTaskRun, PatchArtifact, TestResult
 from tests.integration.factories import provenance_for, seed_minimal, wipe
 
@@ -114,6 +118,109 @@ def test_task_run_detail_keeps_the_three_status_fields_separate(
     assert body["agent_outcome"] == "UNRESOLVED"
     assert body["f2p_passed"] == 1
     assert body["f2p_total"] == 2
+
+
+def test_task_run_detail_without_attribution_says_so_without_hiding(
+    client: TestClient, finished_task_run: EvaluationTaskRun
+) -> None:
+    """没有归因行时 `failure_attribution` 是 null，而且 `attribution_withheld` 是 false。
+
+    两个字段要分开：null 有两种意思（修好了 / 还没结论），"被藏起来"是第三种，
+    混在一个 null 里前端就没法告诉人"现在是盲检期间"。
+    """
+    body = client.get(f"/api/task-runs/{finished_task_run.id}").json()
+
+    assert body["failure_attribution"] is None
+    assert body["attribution_withheld"] is False
+
+
+def test_task_run_detail_carries_the_attribution_but_not_the_raw_votes(
+    client: TestClient, session: Session, finished_task_run: EvaluationTaskRun
+) -> None:
+    """归因随详情走：类别、置信度、证据、理由都在，三票原始回答不透出。
+
+    规则层的 `confidence` 是 None 而不是 0 —— 规则是确定性判定，"没有置信度"
+    和"置信度为零"是两回事，前端要按 None 显示"规则判定"。
+    """
+    session.add(
+        FailureAttribution(
+            evaluation_task_run_id=finished_task_run.id,
+            stage=AttributionStage.LLM,
+            category=FailureCategory.F4_INCORRECT_LOGIC,
+            secondary_category=FailureCategory.F3_INCOMPLETE_FIX,
+            confidence=0.875,
+            judge_model="fake/judge",
+            prompt_hash="a" * 64,
+            evidence={
+                "citations": [{"source": "patch", "quote": "return x - 1"}],
+                "vote_categories": ["F4_INCORRECT_LOGIC"],
+            },
+            reasoning_zh="改对了位置，但边界条件仍然错。",
+            raw_response={"votes": [{"vote_index": 0, "content": "{...}"}]},
+            status=AttributionStatus.OK,
+        )
+    )
+    session.commit()
+
+    body = client.get(f"/api/task-runs/{finished_task_run.id}").json()
+
+    attribution = body["failure_attribution"]
+    assert attribution["stage"] == "LLM"
+    assert attribution["category"] == "F4_INCORRECT_LOGIC"
+    assert attribution["secondary_category"] == "F3_INCOMPLETE_FIX"
+    assert attribution["confidence"] == "0.875"
+    assert attribution["status"] == "OK"
+    assert attribution["judge_model"] == "fake/judge"
+    assert attribution["evidence"]["citations"] == [{"source": "patch", "quote": "return x - 1"}]
+    assert attribution["reasoning_zh"] == "改对了位置，但边界条件仍然错。"
+    assert "raw_response" not in attribution
+    assert body["attribution_withheld"] is False
+
+    # 判定字段一个没动：归因只解释原因，不回写结论（协议 C-40）
+    assert body["agent_outcome"] == "UNRESOLVED"
+
+
+def test_blind_review_switch_withholds_the_attribution_from_the_open_endpoint(
+    client: TestClient,
+    session: Session,
+    finished_task_run: EvaluationTaskRun,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`BENCH_BLIND_REVIEW=true` 时，开放读接口的 JSON 里没有归因内容，只有一个"被藏起来"的标记。
+
+    E6-T3 AC 4 的"不能只靠前端隐藏"对这一页同样成立：盲检队列里写着 task_run_id，
+    标注的人在地址栏敲一下就到这儿了。藏要藏在后端，而且要说明是藏的，不是没有。
+    """
+    from app.infrastructure.config import reset_settings_cache
+
+    session.add(
+        FailureAttribution(
+            evaluation_task_run_id=finished_task_run.id,
+            stage=AttributionStage.RULE,
+            category=FailureCategory.F6_REGRESSION,
+            evidence={"rule": "regression", "facts": {"p2p": "2/3"}},
+            status=AttributionStatus.OK,
+        )
+    )
+    session.commit()
+
+    monkeypatch.setenv("BENCH_BLIND_REVIEW", "true")
+    reset_settings_cache()
+    try:
+        withheld = client.get(f"/api/task-runs/{finished_task_run.id}").json()
+    finally:
+        monkeypatch.delenv("BENCH_BLIND_REVIEW")
+        reset_settings_cache()
+
+    assert withheld["failure_attribution"] is None
+    assert withheld["attribution_withheld"] is True
+    assert "F6_REGRESSION" not in str(withheld)
+
+    # 开关一关，同一条记录立刻可见 —— 证明上面那个 None 是藏的，不是丢了
+    visible = client.get(f"/api/task-runs/{finished_task_run.id}").json()
+    assert visible["failure_attribution"]["category"] == "F6_REGRESSION"
+    assert visible["failure_attribution"]["confidence"] is None
+    assert visible["attribution_withheld"] is False
 
 
 def test_task_run_detail_carries_the_diagnostic_fields(
