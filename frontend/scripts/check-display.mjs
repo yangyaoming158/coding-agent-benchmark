@@ -57,6 +57,11 @@ try {
 
   const {
     cellVerdict,
+    evidenceView,
+    failureCategoryLabel,
+    failureCategoryTone,
+    FAILURE_CATEGORIES,
+    formatConfidence,
     formatCost,
     formatDuration,
     formatRate,
@@ -155,6 +160,49 @@ try {
   check("token 999", formatTokens(999), "999");
   check("token 12.4k", formatTokens(12_400), "12.4k");
   check("token 1.23M", formatTokens(1_234_567), "1.23M");
+
+  // ── 失败归因（E6 的类别与证据怎么显示）──
+  check("十个类别、协议编号顺序", FAILURE_CATEGORIES.length, 10);
+  check("F7 的中文名", failureCategoryLabel("F7_EMPTY_OR_INVALID_PATCH"), "F7 · 空补丁或无效补丁");
+  check("F 类是 AI 的锅（红）", failureCategoryTone("F4_INCORRECT_LOGIC"), "bad");
+  check("N1 不是 AI 的锅（黄）", failureCategoryTone("N1_INFRASTRUCTURE_FAILURE"), "warn");
+  check("N2 题目缺陷也不是 AI 的锅", failureCategoryTone("N2_TASK_DEFECT"), "warn");
+  // 规则层没有置信度：null 显示成"—"而不是 0%（0% 会被读成"完全不可信"）
+  check("置信度 null 不等于 0%", formatConfidence(null), "—");
+  check("置信度 0.875 → 88%", formatConfidence("0.875"), "88%");
+  check("置信度 1 → 100%", formatConfidence("1.000"), "100%");
+  check(
+    "规则层证据 → 规则名 + 判据表",
+    evidenceView({ rule: "regression", facts: { f2p: "4/4", p2p: "1067/1274", agent_outcome: "UNRESOLVED" } }),
+    {
+      kind: "rule",
+      rule: "regression",
+      facts: [["f2p", "4/4"], ["p2p", "1067/1274"], ["agent_outcome", "UNRESOLVED"]],
+    },
+  );
+  check(
+    "规则层的布尔判据转成字符串，不丢",
+    evidenceView({ rule: "empty_or_invalid_patch", facts: { raw_patch_empty: true } }),
+    { kind: "rule", rule: "empty_or_invalid_patch", facts: [["raw_patch_empty", "true"]] },
+  );
+  check(
+    "LLM 层证据 → 引文 + 投票",
+    evidenceView({
+      citations: [{ source: "patch", quote: "return x - 1" }],
+      vote_categories: ["F4_INCORRECT_LOGIC", "F4_INCORRECT_LOGIC"],
+    }),
+    {
+      kind: "citations",
+      citations: [{ source: "patch", quote: "return x - 1" }],
+      votes: ["F4_INCORRECT_LOGIC", "F4_INCORRECT_LOGIC"],
+    },
+  );
+  check("空 evidence → none", evidenceView({}), { kind: "none" });
+  check(
+    "认不出的形状 → 原样 JSON，不丢信息",
+    evidenceView({ note: "x" }),
+    { kind: "raw", json: JSON.stringify({ note: "x" }, null, 2) },
+  );
 
   // ── 轮询开关（决定一个跑完的页面还打不打后端）──
   check("QUEUED 要轮询", isLiveRun("QUEUED"), true);

@@ -791,6 +791,25 @@ API 类型：从 FastAPI 的 OpenAPI 用 `openapi-typescript` 生成，避免手
 只保存在当前 React 内存状态，不写 localStorage/sessionStorage。准确率、kappa 和混淆
 矩阵属于 E6-T4，本卡只保存计算所需的原始标签。
 
+## 16.5 单题页的归因区块与盲检开关（2026-09-21）
+
+§16.2 给 Task Run Detail 定的最后一项"归因结果"到 E7-T3 合入时还是一段说明文字，
+因为 §14.4 里没有归因端点。现在不另开端点：`GET /api/task-runs/{id}` 直接多带一个
+`failure_attribution`（`failure_attributions` 那一行的类别、层级、置信度、状态、证据、
+中文理由、模型和 prompt 指纹；`raw_response` 不透出）。表上 `evaluation_task_run_id`
+是唯一约束，所以是单数、可空。前端按 `evidence` 的形状渲染：规则层 `{rule, facts}`
+显示规则名和判据表，LLM 层 `{citations, vote_categories}` 显示逐字引文和投票，
+认不出的原样 JSON。类别的中文名和 `/review` 共用 `lib/display.ts` 一份。
+
+**这和 §14.6 的盲检是冲突的**：那三个端点要 token、提交前不返回自动归因，但单题页
+的接口是开放的，而盲检队列里就写着 task_run_id。处置是一个后端开关
+`BENCH_BLIND_REVIEW`（默认关）：开着时该接口把 `failure_attribution` 置空、并标
+`attribution_withheld=true`，字段内容根本不出后端，页面显示"盲检进行中"。抽检那几天
+打开，标完关掉，改完重启 api。**没有做成按 `human_reviews` 自动推断**"这道题正在被
+盲检"：批次不落表，刚建好、还没人提交时库里没有任何痕迹，正好在最需要盲的时候露答案；
+而且开放接口每次都要重算一遍分层抽样。开关要人动一下手，但没有空窗，
+和 §12.5 说的"提供开关可以关掉盲检，但报告里必须说明"是同一件事。
+
 ---
 
 # 17 Artifact Storage

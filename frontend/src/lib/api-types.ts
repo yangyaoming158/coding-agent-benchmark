@@ -273,9 +273,10 @@ export interface paths {
         };
         /**
          * Get Task Run
-         * @description 一次执行的详情，带补丁统计和制品清单。
+         * @description 一次执行的详情，带补丁统计、制品清单和自动归因。
          *
-         *     三条 SQL（本体 + 补丁 + 制品），**条数不随制品数量增长**（AC-7）。
+         *     四条 SQL（本体 + 补丁 + 制品 + 归因），**条数不随制品数量增长**（AC-7）。
+         *     盲检开关开着时归因那条不发，直接置空。
          */
         get: operations["get_task_run_api_task_runs__task_run_id__get"];
         put?: never;
@@ -749,6 +750,36 @@ export interface components {
             total: number;
             /** Resolve Rate */
             resolve_rate: string | null;
+        };
+        /**
+         * FailureAttributionSummary
+         * @description 这次失败"为什么没修好"的自动结论（`failure_attributions` 一行）。
+         *
+         *     协议 C-40：它只解释原因，**不回写判定**。`agent_outcome` 说的是"修没修好"，
+         *     这里说的是"没修好是哪一类"，两者独立。
+         */
+        FailureAttributionSummary: {
+            stage: components["schemas"]["AttributionStage"];
+            category: components["schemas"]["FailureCategory"];
+            secondary_category: components["schemas"]["FailureCategory"] | null;
+            /** Confidence */
+            confidence: string | null;
+            status: components["schemas"]["AttributionStatus"];
+            /** Judge Model */
+            judge_model: string | null;
+            /** Prompt Hash */
+            prompt_hash: string | null;
+            /** Evidence */
+            evidence: {
+                [key: string]: unknown;
+            };
+            /** Reasoning Zh */
+            reasoning_zh: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /**
          * FailureCategory
@@ -1504,6 +1535,9 @@ export interface components {
             patches: components["schemas"]["PatchSummary"][];
             /** Artifacts */
             artifacts: components["schemas"]["ArtifactSummary"][];
+            failure_attribution: components["schemas"]["FailureAttributionSummary"] | null;
+            /** Attribution Withheld */
+            attribution_withheld: boolean;
         };
         /**
          * TaskRunSummary

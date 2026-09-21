@@ -2,6 +2,7 @@
 
 import { use } from "react";
 import Link from "next/link";
+import { AttributionPanel } from "@/components/attribution-panel";
 import { DiffViewer } from "@/components/diff-viewer";
 import { LogViewer } from "@/components/log-viewer";
 import { ToneBadge } from "@/components/run-status";
@@ -35,8 +36,7 @@ const POLL_MS = 3000;
  * 3. **用例**：判定的原始依据，逐条 F2P / P2P
  * 4. **日志**：过程
  * 5. **轨迹**：它是怎么想的（工具调用序列）
- *
- * 归因结果（E6 的 `/api/attribution`）还没接 —— 端点不存在，这里留了一行说明。
+ * 6. **归因**：没修好是哪一类、凭什么（E6，随详情一起返回；盲检期间后端藏起来）
  */
 export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
   const { id } = use(props.params);
@@ -274,10 +274,12 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
 
       <section className="mt-8">
         <h2 className="text-sm font-semibold text-neutral-900">失败归因</h2>
-        <p className="mt-2 rounded-md border border-neutral-200 bg-white px-4 py-4 text-xs leading-relaxed text-neutral-500">
-          归因结果（“为什么没修好”的分类）跟着 E6 走，接口还没做。
-          现在能看的是归因要用的原料：上面的补丁、用例、日志和轨迹。
+        <p className="mt-1 text-xs text-neutral-500">
+          「为什么没修好」的分类。它只解释原因，不改上面的判定（协议 C-40）。
         </p>
+        <div className="mt-3">
+          <AttributionPanel detail={detail} />
+        </div>
       </section>
 
       {/* ── 制品清单：审计用 ── */}

@@ -6,6 +6,7 @@ import type { components } from "@/lib/api-types";
 import { MarkdownBody } from "@/components/markdown-body";
 import { useAdminToken } from "@/lib/admin-token";
 import { API_BASE, apiGet, apiPost, apiText } from "@/lib/api";
+import { FAILURE_CATEGORIES, failureCategoryLabel } from "@/lib/display";
 
 type ReviewQueue = components["schemas"]["ReviewQueueResponse"];
 type ReviewCase = components["schemas"]["ReviewCaseResponse"];
@@ -18,20 +19,8 @@ type ActiveSession = {
   seed: number;
 };
 
-const CATEGORY_LABELS: Record<FailureCategory, string> = {
-  F1_REQUIREMENT_MISUNDERSTANDING: "F1 · 误解需求",
-  F2_WRONG_FILE_LOCALIZATION: "F2 · 找错修改位置",
-  F3_INCOMPLETE_FIX: "F3 · 修复不完整",
-  F4_INCORRECT_LOGIC: "F4 · 实现逻辑错误",
-  F5_SYNTAX_OR_BUILD_ERROR: "F5 · 语法或构建错误",
-  F6_REGRESSION: "F6 · 引入回归",
-  F7_EMPTY_OR_INVALID_PATCH: "F7 · 空补丁或无效补丁",
-  F8_AGENT_TOOL_OR_BUDGET_FAILURE: "F8 · Agent 工具或预算问题",
-  N1_INFRASTRUCTURE_FAILURE: "N1 · 平台故障",
-  N2_TASK_DEFECT: "N2 · 题目本身有问题",
-};
-
-const CATEGORIES = Object.keys(CATEGORY_LABELS) as FailureCategory[];
+// 类别的中文名和顺序在 lib/display.ts 里，和单题页的"失败归因"区块共用一份
+const CATEGORIES = FAILURE_CATEGORIES;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "请求失败";
@@ -307,7 +296,7 @@ function AttributionReveal({ reviewCase }: { reviewCase: ReviewCase }) {
     <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-sm font-semibold text-emerald-950">自动归因对照</span>
-        <Badge tone="ok">{CATEGORY_LABELS[automatic.category]}</Badge>
+        <Badge tone="ok">{failureCategoryLabel(automatic.category)}</Badge>
         <Badge>{automatic.stage}</Badge>
         {automatic.confidence !== null && <Badge>置信度 {automatic.confidence}</Badge>}
       </div>
@@ -349,7 +338,7 @@ function ReviewForm({
       </div>
       {reviewCase.own_selected_category && (
         <p className="mt-3 text-sm text-neutral-700">
-          你的判断：{CATEGORY_LABELS[reviewCase.own_selected_category]}
+          你的判断：{failureCategoryLabel(reviewCase.own_selected_category)}
         </p>
       )}
       {!alreadySubmitted && reviewCase.progress.phase !== "COMPLETE" && (
@@ -364,7 +353,7 @@ function ReviewForm({
               <option value="">请选择</option>
               {CATEGORIES.map((item) => (
                 <option key={item} value={item}>
-                  {CATEGORY_LABELS[item]}
+                  {failureCategoryLabel(item)}
                 </option>
               ))}
             </select>

@@ -18,6 +18,9 @@ export type AgentOutcome = Schemas["AgentOutcome"];
 export type TestStatus = Schemas["TestStatus"];
 export type TestRole = Schemas["TestRole"];
 export type CostSource = Schemas["CostSource"];
+export type FailureCategory = Schemas["FailureCategory"];
+export type AttributionStage = Schemas["AttributionStage"];
+export type AttributionStatus = Schemas["AttributionStatus"];
 
 /** 界面上的颜色档。components 拿去映射成具体的 class，这里不带 Tailwind。 */
 export type Tone = "neutral" | "active" | "ok" | "warn" | "bad";
@@ -235,6 +238,147 @@ export function cellVerdict(run: VerdictInput): CellVerdict {
     default:
       return { bucket: "unresolved", tone: "neutral", label: "已结束（无判定）" };
   }
+}
+
+// ── 失败归因（E6，`06-judge-attribution.md` §12.1）────────────
+
+/**
+ * 十个失败类别的中文名。F1～F8 记在 AI 头上，N1 是平台故障，N2 是题目本身有问题。
+ * 顺序就是协议里的编号顺序，`/review` 的下拉框和单题页的标签都从这里取，
+ * 两处各写一份迟早对不上。
+ */
+const FAILURE_CATEGORY_TEXT: Record<FailureCategory, string> = {
+  F1_REQUIREMENT_MISUNDERSTANDING: "F1 · 误解需求",
+  F2_WRONG_FILE_LOCALIZATION: "F2 · 找错修改位置",
+  F3_INCOMPLETE_FIX: "F3 · 修复不完整",
+  F4_INCORRECT_LOGIC: "F4 · 实现逻辑错误",
+  F5_SYNTAX_OR_BUILD_ERROR: "F5 · 语法或构建错误",
+  F6_REGRESSION: "F6 · 引入回归",
+  F7_EMPTY_OR_INVALID_PATCH: "F7 · 空补丁或无效补丁",
+  F8_AGENT_TOOL_OR_BUDGET_FAILURE: "F8 · Agent 工具或预算问题",
+  N1_INFRASTRUCTURE_FAILURE: "N1 · 平台故障",
+  N2_TASK_DEFECT: "N2 · 题目本身有问题",
+};
+
+export const FAILURE_CATEGORIES = Object.keys(FAILURE_CATEGORY_TEXT) as FailureCategory[];
+
+export function failureCategoryLabel(category: FailureCategory): string {
+  return FAILURE_CATEGORY_TEXT[category];
+}
+
+/** F 类是 AI 的锅（红），N 类不是（黄）—— 和 `cellVerdict` 里"谁的问题"用同一套颜色。 */
+export function failureCategoryTone(category: FailureCategory): Tone {
+  return category.startsWith("N") ? "warn" : "bad";
+}
+
+const ATTRIBUTION_STAGE_TEXT: Record<AttributionStage, string> = {
+  RULE: "规则层",
+  LLM: "大模型层",
+  HUMAN: "人工",
+};
+
+export function attributionStageLabel(stage: AttributionStage): string {
+  return ATTRIBUTION_STAGE_TEXT[stage];
+}
+
+const ATTRIBUTION_STATUS_TEXT: Record<AttributionStatus, { label: string; tone: Tone }> = {
+  OK: { label: "可信", tone: "ok" },
+  NEEDS_HUMAN: { label: "待人工复核", tone: "warn" },
+  FAILED: { label: "归因失败", tone: "bad" },
+};
+
+export function attributionStatusText(status: AttributionStatus): {
+  label: string;
+  tone: Tone;
+} {
+  return ATTRIBUTION_STATUS_TEXT[status];
+}
+
+/**
+ * 置信度。后端给的是 0–1 的字符串；`null` 是"没有置信度"（规则层是确定性判定），
+ * 显示成"—"，**不是 0%** —— 0% 会被读成"完全不可信"，而规则层的准确率接近 100%。
+ */
+export function formatConfidence(confidence: string | null): string {
+  if (confidence === null) return "—";
+  const n = Number(confidence);
+  return Number.isFinite(n) ? `${Math.round(n * 100)}%` : confidence;
+}
+
+/** LLM 引文的六个来源段（`app/attribution/llm.py` 的 `EvidenceSource`）。 */
+const EVIDENCE_SOURCE_TEXT: Record<string, string> = {
+  issue: "issue 原文",
+  patch: "AI 补丁",
+  gold_summary: "官方补丁摘要",
+  test_log: "失败用例",
+  features: "结构化特征",
+  trajectory: "轨迹",
+};
+
+export function evidenceSourceLabel(source: string): string {
+  return EVIDENCE_SOURCE_TEXT[source] ?? source;
+}
+
+/** 规则层四条规则的名字（`app/attribution/rules.py` 的 `RuleName`）。 */
+const RULE_NAME_TEXT: Record<string, string> = {
+  regression: "F2P 全过、P2P 有挂 → 回归",
+  empty_or_invalid_patch: "补丁为空或打不上",
+  agent_fault: "Agent 自己出错（超时 / 崩溃 / 预算耗尽）",
+  infra_failure: "平台故障",
+};
+
+export function ruleNameLabel(rule: string): string {
+  return RULE_NAME_TEXT[rule] ?? rule;
+}
+
+/**
+ * `evidence` 这个 JSON 在两层归因里长得不一样，页面按形状渲染：
+ *
+ * - 规则层：`{ rule, facts: {...} }` → 规则名 + 判据键值表
+ * - LLM 层：`{ citations: [{ source, quote }], vote_categories }` → 引文列表 + 投票
+ * - 都不像（将来的人工层，或者字段变了）→ 原样 JSON，宁可难看也不丢信息
+ */
+export type EvidenceView =
+  | { kind: "rule"; rule: string; facts: [string, string][] }
+  | {
+      kind: "citations";
+      citations: { source: string; quote: string }[];
+      votes: string[];
+    }
+  | { kind: "raw"; json: string }
+  | { kind: "none" };
+
+export function evidenceView(evidence: Record<string, unknown>): EvidenceView {
+  const rule = evidence["rule"];
+  const facts = evidence["facts"];
+  if (typeof rule === "string" && facts !== null && typeof facts === "object") {
+    return {
+      kind: "rule",
+      rule,
+      facts: Object.entries(facts as Record<string, unknown>).map(([key, value]) => [
+        key,
+        typeof value === "string" ? value : JSON.stringify(value),
+      ]),
+    };
+  }
+  const citations = evidence["citations"];
+  if (Array.isArray(citations)) {
+    const votes = evidence["vote_categories"];
+    return {
+      kind: "citations",
+      citations: citations
+        .filter(
+          (item): item is { source?: unknown; quote?: unknown } =>
+            item !== null && typeof item === "object",
+        )
+        .map((item) => ({
+          source: typeof item.source === "string" ? item.source : "",
+          quote: typeof item.quote === "string" ? item.quote : JSON.stringify(item),
+        })),
+      votes: Array.isArray(votes) ? votes.map(String) : [],
+    };
+  }
+  if (Object.keys(evidence).length === 0) return { kind: "none" };
+  return { kind: "raw", json: JSON.stringify(evidence, null, 2) };
 }
 
 // ── 数字格式化 ──────────────────────────────────────────────
