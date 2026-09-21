@@ -13,7 +13,8 @@
     "check:task-detail": "node scripts/check-task-detail.mjs",
     "check:leaderboard": "node scripts/check-leaderboard.mjs",
     "check:tasks": "node scripts/check-tasks.mjs",
-    "check": "npm run -s check:display && npm run -s check:task-detail && npm run -s check:leaderboard && npm run -s check:tasks"
+    "check:dashboard": "node scripts/check-dashboard.mjs",
+    "check": "npm run -s check:display && npm run -s check:task-detail && npm run -s check:leaderboard && npm run -s check:tasks && npm run -s check:dashboard"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

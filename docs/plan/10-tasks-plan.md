@@ -1486,7 +1486,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   ⑨ 实验列表显示 `dirty` / 已排除标记。
 - **顺带改了后端**：排行榜每题成本"有一次报不出就 None"放宽为下界（`cost_lower_bound`），
   细账在 `07-platform-architecture.md` §14.5 第五条；不改判定、不碰冻结件。
-- **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
+- **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检，2026-09-21 晚补上，见 E7-T8 卡）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
   归因结果在单题运行页只留了一段说明——后端没有归因端点（E7-T6 的活）。
 - **单题页接上归因**（2026-09-21 晚，E7-T3 的补丁）：`GET /api/task-runs/{id}` 多带 `failure_attribution`
   （`failure_attributions` 一行：类别、层级、置信度、状态、证据、中文理由；`raw_response` 不透出）和
@@ -1499,7 +1499,22 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   显示"还没有归因结论"，开关开着时 JSON 里搜不到类别字符串。
 ### E7-T6 Failure Analysis（分布图/热力图/Top 案例） · **P1 · C:M · E:1.5d**
 ### E7-T7 Human Review 页 · **P1 · C:M · E:1.5d**
-### E7-T8 Dashboard · **P1 · C:S · E:0.5d**
+### E7-T8 Dashboard ✅ 已于 2026-09-21 完成 · **P1 · C:S · E:0.5d**
+- **Goal**：首页一屏回答"平台里有什么、现在在干什么"：几版数据集、几个参赛者、跑了多少次实验、
+  正在跑的进度、最近 5 次实验（§16.2 第一行）
+- **AC**（开工前定的四条）：1. 不新开后端接口，四个数全从现有 `/api/benchmark-sets`、`/api/agent-configs`、
+  `/api/runs` 算；2. 参赛者不算哨兵（ORACLE / NOOP / MOCK）和停用配置，和排行榜准入口径一致；
+  3. 轮询和 `/runs` 同一规矩——只在有活着的实验时开、10 秒一次（§16.1）；4. 口径是纯函数，
+  有断言脚本钉住
+- **实际交付**（2026-09-21）：`frontend/src/lib/dashboard.ts`（`participantSummary` /
+  `datasetSummary` / `liveRuns` / `progressPercent`，19 条断言在 `scripts/check-dashboard.mjs`，
+  进了 `npm run check`）+ `components/dashboard.tsx` + 首页 `app/page.tsx` 改为总览、平台自检
+  挪到底部，侧栏"平台自检"改名"总览"。数据集只数 `PUBLISHED`，题数按每个数据集**最新版**算、
+  旧版不重复；"正在跑"按状态单独取 RUNNING / QUEUED 各一页（不在"最近 5 次"里的也能看到）。
+  **实测**（开发库，2026-09-21 晚）：数据集 3 个 · 6 版 · 最新版合计 138 题（22 + 41 + 75）、
+  参赛 Agent 3 个 · 5 条启用配置、实验 56 次、正在跑 0 个、最近 5 次是 #166–#170。
+  没跑真实验去截"正在跑"的样子——建实验要干净工作区（C-27），分支上有未提交改动；
+  那一段用的是 `/runs` 同一套 `StatusBadge` / `ProgressBar`。
 
 ## E8 — Benchmark Dataset Production
 

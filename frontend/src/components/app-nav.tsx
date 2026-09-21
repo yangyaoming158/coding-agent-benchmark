@@ -7,10 +7,10 @@ import { usePathname } from "next/navigation";
  * 侧边导航。
  *
  * 只放已经可达的页面 —— 导航里挂一个 404 的链接，比不放更糟。
- * 新页面做出来之后往这里加一行即可（E7-T6 失败分析、E7-T8 Dashboard）。
+ * 新页面做出来之后往这里加一行即可（E7-T6 失败分析还没做）。
  */
 const NAV_ITEMS = [
-  { href: "/", label: "平台自检" },
+  { href: "/", label: "总览" },
   { href: "/benchmarks", label: "数据集" },
   { href: "/runs", label: "实验运行" },
   { href: "/agents", label: "Agent 与配置" },
