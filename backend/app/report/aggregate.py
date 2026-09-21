@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 from collections import Counter, defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
 from math import ceil
@@ -27,6 +28,7 @@ from app.domain.enums import (
     AttributionStage,
     CostSource,
     HumanReviewAction,
+    InfraOutcome,
     PatchKind,
     ReportScope,
 )
@@ -39,6 +41,8 @@ from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRu
 from app.report.models import (
     AgentSummary,
     Availability,
+    CombinedAgentRow,
+    CombinedSourceResult,
     ConcurrencyMetric,
     ConcurrencyPoint,
     CostDistribution,
@@ -103,18 +107,35 @@ def _load_run_rows(
 
 def _validate_comparability(
     rows: Sequence[tuple[EvaluationRun, AgentConfig, Agent, BenchmarkSet]],
-) -> BenchmarkSet:
-    sets = {run.benchmark_set_id for run, _, _, _ in rows}
-    if len(sets) != 1:
-        raise ReportInputError("对比报告只能包含同一个 benchmark_set 版本的实验")
+) -> list[BenchmarkSet]:
+    """协议必须一致；跨数据集只允许不同 slug 的发布版并排展示。"""
     protocols = {run.protocol_version for run, _, _, _ in rows}
     if len(protocols) != 1:
         raise ReportInputError("协议版本不同的实验不能放进同一份对比报告（C-59）")
-    return rows[0][3]
+    datasets = {dataset.id: dataset for _, _, _, dataset in rows}
+    if len({dataset.slug for dataset in datasets.values()}) != len(datasets):
+        raise ReportInputError("同一个数据集的不同版本不能放进跨数据集合并表")
+    return sorted(datasets.values(), key=lambda dataset: (dataset.slug, dataset.version))
+
+
+def _dataset_info(dataset: BenchmarkSet) -> DatasetInfo:
+    return DatasetInfo(
+        id=dataset.id,
+        slug=dataset.slug,
+        version=dataset.version,
+        title=dataset.title,
+        task_count=dataset.task_count,
+        snapshot_digest=dataset.snapshot_digest,
+    )
+
+
+def _dataset_label(dataset: BenchmarkSet) -> str:
+    return f"{dataset.slug}@{dataset.version}"
 
 
 def _run_summaries(
     rows: Sequence[tuple[EvaluationRun, AgentConfig, Agent, BenchmarkSet]],
+    sigkill_counts: dict[int, int],
 ) -> list[RunSummary]:
     return [
         RunSummary(
@@ -140,9 +161,30 @@ def _run_summaries(
             external_wait_ms=run.external_wait_ms,
             dirty=run.dirty,
             excluded_reason=run.leaderboard_excluded_reason,
+            sigkill_without_oom_flag_count=sigkill_counts.get(run.id, 0),
+            dataset_label=_dataset_label(dataset),
         )
-        for run, config, agent, _ in rows
+        for run, config, agent, dataset in rows
     ]
+
+
+def _sigkill_counts(session: Session, run_ids: Sequence[int]) -> dict[int, int]:
+    """从所有 attempt 推算 Agent 容器的无 OOM 标志 137 次数，不修改平台判定。"""
+    rows = session.execute(
+        sa.select(EvaluationTaskRun.evaluation_run_id, sa.func.count(EvaluationTaskRun.id))
+        .where(
+            EvaluationTaskRun.evaluation_run_id.in_(list(run_ids)),
+            EvaluationTaskRun.exit_code == 137,
+            sa.or_(
+                EvaluationTaskRun.infra_outcome.is_(None),
+                EvaluationTaskRun.infra_outcome.notin_(
+                    [InfraOutcome.OOM_KILLED, InfraOutcome.AGENT_TIMEOUT, InfraOutcome.TEST_TIMEOUT]
+                ),
+            ),
+        )
+        .group_by(EvaluationTaskRun.evaluation_run_id)
+    ).all()
+    return {int(run_id): int(count) for run_id, count in rows}
 
 
 def _cost_distributions(session: Session, run_ids: Sequence[int]) -> dict[int, CostDistribution]:
@@ -184,29 +226,103 @@ def _cost_distributions(session: Session, run_ids: Sequence[int]) -> dict[int, C
     return result
 
 
-def _task_flips(session: Session, run_ids: Sequence[int]) -> dict[int, tuple[int, Decimal | None]]:
+@dataclass(frozen=True, slots=True)
+class FlipMetrics:
+    """逐题状态翻转及补丁指纹分类；同一份非空补丁翻转须报警。"""
+
+    flipped: int
+    rate: Decimal | None
+    patch_different: int
+    patch_different_rate: Decimal | None
+    same_nonempty_patch: int
+    same_nonempty_patch_rate: Decimal | None
+    same_empty_patch_status: int
+    missing_patch: int
+    no_agent_conclusion: int
+
+
+def _classify_flip(
+    attempts: Sequence[tuple[AgentOutcome | None, str | None, bool | None]],
+) -> tuple[bool, bool, bool, bool]:
+    """仅比较结论不同的轮次，返回补丁变更、非空同补丁、空补丁、缺指纹。"""
+    pairs = [
+        (left, right)
+        for index, left in enumerate(attempts)
+        for right in attempts[index + 1 :]
+        if left[0] != right[0]
+    ]
+    return (
+        any(
+            left[1] is not None and right[1] is not None and left[1] != right[1]
+            for left, right in pairs
+        ),
+        any(
+            left[1] is not None and left[1] == right[1] and left[2] is False and right[2] is False
+            for left, right in pairs
+        ),
+        any(
+            left[1] is not None and left[1] == right[1] and left[2] is True and right[2] is True
+            for left, right in pairs
+        ),
+        any(left[1] is None or right[1] is None for left, right in pairs),
+    )
+
+
+def _task_flips(session: Session, run_ids: Sequence[int]) -> dict[int, FlipMetrics]:
     rows = session.execute(
         sa.select(
             EvaluationRun.agent_config_id,
             EvaluationTaskRun.benchmark_task_id,
             EvaluationTaskRun.agent_outcome,
+            PatchArtifact.sha256,
+            PatchArtifact.is_empty,
         )
         .join(EvaluationRun, EvaluationRun.id == EvaluationTaskRun.evaluation_run_id)
+        .outerjoin(
+            PatchArtifact,
+            sa.and_(
+                PatchArtifact.evaluation_task_run_id == EvaluationTaskRun.id,
+                PatchArtifact.kind == PatchKind.AGENT_NORMALIZED,
+            ),
+        )
         .where(
             EvaluationTaskRun.evaluation_run_id.in_(list(run_ids)),
             EvaluationTaskRun.is_canonical.is_(True),
         )
     ).all()
-    grouped: dict[int, dict[int, list[AgentOutcome | None]]] = defaultdict(
-        lambda: defaultdict(list)
+    grouped: dict[int, dict[int, list[tuple[AgentOutcome | None, str | None, bool | None]]]] = (
+        defaultdict(lambda: defaultdict(list))
     )
-    for config_id, task_id, outcome in rows:
-        grouped[int(config_id)][int(task_id)].append(outcome)
-    result: dict[int, tuple[int, Decimal | None]] = {}
+    for config_id, task_id, outcome, sha256, is_empty in rows:
+        grouped[int(config_id)][int(task_id)].append((outcome, sha256, is_empty))
+    result: dict[int, FlipMetrics] = {}
     for config_id, tasks in grouped.items():
-        comparable = [outcomes for outcomes in tasks.values() if len(outcomes) > 1]
-        flipped = sum(1 for outcomes in comparable if len(set(outcomes)) > 1)
-        result[config_id] = (flipped, _rate(flipped, len(comparable)))
+        comparable = [attempts for attempts in tasks.values() if len(attempts) > 1]
+        flipped = patch_different = same_nonempty = same_empty = missing = no_conclusion = 0
+        for attempts in comparable:
+            if len({outcome for outcome, _, _ in attempts}) <= 1:
+                continue
+            flipped += 1
+            if any(outcome is None for outcome, _, _ in attempts):
+                no_conclusion += 1
+                continue
+            different, same_patch, empty_patch, no_hash = _classify_flip(attempts)
+            patch_different += int(different)
+            same_nonempty += int(same_patch)
+            same_empty += int(empty_patch)
+            missing += int(no_hash)
+        denominator = len(comparable)
+        result[config_id] = FlipMetrics(
+            flipped=flipped,
+            rate=_rate(flipped, denominator),
+            patch_different=patch_different,
+            patch_different_rate=_rate(patch_different, denominator),
+            same_nonempty_patch=same_nonempty,
+            same_nonempty_patch_rate=_rate(same_nonempty, denominator),
+            same_empty_patch_status=same_empty,
+            missing_patch=missing,
+            no_agent_conclusion=no_conclusion,
+        )
     return result
 
 
@@ -231,11 +347,14 @@ def _facets(
 
 
 def _agent_summaries(
-    session: Session, dataset_id: int, selected_ids: Sequence[int]
+    session: Session,
+    dataset: BenchmarkSet,
+    selected_ids: Sequence[int],
+    sigkill_counts: dict[int, int],
 ) -> list[AgentSummary]:
     eligible = [
         run
-        for run in leaderboard.eligible_runs(session, benchmark_set_id=dataset_id)
+        for run in leaderboard.eligible_runs(session, benchmark_set_id=dataset.id)
         if run.evaluation_run_id in selected_ids
     ]
     eligible_ids = [run.evaluation_run_id for run in eligible]
@@ -247,7 +366,7 @@ def _agent_summaries(
 
     output = []
     for row in base:
-        flip_count, flip_rate = flips.get(row.agent_config_id, (0, None))
+        flip = flips.get(row.agent_config_id)
         denominator = row.run_count * row.tasks_per_run
         output.append(
             AgentSummary(
@@ -264,8 +383,8 @@ def _agent_summaries(
                 resolve_rate_max=row.resolve_rate_max,
                 resolve_rate_spread=row.resolve_rate_spread,
                 effective_resolve_rate_mean=row.effective_resolve_rate_mean,
-                task_outcome_flip_count=flip_count,
-                task_outcome_flip_rate=flip_rate,
+                task_outcome_flip_count=flip.flipped if flip else 0,
+                task_outcome_flip_rate=flip.rate if flip else None,
                 cost_usd_total=row.cost_usd_total,
                 cost_per_task=row.cost_per_task,
                 cost_lower_bound=row.cost_lower_bound,
@@ -282,6 +401,18 @@ def _agent_summaries(
                 infra_failure_rate=_rate(row.infra_failure_total, denominator),
                 retry_total=row.retry_total,
                 facets=facets.get((row.agent_config_id, row.protocol_version), {}),
+                dataset_label=_dataset_label(dataset),
+                patch_different_flip_count=flip.patch_different if flip else 0,
+                patch_different_flip_rate=flip.patch_different_rate if flip else None,
+                same_nonempty_patch_flip_count=flip.same_nonempty_patch if flip else 0,
+                same_nonempty_patch_flip_rate=flip.same_nonempty_patch_rate if flip else None,
+                same_empty_patch_status_flip_count=flip.same_empty_patch_status if flip else 0,
+                missing_patch_flip_count=flip.missing_patch if flip else 0,
+                no_agent_conclusion_flip_count=flip.no_agent_conclusion if flip else 0,
+                patch_consistency_alarm=bool(flip and flip.same_nonempty_patch),
+                sigkill_without_oom_flag_count=sum(
+                    sigkill_counts.get(run_id, 0) for run_id in row.run_ids
+                ),
             )
         )
     return output
@@ -549,11 +680,14 @@ def _task_results(session: Session, run_ids: Sequence[int], *, base_url: str) ->
             EvaluationTaskRun,
             EvaluationRun.id,
             AgentConfig.label,
+            BenchmarkSet.slug,
+            BenchmarkSet.version,
             BenchmarkTask.task_id,
             BenchmarkTask.issue_title,
         )
         .join(EvaluationRun, EvaluationRun.id == EvaluationTaskRun.evaluation_run_id)
         .join(AgentConfig, AgentConfig.id == EvaluationRun.agent_config_id)
+        .join(BenchmarkSet, BenchmarkSet.id == EvaluationRun.benchmark_set_id)
         .join(BenchmarkTask, BenchmarkTask.id == EvaluationTaskRun.benchmark_task_id)
         .where(
             EvaluationTaskRun.evaluation_run_id.in_(list(run_ids)),
@@ -563,7 +697,7 @@ def _task_results(session: Session, run_ids: Sequence[int], *, base_url: str) ->
     ).all()
     links = _evidence_links(session, [row[0].id for row in rows], base_url=base_url)
     output = []
-    for task_run, run_id, label, task_id, issue_title in rows:
+    for task_run, run_id, label, dataset_slug, dataset_version, task_id, issue_title in rows:
         patch_url, log_url, trajectory_url = links[task_run.id]
         output.append(
             TaskResult(
@@ -586,6 +720,7 @@ def _task_results(session: Session, run_ids: Sequence[int], *, base_url: str) ->
                 patch_url=patch_url,
                 log_url=log_url,
                 trajectory_url=trajectory_url,
+                dataset_label=f"{dataset_slug}@{dataset_version}",
             )
         )
     return output
@@ -599,12 +734,15 @@ def _failures(
             EvaluationTaskRun,
             EvaluationRun.id,
             AgentConfig.label,
+            BenchmarkSet.slug,
+            BenchmarkSet.version,
             BenchmarkTask.task_id,
             BenchmarkTask.issue_title,
             FailureAttribution,
         )
         .join(EvaluationRun, EvaluationRun.id == EvaluationTaskRun.evaluation_run_id)
         .join(AgentConfig, AgentConfig.id == EvaluationRun.agent_config_id)
+        .join(BenchmarkSet, BenchmarkSet.id == EvaluationRun.benchmark_set_id)
         .join(BenchmarkTask, BenchmarkTask.id == EvaluationTaskRun.benchmark_task_id)
         .outerjoin(
             FailureAttribution,
@@ -625,7 +763,16 @@ def _failures(
     attributed = 0
     llm_count = 0
     cases: list[FailureCase] = []
-    for task_run, run_id, label, task_id, issue_title, attribution in rows:
+    for (
+        task_run,
+        run_id,
+        label,
+        dataset_slug,
+        dataset_version,
+        task_id,
+        issue_title,
+        attribution,
+    ) in rows:
         category = attribution.category.value if attribution is not None else None
         if category is not None:
             attributed += 1
@@ -656,6 +803,7 @@ def _failures(
                     patch_url=patch_url,
                     log_url=log_url,
                     trajectory_url=trajectory_url,
+                    dataset_label=f"{dataset_slug}@{dataset_version}",
                 )
             )
     accuracy_state, accuracy, kappa_state, kappa = _review_metrics(session, run_ids)
@@ -681,6 +829,41 @@ def _failures(
     )
 
 
+def _combined_agents(
+    rows: Sequence[tuple[EvaluationRun, AgentConfig, Agent, BenchmarkSet]],
+    agents: Sequence[AgentSummary],
+    datasets: Sequence[BenchmarkSet],
+) -> list[CombinedAgentRow]:
+    """只使用各数据集各自准入的运行；不把不同题集的解决率相加。"""
+    eligible_ids = {run_id for agent in agents for run_id in agent.run_ids}
+    by_config: dict[int, dict[int, list[EvaluationRun]]] = defaultdict(lambda: defaultdict(list))
+    configs: dict[int, tuple[str, str]] = {}
+    for run, config, _, dataset in rows:
+        if run.id in eligible_ids:
+            by_config[config.id][dataset.id].append(run)
+            configs[config.id] = (config.label, config.model_name)
+    result = []
+    for config_id, grouped in sorted(by_config.items(), key=lambda item: configs[item[0]][0]):
+        label, model_name = configs[config_id]
+        result.append(
+            CombinedAgentRow(
+                agent_config_id=config_id,
+                label=label,
+                model_name=model_name,
+                sources=[
+                    CombinedSourceResult(
+                        dataset_label=_dataset_label(dataset),
+                        task_count=dataset.task_count,
+                        run_ids=[run.id for run in grouped.get(dataset.id, [])],
+                        resolved_counts=[run.resolved_count for run in grouped.get(dataset.id, [])],
+                    )
+                    for dataset in datasets
+                ],
+            )
+        )
+    return result
+
+
 def build_report(
     session: Session,
     run_ids: Sequence[int],
@@ -693,15 +876,29 @@ def build_report(
 ) -> ReportData:
     """生成一份报告的全部事实；不写文件、不提交事务。"""
     rows = _load_run_rows(session, run_ids)
-    dataset = _validate_comparability(rows)
+    datasets = _validate_comparability(rows)
     ordered_ids = [run.id for run, _, _, _ in rows]
-    runs = _run_summaries(rows)
-    agents = _agent_summaries(session, dataset.id, ordered_ids)
+    sigkill_counts = _sigkill_counts(session, ordered_ids)
+    runs = _run_summaries(rows, sigkill_counts)
+    agents = [
+        agent
+        for dataset in datasets
+        for agent in _agent_summaries(
+            session,
+            dataset,
+            [run.id for run, _, _, selected_dataset in rows if selected_dataset.id == dataset.id],
+            sigkill_counts,
+        )
+    ]
     task_results = _task_results(session, ordered_ids, base_url=base_url)
     failures = _failures(session, ordered_ids, base_url=base_url, top_n=top_n)
     performance = _performance(session, ordered_ids, runs, host_metrics_csv=host_metrics_csv)
 
     warnings: list[str] = []
+    if len(datasets) > 1:
+        warnings.append(
+            "跨数据集报告的失败归因与性能总量覆盖全部所选运行；各版解决率只看对应的数据集行。"
+        )
     real_configs = {config.id for _, config, agent, _ in rows if agent.kind not in _SENTINELS}
     if len(real_configs) < 3:
         warnings.append(
@@ -727,26 +924,34 @@ def build_report(
         warnings.append(performance.external_wait.reason or "external_wait 不可用")
     if not performance.host_cpu.available:
         warnings.append(performance.host_cpu.reason or "CPU 峰值不可用")
+    if any(agent.patch_consistency_alarm for agent in agents):
+        warnings.append(
+            "平台报警：同一份非空标准化补丁在不同轮次得出不同 Agent 结论，请核查判定证据。"
+        )
+    if any(agent.missing_patch_flip_count for agent in agents):
+        warnings.append("部分翻转题没有标准化补丁指纹，无法完整区分补丁变化与判定变化。")
+    if any(agent.no_agent_conclusion_flip_count for agent in agents):
+        warnings.append("部分翻转题有一轮没有 Agent 结论；保留在总翻转率中，不纳入补丁指纹对比。")
+    combined = _combined_agents(rows, agents, datasets) if len(datasets) > 1 else []
+    if combined and any(not source.run_ids for agent in combined for source in agent.sources):
+        warnings.append("跨数据集合并表中有 Agent 缺少某版数据集的合格完整运行，来源栏显示不可用。")
 
     return ReportData(
         generated_at=generated_at or datetime.now(tz=UTC),
         title=title,
         scope=(ReportScope.SINGLE_RUN if len(ordered_ids) == 1 else ReportScope.COMPARISON).value,
         run_ids=ordered_ids,
-        dataset=DatasetInfo(
-            id=dataset.id,
-            slug=dataset.slug,
-            version=dataset.version,
-            title=dataset.title,
-            task_count=dataset.task_count,
-            snapshot_digest=dataset.snapshot_digest,
-        ),
+        dataset=_dataset_info(datasets[0]) if len(datasets) == 1 else None,
         warnings=warnings,
         runs=runs,
         agents=agents,
         task_results=task_results,
         performance=performance,
         failures=failures,
+        datasets=[_dataset_info(dataset) for dataset in datasets],
+        combined_task_count=sum(dataset.task_count for dataset in datasets) if combined else None,
+        combined_agents=combined,
+        sigkill_without_oom_flag_count=sum(sigkill_counts.values()),
     )
 
 

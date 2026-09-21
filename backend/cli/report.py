@@ -38,7 +38,7 @@ def cmd_generate(args: argparse.Namespace) -> int:
 
     print(
         f"报告已生成：{result.data.scope}，数据集 "
-        f"{result.data.dataset.slug}@{result.data.dataset.version}，"
+        f"{', '.join(dataset.slug + '@' + dataset.version for dataset in result.data.datasets)}，"
         f"运行 {', '.join('#' + str(i) for i in result.data.run_ids)}"
     )
     for report_format, ref in result.artifacts.items():

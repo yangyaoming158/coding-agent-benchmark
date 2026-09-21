@@ -7,12 +7,15 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from app.domain.enums import ArtifactKind, ReportFormat
+from app.domain.enums import AgentOutcome, ArtifactKind, ReportFormat
 from app.infrastructure.models.artifact import Artifact
 from app.infrastructure.models.attribution import ReportRecord
+from app.report.aggregate import _classify_flip
 from app.report.models import (
     AgentSummary,
     Availability,
+    CombinedAgentRow,
+    CombinedSourceResult,
     ConcurrencyMetric,
     CostDistribution,
     DatasetInfo,
@@ -46,6 +49,16 @@ def sample_report() -> ReportData:
             task_count=41,
             snapshot_digest="a" * 64,
         ),
+        datasets=[
+            DatasetInfo(
+                id=4,
+                slug="benchmark-cn-v1",
+                version="v2",
+                title="中文集",
+                task_count=41,
+                snapshot_digest="a" * 64,
+            )
+        ],
         warnings=["只有 2 个真实 Agent；费用不能当作完整总成本。"],
         runs=[
             RunSummary(
@@ -191,7 +204,7 @@ def test_three_formats_share_semantics_and_keep_missing_cost_visible() -> None:
     markdown = render_markdown(report)
     html = render_html(report)
 
-    assert body["schema_version"] == "1.0"
+    assert body["schema_version"] == "2.0"
     assert body["agents"][0]["cost_per_task"] == "0.0152"
     assert body["agents"][0]["cost_lower_bound"] is True
     for output in (markdown, html):
@@ -251,4 +264,82 @@ def test_persist_report_writes_and_registers_all_three_formats(tmp_path) -> None
     }
     assert {row.format for row in records} == set(ReportFormat)
     assert all(row.run_ids == [125, 126] for row in records)
-    assert all(row.params["schema_version"] == "1.0" for row in records)
+    assert all(row.params["schema_version"] == "2.0" for row in records)
+
+
+def test_flip_classification_keeps_empty_patch_out_of_platform_alarm() -> None:
+    assert _classify_flip(
+        [(AgentOutcome.RESOLVED, "a" * 64, False), (AgentOutcome.UNRESOLVED, "b" * 64, False)]
+    ) == (True, False, False, False)
+    assert _classify_flip(
+        [(AgentOutcome.RESOLVED, "a" * 64, False), (AgentOutcome.UNRESOLVED, "a" * 64, False)]
+    ) == (False, True, False, False)
+    assert _classify_flip(
+        [(AgentOutcome.UNRESOLVED, "e" * 64, True), (AgentOutcome.EMPTY_PATCH, "e" * 64, True)]
+    ) == (False, False, True, False)
+    assert _classify_flip(
+        [(AgentOutcome.RESOLVED, None, None), (AgentOutcome.UNRESOLVED, "b" * 64, False)]
+    ) == (False, False, False, True)
+
+
+def test_combined_table_keeps_sources_separate_in_all_formats() -> None:
+    original = sample_report()
+    official = DatasetInfo(
+        id=5,
+        slug="swebench-verified-subset",
+        version="v3",
+        title="官方校准集",
+        task_count=75,
+        snapshot_digest="b" * 64,
+    )
+    combined = original.model_copy(
+        update={
+            "dataset": None,
+            "datasets": [original.dataset, official],
+            "combined_task_count": 116,
+            "combined_agents": [
+                CombinedAgentRow(
+                    agent_config_id=8,
+                    label="aider",
+                    model_name="deepseek-chat",
+                    sources=[
+                        CombinedSourceResult(
+                            dataset_label="benchmark-cn-v1@v2",
+                            task_count=41,
+                            run_ids=[125],
+                            resolved_counts=[6],
+                        ),
+                        CombinedSourceResult(
+                            dataset_label="swebench-verified-subset@v3",
+                            task_count=75,
+                            run_ids=[126],
+                            resolved_counts=[19],
+                        ),
+                    ],
+                )
+            ],
+        }
+    )
+    body = json.loads(render_json(combined))
+    assert body["dataset"] is None
+    assert body["combined_task_count"] == 116
+    assert body["combined_agents"][0]["sources"][1]["resolved_counts"] == [19]
+    for output in (render_markdown(combined), render_html(combined)):
+        assert "跨数据集合并表" in output
+        assert "benchmark-cn-v1@v2" in output
+        assert "swebench-verified-subset@v3" in output
+        assert "6/41" in output
+        assert "19/75" in output
+        assert "#125 6/41" in output
+        assert "#126 19/75" in output
+        assert "116" in output
+
+
+def test_platform_alarm_is_red_in_html_and_visible_in_markdown() -> None:
+    report = sample_report()
+    flagged_agent = report.agents[0].model_copy(
+        update={"same_nonempty_patch_flip_count": 1, "patch_consistency_alarm": True}
+    )
+    flagged = report.model_copy(update={"agents": [flagged_agent]})
+    assert '<p class="alarm">平台报警' in render_html(flagged)
+    assert "⚠ 平台报警" in render_markdown(flagged)
