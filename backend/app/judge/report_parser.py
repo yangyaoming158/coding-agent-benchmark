@@ -127,6 +127,16 @@ _SUMMARY_HEADER = "short test summary info"
 _CONFTEST_LOAD_FAILURE = re.compile(r"^(\w+(?:Error|Exception))? ?while loading conftest '([^']+)'")
 #: 紧跟在上面那行后面的 traceback，最后一行 `E   ImportError: ...` 是给人看的原因
 _TRACEBACK_E_LINE = re.compile(r"^E\s+(\S.*)$")
+#: 另外两种"pytest 启动就死"的形态（2026-09-21 #170 实测）：pytest 插件导入失败
+#: （`ImportError: Error importing plugin "sklearn.tests.random_seed"`）和加载 conftest 时项目代码
+#: 直接抛异常（`NameError: name 'Type' is not defined`）。共同点：一段标准 Python traceback、
+#: 退出码 1、没有 junitxml、零用例，而且 traceback 里有**工作区内**的文件帧 —— 项目自己的代码
+#: 导入失败。工作区帧是关键证据：没有它（只有 site-packages 的帧）就是环境坏了，那是平台的锅。
+_TRACEBACK_START = "Traceback (most recent call last):"
+_TRACEBACK_FRAME = re.compile(r'^\s+File "([^"]+)", line \d+')
+_TRACEBACK_EXCEPTION = re.compile(
+    r"^([A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Warning))\b.*$"
+)
 
 #: 短摘要里 SKIPPED 行的形状：`SKIPPED [1] tests/test_a.py:26: reason`，没有用例 ID。
 _SKIPPED_COUNT_PREFIX = re.compile(r"^\[\d+\]\s")
@@ -561,6 +571,18 @@ def _strip_message_dash(rest: str) -> str | None:
     return text[:MAX_MESSAGE_EXCERPT] or None
 
 
+def _inside_workspace(path: str, repo_root: Path | str | None) -> bool:
+    """traceback 里的这一帧是不是工作区内的文件。
+
+    `repo_root` 没给时退回"不是绝对路径"这条粗判据：pytest 对工作区内的文件通常打相对路径，
+    对 site-packages 打绝对路径。
+    """
+    if repo_root is not None:
+        root = str(repo_root).rstrip("/") + "/"
+        return path.startswith(root)
+    return not path.startswith("/")
+
+
 def parse_pytest_text(text: str, *, repo_root: Path | str | None = None) -> ParsedReport:
     """从 pytest 的文本输出里捞结果。junitxml 没生成时的兜底。
 
@@ -574,11 +596,31 @@ def parse_pytest_text(text: str, *, repo_root: Path | str | None = None) -> Pars
     in_summary = False
 
     conftest_failure: tuple[str, str | None] | None = None
+    #: 最近一段 Python traceback：(工作区内的文件帧, 异常行)。只在零用例时才用得上
+    traceback_frames: list[str] = []
+    traceback_exception: str | None = None
+    in_traceback = False
     for raw_line in text.splitlines():
         line = raw_line.rstrip()
         if _SUMMARY_HEADER in line:
             in_summary = True
             continue
+
+        if line == _TRACEBACK_START:
+            in_traceback = True
+            traceback_frames = []
+            traceback_exception = None
+            continue
+        if in_traceback:
+            frame = _TRACEBACK_FRAME.match(line)
+            if frame is not None:
+                traceback_frames.append(frame.group(1))
+                continue
+            exc = _TRACEBACK_EXCEPTION.match(line)
+            if exc is not None:
+                traceback_exception = line
+                in_traceback = False
+                continue
 
         loading = _CONFTEST_LOAD_FAILURE.match(line)
         if loading is not None:
@@ -646,6 +688,17 @@ def parse_pytest_text(text: str, *, repo_root: Path | str | None = None) -> Pars
                 message_excerpt=(message or "conftest 加载失败")[:MAX_MESSAGE_EXCERPT],
             )
         )
+    elif not cases and traceback_exception is not None:
+        # 零用例 + 启动 traceback：只有 traceback 里出现了工作区内的文件才算"项目代码导入失败"。
+        # 归到最后一个工作区帧（离异常最近的那处项目代码）
+        workspace_frames = [f for f in traceback_frames if _inside_workspace(f, repo_root)]
+        if workspace_frames:
+            collection_errors.append(
+                CollectionError(
+                    module_path=normalize_test_id(workspace_frames[-1], repo_root=repo_root),
+                    message_excerpt=traceback_exception[:MAX_MESSAGE_EXCERPT],
+                )
+            )
 
     return ParsedReport(
         cases=cases,

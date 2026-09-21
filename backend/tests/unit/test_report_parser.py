@@ -34,7 +34,7 @@ GOLDEN_TASK = (
     Path(__file__).resolve().parents[3] / "datasets" / "golden" / "bench-golden__textkit-1.json"
 )
 
-#: 全部 13 份 fixture。新增 fixture 时这里也要加 —— 有几条通用不变量对每一份都跑。
+#: 全部 15 份 fixture。新增 fixture 时这里也要加 —— 有几条通用不变量对每一份都跑。
 ALL_FIXTURES = (
     "shapes_xunit2.xml",
     "shapes_xunit1.xml",
@@ -43,6 +43,8 @@ ALL_FIXTURES = (
     "collection_error_xunit2.xml",
     "collection_error_stdout.txt",
     "conftest_import_failure_stdout.txt",
+    "startup_traceback_plugin_import_stdout.txt",
+    "startup_traceback_conftest_nameerror_stdout.txt",
     "empty_xunit2.xml",
     "truncated_xunit2.xml",
     "golden_textkit_base_xunit2.xml",
@@ -323,6 +325,54 @@ def test_conftest_import_failure_is_a_collection_error_and_not_the_harness_fault
     assert check.collection_aborted is True
     assert check.blames_harness is False, "没有 XML 是收集失败的必然结果，不是平台的锅"
     assert check.missing_ids == ("tests/test_types.py::test_bool",)
+
+
+@pytest.mark.parametrize(
+    ("fixture", "module", "message"),
+    [
+        (
+            "startup_traceback_plugin_import_stdout.txt",
+            "sklearn/utils/_set_output.py",
+            'Error importing plugin "sklearn.tests.random_seed"',
+        ),
+        (
+            "startup_traceback_conftest_nameerror_stdout.txt",
+            "sphinx/util/typing.py",
+            "NameError: name 'Type' is not defined",
+        ),
+    ],
+)
+def test_startup_traceback_through_workspace_code_is_a_collection_error(
+    fixture: str, module: str, message: str
+) -> None:
+    """pytest 启动就死的另外两种形态（2026-09-21 #170 真实输出）：
+    插件导入失败、conftest 触发项目代码抛异常。
+
+    没有 `while loading conftest` 那行，只有一段标准 Python traceback、退出码 1、零用例。
+    判据是 traceback 里有**工作区内**的文件帧 —— 项目自己的代码导入失败，归到离异常最近的那一帧。
+    """
+    report = parse_pytest_text(read(fixture), repo_root="/workspace")
+    assert report.cases == {}
+    assert [e.module_path for e in report.collection_errors] == [module]
+    assert message in (report.collection_errors[0].message_excerpt or "")
+    check = report.check_integrity(["tests/test_x.py::test_y"])
+    assert check.collection_aborted is True
+    assert check.blames_harness is False
+
+
+def test_startup_traceback_without_workspace_frames_still_blames_the_harness() -> None:
+    """traceback 里只有 site-packages 的帧 —— 是环境坏了，不是 AI 改的代码，
+    照旧按 (a) 记平台故障。
+    """
+    text = (
+        "exit_code=1\n--- stderr ---\nTraceback (most recent call last):\n"
+        '  File "/opt/conda/lib/python3.9/site-packages/_pytest/main.py", line 1, in <module>\n'
+        "    import foo\nModuleNotFoundError: No module named 'foo'\n"
+    )
+    report = parse_pytest_text(text, repo_root="/workspace")
+    assert report.collection_errors == ()
+    assert report.source is ReportSource.NONE
+    assert report.check_integrity(["t.py::a"]).blames_harness is True
 
 
 def test_an_empty_text_report_still_blames_the_harness() -> None:
