@@ -1,16 +1,17 @@
 import Link from "next/link";
+import { Dashboard } from "@/components/dashboard";
 import { PlatformStatus } from "@/components/platform-status";
 
 /**
- * 首页。
+ * 首页 = Dashboard（E7-T8，§16.2 的第一行）。
  *
- * 目前只放一件事：平台自检。完整的 Dashboard 是 E7 的活。
- * 这一页存在的意义是把"前端 → 后端 → 数据库"这条链真的跑通一次 ——
- * 脚手架建起来但从没调通过后端，等于什么都没验证。
+ * 上面是总览：几版数据集、几个参赛者、跑了多少次实验、正在跑的进度、最近 5 次。
+ * 下面留着平台自检 —— 它是 E7-T1 时首页唯一的内容，把「前端 → 后端 → 数据库」
+ * 这条链真调通一次的证据；演示时后端没起来，先看这一栏。
  */
 export default function Home() {
   return (
-    <div className="mx-auto w-full max-w-4xl">
+    <div className="mx-auto w-full max-w-5xl">
       <header className="border-b border-neutral-200 pb-6">
         <h1 className="text-2xl font-semibold tracking-tight">
           AI Coding Agent 评测基准平台
@@ -21,7 +22,7 @@ export default function Home() {
         </p>
       </header>
 
-      <PlatformStatus />
+      <Dashboard />
 
       <section className="mt-10">
         <h2 className="text-sm font-semibold text-neutral-900">从哪看起</h2>
@@ -30,8 +31,8 @@ export default function Home() {
         </p>
         <ol className="mt-3 space-y-1 text-sm text-neutral-600">
           {[
-            ["/leaderboard", "排行榜", "同一版数据集上各 Agent 的解决率与成本"],
-            ["/runs", "实验运行", "点一次实验，看逐题网格"],
+            ["/leaderboard", "排行榜", "同一版数据集上各 Agent 的解决率与成本，点参赛者进实验"],
+            ["/runs", "实验运行", "点一次实验，看逐题网格；点一格，看补丁、用例、日志、轨迹和归因"],
             ["/benchmarks", "数据集", "每一版的构成、门禁证据、逐题表"],
           ].map(([href, label, desc]) => (
             <li key={href} className="flex gap-2">
@@ -46,10 +47,9 @@ export default function Home() {
             </li>
           ))}
         </ol>
-        <p className="mt-3 text-xs text-neutral-500">
-          还没做的：失败分析（E7-T6）、Dashboard（E7-T8）。
-        </p>
       </section>
+
+      <PlatformStatus />
     </div>
   );
 }

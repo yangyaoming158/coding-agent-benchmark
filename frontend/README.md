@@ -51,7 +51,7 @@ sessionStorage 里（`src/lib/admin-token.ts`），关掉标签页即失效。
 
 | 路由 | 页面 | 卡 |
 | --- | --- | --- |
-| `/` | 平台自检：把「前端 → 后端 → 数据库」这条链真的调通一次 | E7-T1 |
+| `/` | 总览（Dashboard）：几版数据集、几个参赛者、跑了多少次实验、正在跑的进度、最近 5 次；底下保留平台自检 | E7-T8 |
 | `/benchmarks` | 数据集版本列表：有哪几版、各多少题、发布状态 | E7-T5 |
 | `/benchmarks/[slug]` | 数据集详情：语言/来源构成、门禁自检证据、逐题表格（仓库/难度/语言/状态 + 搜索，五个条件全走后端参数） | E7-T5 |
 | `/tasks/[taskId]` | 单题详情：Issue 原文、F2P/P2P 清单、验证证据与隔离记录、各 Agent 历史表现 | E7-T5 |
@@ -73,11 +73,12 @@ sessionStorage 里（`src/lib/admin-token.ts`），关掉标签页即失效。
 断言脚本：
 
 ```bash
-npm run check                # 四个一起跑
+npm run check                # 五个一起跑
 npm run check:display        # src/lib/display.ts
 npm run check:task-detail    # src/lib/diff.ts、trajectory.ts、search.ts
 npm run check:leaderboard    # src/lib/leaderboard.ts
 npm run check:tasks          # src/lib/tasks.ts
+npm run check:dashboard      # src/lib/dashboard.ts（谁算参赛者、几版数据集、什么算正在跑）
 ```
 
 零额外依赖（用仓库自带的 tsc 编译成 JS 再动态 import），不用起服务；全过时末尾打印
