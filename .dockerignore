@@ -1,0 +1,15 @@
+# 两个平台镜像（deploy/backend、deploy/frontend）的构建上下文都是仓库根目录。
+# 这里写成"先全部排除、再放行真正要 COPY 的"：
+#   - .env 里是各家大模型的 Key，一旦进了镜像层，docker history 就能翻出来（E10-T1 AC ④）
+#   - var/ 几十 GB、backend/.venv 和 frontend/node_modules 几百 MB，进上下文只会拖慢构建
+# 后端镜像只装依赖不装代码（代码从宿主机挂进来，理由见 docker-compose.yml 顶部），
+# 所以 backend/ 只放行两个依赖清单。
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!deploy
+!frontend
+frontend/node_modules
+frontend/.next
+frontend/.env*
+frontend/*.tsbuildinfo
