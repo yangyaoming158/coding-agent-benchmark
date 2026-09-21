@@ -46,6 +46,7 @@ make dev         # 后端 :8000 前端 :3000
 | 怎么装 | [`docs/deployment.md`](docs/deployment.md) —— 每条命令都在本机跑过，末尾有验收记录 |
 | 怎么用（建镜像 → 灌题 → 配 Agent → 建实验 → 看进度 → 排行榜 / 报告 → 归因 / 抽检 → 发布数据集） | [`docs/usage.md`](docs/usage.md) |
 | 怎么做的（模块分层、17 张表、沙箱、判定、没做的和为什么） | [`docs/architecture.md`](docs/architecture.md) |
+| 怎么演示（5 分钟主线：排行榜 → 实验 → 逐题网格 → 单题证据，录屏 / 快照兜底） | [`docs/demo.md`](docs/demo.md) |
 
 想动手改代码，先看 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 **接手别人已经跑起来的环境**，看那份文档的「接手一份已有的环境」一节 ——
