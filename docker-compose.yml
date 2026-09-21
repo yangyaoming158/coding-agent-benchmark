@@ -1,0 +1,167 @@
+# 一键部署（E10-T1）。四个常驻服务加一个一次性迁移：
+#
+#   postgres ──→ migrate（alembic upgrade head，跑完退出）──→ api、worker
+#   frontend 独立起，浏览器里再去连 api
+#
+# 用法：make compose-up（推荐，它会把仓库路径传进来）
+#      或 docker compose up -d --build（此时 .env 里要有 BENCH_REPO_DIR，见 .env.example）
+# 所有 `python -m cli.*` 命令都在容器里跑：make compose-cli CMD="python -m cli.seed"
+#
+# ── 为什么代码不打进镜像，而是把仓库按宿主机原路径挂进容器 ──
+#
+# Worker 起评测容器走的是宿主机的 dockerd（挂 docker.sock，05-sandbox.md §10.6 说的 DooD），
+# 它把工作区路径**原样**交给 dockerd（app/sandbox/container.py 的 _create_kwargs 里是 str(m.source)），
+# dockerd 按宿主机的文件系统去找这个路径。所以 Worker 在容器里看到的路径必须和宿主机一模一样，
+# 否则 dockerd 会在宿主机上新建一个同名空目录挂进去 —— 评测容器看到的是空工作区，而且不报错。
+#
+# 要挂进评测容器的不只 var/workspaces：MiniAgent 的 miniagent_runtime.py（在 backend/app/runner/）
+# 和 aider 的模型设置文件（images/aider/model-settings/）也在仓库里。把整个仓库按原路径挂进来，
+# 三处一个字都不用翻译，C-27 的 `git status` 在容器里看到的也是同一个检出。
+# 代价是镜像里没有代码，换机器要先 clone 仓库 —— 这个文件本来就在仓库里，那一步省不掉。
+#
+# 端口默认 8000 / 3000 / 5433，都能在 .env 里改（BENCH_API_PORT / BENCH_WEB_PORT / BENCH_PG_PORT）。
+# 5433 和 scripts/dev_db.sh 起的开发库是同一个端口：两个不能同时起，见 docs/deployment.md。
+
+name: bench
+
+# api / worker / migrate / cli 共用的一段：同一个镜像、同一份 .env、同一个挂载
+x-backend: &backend
+  build:
+    context: .
+    dockerfile: deploy/backend/Dockerfile
+  image: bench-platform:latest
+  # .env 整份传进去（各家 API Key、并发数、日志格式……），下面 environment 里的几项覆盖它
+  env_file: .env
+  environment: &backend-env
+    BENCH_REPO_DIR: ${BENCH_REPO_DIR:?没有 BENCH_REPO_DIR。用 make compose-up，或者在 .env 里写 BENCH_REPO_DIR=<仓库绝对路径>}
+    # 库在 compose 网络里叫 postgres、端口是容器内的 5432，不是 .env 里给宿主机用的 localhost:5433
+    BENCH_DATABASE_URL: postgresql+psycopg://bench:bench@postgres:5432/bench
+    LOG_FORMAT: ${LOG_FORMAT:-json}
+    # `python -m app.worker` 靠当前目录找到 app，但健康检查脚本在 /usr/local/bin，
+    # Python 只把脚本所在目录放进 sys.path，不放当前目录 —— 显式给一份
+    PYTHONPATH: ${BENCH_REPO_DIR}/backend
+  working_dir: ${BENCH_REPO_DIR}/backend
+  volumes:
+    - type: bind
+      source: ${BENCH_REPO_DIR}
+      target: ${BENCH_REPO_DIR}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: bench
+      POSTGRES_USER: bench
+      POSTGRES_PASSWORD: bench
+    volumes:
+      # 命名卷：`docker compose down` 保留数据，`down -v` 才删
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      # 发布到宿主机，是为了让宿主机上的 make / uv 工具链（.env 里的 localhost:5433）也能连这个库
+      - "${BENCH_PG_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bench -d bench"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    <<: *backend
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    <<: *backend
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      <<: *backend-env
+      # 写接口靠它把门。没配的话 API 进程起不来（E7-T0 AC-3）；这里让 compose 在起容器之前就报错，
+      # 比看着 api 崩溃循环清楚得多
+      ADMIN_TOKEN: ${ADMIN_TOKEN:?.env 里没填 ADMIN_TOKEN。生成一个：python3 -c "import secrets; print(secrets.token_urlsafe(32))"}
+      # CORS 放行名单要和前端实际的端口一致，前端端口改了这里自动跟着改
+      BENCH_DEV_FRONTEND_ORIGINS: ${BENCH_DEV_FRONTEND_ORIGINS:-http://localhost:${BENCH_WEB_PORT:-3000},http://127.0.0.1:${BENCH_WEB_PORT:-3000}}
+    ports:
+      - "${BENCH_API_PORT:-8000}:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "bench-healthcheck", "api"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    <<: *backend
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      WORKER_ID: compose-worker
+    volumes:
+      - type: bind
+        source: ${BENCH_REPO_DIR}
+        target: ${BENCH_REPO_DIR}
+      # DooD：Worker 用宿主机的 dockerd 起评测容器。拿着这个 socket 等于拿着宿主机 root，
+      # 所以这个服务**不发布任何端口**（§10.6），也只有它和 cli 挂这个 socket
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    # Worker 收到第一个 SIGTERM 是优雅停机：做完手上这道题再退（最多等 WORKER_SHUTDOWN_GRACE_S=1200 秒）。
+    # 宽限期要比它长，不然 compose 会在题跑到一半时 SIGKILL，评测容器成了孤儿、作业要等租约过期才重跑。
+    # 等不及时：docker compose kill -s SIGTERM worker 再发一次，第二次是"不等了"，仍会回收容器。
+    stop_grace_period: 21m
+    healthcheck:
+      test: ["CMD", "bench-healthcheck", "worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # 跑命令行用的，`docker compose up` 不会起它（profiles）。
+  # 和 worker 一样挂 docker.sock —— cli.validate、cli.images 这些要起容器。
+  #   docker compose run --rm cli python -m cli.seed
+  cli:
+    <<: *backend
+    profiles: ["tools"]
+    command: ["python", "-c", "print('用法：docker compose run --rm cli python -m cli.<模块> ...')"]
+    volumes:
+      - type: bind
+        source: ${BENCH_REPO_DIR}
+        target: ${BENCH_REPO_DIR}
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/frontend/Dockerfile
+      args:
+        # 浏览器用这个地址找后端，构建时内联进页面（见 deploy/frontend/Dockerfile）
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:${BENCH_API_PORT:-8000}}
+    image: bench-frontend:latest
+    ports:
+      - "${BENCH_WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  pgdata:

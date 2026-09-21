@@ -2005,7 +2005,39 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 
 ## E10 — Deployment / Documentation / Demo
 
-### E10-T1 docker compose 一键部署（api/worker/pg/minio/frontend） · **P0 · C:M · E:1.5d · 🐳**
+### E10-T1 docker compose 一键部署（api/worker/pg/minio/frontend） · **P0 · C:M · E:1.5d · 🐳** ✅
+- **Goal**：干净机器上一条命令起完整平台（DEL-01 的"`docker compose up` 后全部服务健康"），
+  并且 Worker 在容器里**真能跑评测**，不只是进程起来了
+- **Req**：NFR-08、P0-17 · **Deps**：E0-T4、E5-T1、E7-T0 · **Modules**：`docker-compose.yml`、`deploy/`、`Makefile`、`scripts/check_env.py`
+- **AC（2026-09-21 定，卡片原本只有标题这一行）**：
+  ① 仓库根目录 `make compose-up`（等价 `docker compose up -d --build`）起 postgres / migrate（一次性）/ api / worker / frontend，
+  `docker compose ps` 全部 healthy，`/api/health` 返回 `status=ok` 且 `migration_revision` 在 head；
+  ② MinIO 不进 compose（砍单第 5 条）：`ARTIFACT_BACKEND=local`，制品落宿主机 `var/artifacts`；
+  ③ **Worker 在容器里真能跑评测**：挂 `docker.sock`（DooD，§10.6），Golden 4 题 Oracle 4/4 RESOLVED、Noop 0/4；
+  评测容器仍是非 root + `cap_drop=ALL` + 测试阶段断网 —— 部署方式不改沙箱策略；
+  ④ 密钥不进镜像：`.env` 被 `.dockerignore` 挡住；`ADMIN_TOKEN` 没填时 `compose up` 当场报错，不是 API 崩溃循环；
+  ⑤ 数据不丢：postgres 用命名卷，`down` 再 `up` 数据还在；`var/` 是宿主机目录，和 `make dev` 开发模式共用同一份；
+  ⑥ 不和现有流程打架：宿主机 `make` / `uv` 仍能连 compose 起的库；8000 / 3000 / 5433 都能在 `.env` 里改；
+  和 `scripts/dev_db.sh` 的 `bench-postgres` 的关系写清；
+  ⑦ 协议 C-27 在容器里照样成立：容器里看到的就是宿主机检出，脏工作区建实验被拒，`ALLOW_DIRTY=1` 才放行且标 dirty；
+  ⑧ 不改 `frontend/` 一个文件；前端镜像由 compose 构建，`NEXT_PUBLIC_API_BASE` 可配；
+  ⑨ `scripts/check_env.py` 加 docker compose v2 检查（AGENTS.md §6：新环境依赖要同步）；compose 文件有自动化测试
+  （worker 挂 sock、api 不挂、worker 无对外端口、`.env` 不进构建上下文）
+- **范围声明**：不做 `docker-compose.dev.yml`（开发用 `make dev`，两套编排只会各改各的）；
+  不做 MinIO（E10-T2 保留 Local，抽象层已就绪）；不碰 `frontend/`（队友在做）
+- **2026-09-21 实现记录**：`docker-compose.yml` + `deploy/{backend,frontend}/Dockerfile` + `deploy/backend/entrypoint.sh`
+  + `scripts/compose_smoke.sh` + `make compose-{build,up,down,ps,logs,cli,smoke}`。**代码不打进镜像**，仓库按宿主机原路径挂进容器——
+  DooD 下评测容器的挂载路径由宿主 dockerd 解释，容器里的路径必须和宿主机一样（细账在 `05-sandbox.md` §10.6 回填）。
+  Worker 容器以仓库属主的 uid 跑，评测容器仍是非 root + cap_drop=ALL + 断网。
+  **AC 对账**：① ✅ 干净复制目录 `make compose-up` 1 分 49 秒全 healthy，`/api/health` ok / 0008；② ✅ local；
+  ③ ✅ `make compose-smoke` Oracle 4/4、Noop 0/4、故障 0，评测容器 uid=1000 / CapEff=0 / NoNewPrivs=1 / 只有 lo；
+  ④ ✅ 两个镜像里 `find -name .env` 为空，缺 `ADMIN_TOKEN` 时 `compose config` 当场报错；⑤ ✅ `down` 再 `up` 四个实验都在；
+  ⑥ ✅ 宿主机 `uv run python -m cli.experiment status` 指到 5434 列出同一批实验，三个端口 `.env` 可改（有测试）；
+  ⑦ ✅ 容器里脏工作区建实验被拒、`--allow-dirty` 标 dirty=true；⑧ ✅ `frontend/` 零改动；⑨ ✅ `check_env.py` 加 compose ≥ 2.20，
+  `tests/unit/test_compose_deploy.py` 7 条（6 条带 docker 标记）。
+  **踩到的坑**：清华 debian/pypi 源 403、USTC pypi 限流 429（默认改阿里云）；`uv sync --frozen` 换不了源（改 `uv export` 再装）；
+  Docker Hub 拉不动 node（前端底座改 python:3.11-slim + npmmirror 的 node tar 包）；路径含中文时 buildx 一次建两个镜像报错（逐个建）。
+  前端镜像 1.45 GB，因为不能改 `frontend/` 加 standalone，node_modules 留在运行时层。
 ### E10-T2 MinioArtifactStore 接入与切换验证 · **P1 · C:S · E:0.5d**
 ### E10-T3 报告生成器（HTML + Markdown + JSON，含每题轨迹链接） · **P1 · C:L · E:2d** ✅
 - **Goal**：从已有实验生成可归档、可复核、可机器读取的统一报告
@@ -2121,6 +2153,18 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   这里先记一笔）。两处缺口归 E10-T3 报告生成器补，本卡的实验部分已完成。
 ### E10-T5 Harness Replay 校准实验（MET-01） · **P1 · C:M · E:1d**
 ### E10-T6 部署文档 / 使用文档 / 架构文档 · **P0 · C:M · E:1.5d**
+- **Goal**：DEL-06。三份文档：`docs/deployment.md`（怎么装）、`docs/usage.md`（怎么用）、`docs/architecture.md`（怎么做的），
+  读者按 AGENTS.md §3 定为软件工程本科生
+- **Req**：NFR-08、P1-14 · **Deps**：E10-T1 · **Modules**：`docs/`
+- **AC（2026-09-21 定，卡片原本只有标题这一行）**：
+  ① 部署文档里每条命令都在本机按顺序原样执行过（贴回显）；含 §10.6 要求写进部署文档的四条：
+  代理三处、Docker Desktop 共存、端口避让、DooD 的宿主机权限暴露；
+  ② 使用文档覆盖完整旅程：建镜像 → 灌题 → 配 Agent → 建实验 → 看进度 → 排行榜 / 报告 → 归因 / 抽检 → 发布数据集；
+  每条命令核对过 `--help`；
+  ③ 架构文档的模块分层和 `backend/pyproject.toml` 的 import-linter 合同一致，表清单和 `app/infrastructure/models/` 一致；
+  写明未做项（MinIO、Replay）和原因（§26.2 的主动披露纪律）；
+  ④ README / CONTRIBUTING / AGENTS.md 指向这三份；DEL-06 的验收方式是"未参与开发的同学照文档在干净环境部署成功"，
+  部署文档末尾留一节验收记录，由那位同学填 —— 这一步不能由作者自己代替
 ### E10-T7 答辩演示脚本与录屏兜底 · **P0 · C:S · E:0.5d**
 
 ---

@@ -108,6 +108,31 @@ def check_artifact_store() -> None:
 MIN_GIT_VERSION = (2, 32)
 
 
+#: 一键部署要求的最低 docker compose 版本。
+#:
+#: 2.20 是硬门槛：docker-compose.yml 用了 `depends_on.condition: service_completed_successfully`
+#: （api / worker 要等迁移跑完）和 `up --wait`（等健康检查），v1（python 写的 docker-compose）
+#: 和更早的 v2 不认，报错是"unsupported"或者干脆忽略掉，api 会赶在建表之前起来。
+MIN_COMPOSE_VERSION = (2, 20)
+
+
+def check_compose() -> None:
+    """docker compose 插件在不在、版本够不够（E10-T1 一键部署用）。"""
+    code, out = run_cmd(["docker", "compose", "version", "--short"])
+    version = out.strip().lstrip("v") if code == 0 else "?"
+    try:
+        numbers = tuple(int(x) for x in version.split(".")[:2])
+    except ValueError:
+        numbers = ()
+    check(
+        f"docker compose ≥ {MIN_COMPOSE_VERSION[0]}.{MIN_COMPOSE_VERSION[1]}",
+        code == 0 and numbers >= MIN_COMPOSE_VERSION,
+        version if code == 0 else "未安装（要 docker-compose-plugin，不是老的 docker-compose）",
+        "一键部署（make compose-up）用不了；开发模式 make dev 不受影响",
+        warn_only=True,
+    )
+
+
 def check_git() -> None:
     """git 命令行的版本。评测的工作区物化全靠它（协议 C-43）。"""
     if shutil.which("git") is None:
@@ -260,6 +285,7 @@ def main() -> int:
     else:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
 
+    check_compose()
     check_git()
     check_golden_image()
     check_base_image()

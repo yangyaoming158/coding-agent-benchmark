@@ -12,7 +12,8 @@ SHELL := /bin/bash
         worker enqueue queue stress-sweep stress-hold stress-oom \
         dev dev-api dev-web web-install web-lint web-build gen-api report schema \
         golden golden-verify images images-aider images-claude-code test-agent \
-        images-base images-envs images-list images-gc
+        images-base images-envs images-list images-gc \
+        compose-build compose-up compose-down compose-ps compose-logs compose-cli compose-smoke
 
 BACKEND := backend
 FRONTEND := frontend
@@ -332,6 +333,43 @@ images-aider:        ## 建 Aider 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)�
 
 images-claude-code:  ## 建 Claude Code 的 Agent 镜像（要先有 $(GOLDEN_IMAGE)）
 	docker build -t $(CLAUDE_CODE_IMAGE) images/claude-code
+
+# ── E10-T1：docker compose 一键部署 ─────────────────────────
+# Worker 在容器里用宿主机的 dockerd 起评测容器，所以仓库要按**宿主机原路径**挂进容器
+# （理由见 docker-compose.yml 顶部）。这里把当前目录传进去；绕开 make 直接 `docker compose`
+# 的话要在 .env 里写 BENCH_REPO_DIR。端口在 .env 里改（BENCH_API_PORT / BENCH_WEB_PORT / BENCH_PG_PORT）。
+COMPOSE := BENCH_REPO_DIR="$(CURDIR)" docker compose
+
+# 两个镜像**逐个**建，不用 `docker compose build` 一把建：仓库路径含非 ASCII 字符（比如中文）时，
+# 一条命令建两个会报 `header key "x-docker-expose-session-sharedkey" contains value with
+# non-printable ASCII characters`（buildx 0.36.1，2026-09-21 实测；纯 ASCII 路径正常）。
+# 同理 compose-up 不带 --build。
+compose-build:       ## 建平台的两个镜像（后端运行时 + 前端）
+	$(COMPOSE) build api
+	$(COMPOSE) build frontend
+
+compose-up: compose-build   ## 一键起 postgres / migrate / api / worker / frontend，等到全部 healthy
+	$(COMPOSE) up -d --wait
+	@echo "API   http://localhost:$$($(COMPOSE) port api 8000 | sed 's/.*://')/docs"
+	@echo "前端  http://localhost:$$($(COMPOSE) port frontend 3000 | sed 's/.*://')"
+	@echo "下一步：make compose-smoke 跑一遍 Golden 冒烟；平台命令用 make compose-cli CMD=\"python -m cli.seed\""
+
+compose-down:        ## 停掉并删容器，数据卷保留（真要删库：docker compose down -v）
+	$(COMPOSE) down
+
+compose-ps:          ## 看五个服务的状态
+	$(COMPOSE) ps
+
+compose-logs:        ## 跟日志：make compose-logs SERVICE=worker（不给就全部）
+	$(COMPOSE) logs -f --tail=100 $(SERVICE)
+
+# cli 服务和 worker 同一份配置（挂 docker.sock、按仓库属主 uid 跑），`up` 不起它。
+# 能起容器的命令（cli.validate、cli.images）也在这里跑，不用装 uv。
+compose-cli:         ## 在容器里跑一条平台命令：make compose-cli CMD="python -m cli.seed"
+	$(COMPOSE) run --rm cli $(CMD)
+
+compose-smoke:       ## 部署冒烟：Golden 4 题 Oracle 4/4、Noop 0/4（脏工作区加 ALLOW_DIRTY=1）
+	BENCH_REPO_DIR="$(CURDIR)" ./scripts/compose_smoke.sh
 
 clean:               ## 清理缓存
 	find . -type d -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true

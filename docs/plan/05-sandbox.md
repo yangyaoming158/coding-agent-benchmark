@@ -156,6 +156,37 @@ Agent 阶段需要访问 LLM API，但**绝不能**访问 github.com（会搜到
 
 上述四条应作为 `scripts/check_env.py` 的检查项，在每次启动 EvaluationRun 前自动校验——**在长跑实验开始前失败，远好过跑到一半才发现连错了 daemon**。
 
+### DooD 部署实测回填（2026-09-21，E10-T1）
+
+上面"Worker 挂 docker.sock"那一句落地成了 `docker-compose.yml`（postgres / migrate / api / worker / frontend，
+另有一个只给 `run` 用的 `cli` 服务）。实测时发现三件事，规格里没写、代码注释里只提了半句：
+
+**一、容器里的路径必须和宿主机一模一样，否则评测容器拿到的是空目录，而且不报错。**
+Worker 起评测容器时把工作区路径原样交给 dockerd（`container.py` 的 `_create_kwargs()` 里是 `str(m.source)`），
+dockerd 按**宿主机**的文件系统解释它——路径不存在就新建一个空目录挂进去。要挂进评测容器的不只 `var/workspaces`：
+MiniAgent 的 `miniagent_runtime.py`（`backend/app/runner/`）和 aider 的 `images/aider/model-settings/` 也在仓库里。
+所以 compose 把**整个仓库按宿主机原路径**挂进 api / worker / cli 三个容器，镜像里只有 Python 依赖不装代码，
+三处路径一个字都不用翻译；顺带 C-27 的 `git status` 在容器里看到的也是同一个检出（脏工作区建实验照样被拒，实测过）。
+代价是 `.env` 里要有仓库绝对路径（`BENCH_REPO_DIR`，`make compose-up` 自动传）。
+
+**二、Worker 不能以 root 跑。** 容器默认是 root，而 `default_container_user()` 在 harness 是 root 时让评测容器退到 nobody：
+工作区是 root 建的，nobody 写不进去，被测 AI 一个文件都改不了，全部 UNRESOLVED，还像是 AI 自己不行。
+入口脚本（`deploy/backend/entrypoint.sh`）读仓库目录的属主，用 `setpriv` 切成那个 uid/gid，再把 `docker.sock` 的属组挂上。
+实测容器里 `id` 是 `1000:1000 + 1001(dockersock)`，经它起的评测容器 `uid=1000`、`CapEff` 全零、`NoNewPrivs=1`、只有 `lo` 网卡——
+和宿主机直接 `make worker` 起的一模一样，部署方式没改 §10.3 的任何一条。
+
+**三、这台机器上的三个网络坑，都不是代码的事。** ① 清华的 debian 和 pypi 源当天返回 403（`images/base/Dockerfile` 用的就是它，
+下次建 env 镜像会撞上）；USTC 的 pypi 对 uv 并发下载限流 429；阿里云两样都正常，两个平台 Dockerfile 默认阿里云、build-arg 可换。
+② `uv sync --frozen` 按 `uv.lock` 里记的**绝对 URL** 下载，`--default-index` 换不掉源，所以镜像里是 `uv export` 导出锁定版本（带 sha256）再装。
+③ `docker pull node:24-alpine` / `python:3.12-slim` 过代理 10 分钟拉不到 6 MB，前端镜像改成 `python:3.11-slim`（建过 bench-base 的机器都有）
++ 从 npmmirror 下 node tar 包（31 MB，12 MB/s，SHA256 与官方一致）。另外 buildx 0.36.1 在**路径含中文**时一条命令建两个镜像会报
+`x-docker-expose-session-sharedkey ... non-printable ASCII characters`，纯 ASCII 路径正常——`make compose-build` 逐个建绕开。
+
+**证据（在一份带空格和中文路径的干净复制目录里，`.env` 从 `.env.example` 抄、只填 `ADMIN_TOKEN`）**：`make compose-up` 1 分 49 秒五个服务全 healthy，
+`/api/health` 返回 `status=ok, migration_revision=0008`；`make compose-smoke` 48 秒：八步验证 4/4 VALID → Oracle #3 COMPLETED 4/4、
+Noop #4 COMPLETED 0/4、平台故障 0、`dirty=false`；`docker compose down` 再 `up` 四个实验都在；宿主机 `uv run python -m cli.experiment status`
+指到 5434 能列出同一批实验。DEL-06 要求的"未参与开发的同学照文档部署"还没做，那是 E10-T6 的验收步骤。
+
 ---
 
 ## 10.7 工作区物化的实现决策（E2-T1 落地回填，2026-09-04）
