@@ -186,6 +186,8 @@ MiniAgent 的 `miniagent_runtime.py`（`backend/app/runner/`）和 aider 的 `im
 `/api/health` 返回 `status=ok, migration_revision=0008`；`make compose-smoke` 48 秒：八步验证 4/4 VALID → Oracle #3 COMPLETED 4/4、
 Noop #4 COMPLETED 0/4、平台故障 0、`dirty=false`；`docker compose down` 再 `up` 四个实验都在；宿主机 `uv run python -m cli.experiment status`
 指到 5434 能列出同一批实验。DEL-06 要求的"未参与开发的同学照文档部署"还没做，那是 E10-T6 的验收步骤。
+**2026-09-21 晚（E10-T6）**：上面四条约束和三个网络坑已写成 `docs/deployment.md` §5、§6；同一份副本 `down -v` 清空后按文档重走一遍：
+`compose-up` 19 秒（镜像已缓存）、冒烟 50 秒 Oracle 4/4 / Noop 0/4、`down` 再 `up` 22 秒实验都在。验收记录表在那份文档 §9，等非开发同学填。
 
 ---
 
