@@ -6,14 +6,24 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from pathlib import Path
 
+import pytest
 import sqlalchemy as sa
 from sqlalchemy.orm import Session
 
-from app.domain.enums import AgentKind, ArtifactKind, ReportFormat
+from app.domain.enums import (
+    AgentKind,
+    AgentOutcome,
+    ArtifactKind,
+    BenchmarkSetStatus,
+    InfraOutcome,
+    LifecycleStatus,
+    ReportFormat,
+)
 from app.infrastructure.models.artifact import Artifact
 from app.infrastructure.models.attribution import ReportRecord
+from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkSetItem
 from app.infrastructure.models.evaluation import EvaluationTaskRun
-from app.report.aggregate import build_report
+from app.report.aggregate import ReportInputError, build_report
 from app.report.service import persist_report
 from app.storage import LocalArtifactStore
 from tests.integration.test_api_leaderboard import World
@@ -90,3 +100,75 @@ def test_persist_report_writes_real_artifact_and_report_rows(session: Session, t
     assert {row.format for row in record_rows} == set(ReportFormat)
     assert all(row.run_ids == [run.id] for row in record_rows)
     assert all(store.exists(ref.key) for ref in generated.artifacts.values())
+
+
+def test_mixed_datasets_keep_separate_scores_and_count_137_attempts(session: Session) -> None:
+    world = World(session)
+    config_id = world.contestant("aider", "aider@deepseek-chat", kind=AgentKind.CLI)
+    chinese = world.run(config_id, resolved=2)
+    official_set = BenchmarkSet(
+        slug="swebench-verified-subset",
+        version="v3",
+        title="官方校准集",
+        status=BenchmarkSetStatus.PUBLISHED,
+        task_count=6,
+    )
+    session.add(official_set)
+    session.flush()
+    for index, task_id in enumerate(world.task_ids):
+        session.add(
+            BenchmarkSetItem(
+                benchmark_set_id=official_set.id,
+                benchmark_task_id=task_id,
+                task_content_hash=f"{index:064d}",
+                position=index,
+            )
+        )
+    world.dataset = official_set
+    official = world.run(config_id, resolved=4)
+    first_task = session.scalar(
+        sa.select(EvaluationTaskRun).where(
+            EvaluationTaskRun.evaluation_run_id == chinese.id,
+            EvaluationTaskRun.agent_outcome == AgentOutcome.UNRESOLVED,
+        )
+    )
+    assert first_task is not None
+    session.add(
+        EvaluationTaskRun(
+            evaluation_run_id=chinese.id,
+            benchmark_task_id=first_task.benchmark_task_id,
+            attempt_no=2,
+            lifecycle_status=LifecycleStatus.COMPLETED,
+            infra_outcome=InfraOutcome.AGENT_RUNTIME_ERROR,
+            agent_outcome=AgentOutcome.UNRESOLVED,
+            agent_started_at=chinese.created_at,
+            exit_code=137,
+            is_canonical=False,
+        )
+    )
+    first_task.exit_code = 137
+    first_task.infra_outcome = InfraOutcome.AGENT_TIMEOUT
+    session.flush()
+
+    report = build_report(session, [chinese.id, official.id])
+
+    assert report.dataset is None
+    assert [item.slug for item in report.datasets] == ["benchmark-dev", "swebench-verified-subset"]
+    assert report.combined_task_count == 12
+    assert len(report.agents) == 2
+    assert any("失败归因与性能总量覆盖全部所选运行" in warning for warning in report.warnings)
+    assert [source.resolved_counts for source in report.combined_agents[0].sources] == [[2], [4]]
+    assert {row.dataset_label for row in report.task_results} == {
+        "benchmark-dev@v1",
+        "swebench-verified-subset@v3",
+    }
+    assert report.sigkill_without_oom_flag_count == 1
+    assert [run.sigkill_without_oom_flag_count for run in report.runs] == [1, 0]
+
+    official.protocol_version = "v1.3"
+    with pytest.raises(ReportInputError, match="协议版本不同"):
+        build_report(session, [chinese.id, official.id])
+    official.protocol_version = "v1.2"
+    official_set.slug = "benchmark-dev"
+    with pytest.raises(ReportInputError, match="同一个数据集的不同版本"):
+        build_report(session, [chinese.id, official.id])

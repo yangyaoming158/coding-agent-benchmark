@@ -12,7 +12,14 @@ from html import escape
 from typing import Final
 
 from app.domain.enums import FailureCategory
-from app.report.models import AgentSummary, Availability, FailureCase, ReportData, TaskResult
+from app.report.models import (
+    AgentSummary,
+    Availability,
+    DatasetInfo,
+    FailureCase,
+    ReportData,
+    TaskResult,
+)
 
 _MISSING: Final = "不可用"
 
@@ -83,6 +90,33 @@ def _case_links(case: FailureCase | TaskResult) -> str:
     return " / ".join(links) or _MISSING
 
 
+def _datasets(report: ReportData) -> list[DatasetInfo]:
+    return report.datasets or ([report.dataset] if report.dataset is not None else [])
+
+
+def _combined_headers(report: ReportData) -> list[str]:
+    return ["Agent", *[f"{item.slug}@{item.version}" for item in _datasets(report)], "总题数"]
+
+
+def _combined_cells(report: ReportData) -> list[list[object]]:
+    """各版逐轮显示解决数；总题数只说明覆盖范围，不生成混合解决率。"""
+    return [
+        [
+            agent.label,
+            *[
+                "；".join(
+                    f"#{run_id} {count}/{source.task_count}"
+                    for run_id, count in zip(source.run_ids, source.resolved_counts, strict=True)
+                )
+                or _MISSING
+                for source in agent.sources
+            ],
+            report.combined_task_count or _MISSING,
+        ]
+        for agent in report.combined_agents
+    ]
+
+
 def render_markdown(report: ReportData) -> str:
     """渲染便于代码评审和归档的 Markdown 报告。"""
     lines = [
@@ -90,8 +124,16 @@ def render_markdown(report: ReportData) -> str:
         "",
         f"生成时间：{report.generated_at.isoformat()}  ",
         f"范围：{report.scope}；运行：{', '.join('#' + str(i) for i in report.run_ids)}  ",
-        f"数据集：{report.dataset.slug}@{report.dataset.version}（{report.dataset.task_count} 题）  ",
-        f"快照：{report.dataset.snapshot_digest or _MISSING}",
+        "数据集："
+        + "、".join(
+            f"{item.slug}@{item.version}（{item.task_count} 题）" for item in _datasets(report)
+        )
+        + "  ",
+        "快照："
+        + "、".join(
+            f"{item.slug}@{item.version}={item.snapshot_digest or _MISSING}"
+            for item in _datasets(report)
+        ),
         "",
         "## 数据完整性说明",
         "",
@@ -100,9 +142,21 @@ def render_markdown(report: ReportData) -> str:
     if not report.warnings:
         lines.append("- 未发现缺失或范围警告。")
 
+    if report.combined_agents:
+        lines += [
+            "",
+            "## 跨数据集合并表",
+            "",
+            "每个来源分别统计；总题数为各版题数之和，不计算混合解决率。",
+            "",
+            _md_table(_combined_headers(report), _combined_cells(report)),
+        ]
+
     agent_rows = [
         [
             agent.label,
+            agent.dataset_label
+            or (f"{report.dataset.slug}@{report.dataset.version}" if report.dataset else _MISSING),
             agent.model_name,
             agent.run_count,
             _pct(agent.resolve_rate_mean),
@@ -111,7 +165,11 @@ def render_markdown(report: ReportData) -> str:
             _pct(agent.resolve_rate_max),
             _pct(agent.resolve_rate_spread),
             _pct(agent.task_outcome_flip_rate),
+            f"{agent.patch_different_flip_count}（{_pct(agent.patch_different_flip_rate)}）",
+            f"{agent.same_nonempty_patch_flip_count}（{_pct(agent.same_nonempty_patch_flip_rate)}）"
+            + (" ⚠ 平台报警" if agent.patch_consistency_alarm else ""),
             agent.infra_failure_total,
+            agent.sigkill_without_oom_flag_count,
             agent.retry_total,
         ]
         for agent in report.agents
@@ -123,6 +181,7 @@ def render_markdown(report: ReportData) -> str:
         _md_table(
             [
                 "Agent",
+                "数据集",
                 "模型",
                 "轮数",
                 "严格解决率",
@@ -131,19 +190,55 @@ def render_markdown(report: ReportData) -> str:
                 "最高",
                 "轮间极差",
                 "逐题翻转率",
+                "补丁不同",
+                "同补丁不同结论",
                 "平台故障",
+                "137 无 OOM 标志（推算）",
                 "重试",
             ],
             agent_rows,
         ),
         "",
+        "注：同补丁只统计同一份非空标准化补丁；空补丁失败状态变化单独记录，不触发平台报警。",
+        "空补丁状态变化："
+        + "、".join(
+            f"{agent.label} × {agent.dataset_label}: {agent.same_empty_patch_status_flip_count}"
+            for agent in report.agents
+        )
+        + "。",
+        "无 Agent 结论的翻转："
+        + "、".join(
+            f"{agent.label} × {agent.dataset_label}: {agent.no_agent_conclusion_flip_count}"
+            for agent in report.agents
+        )
+        + "；保留在总翻转率中，不纳入补丁对比。",
+        "",
+        "### 137 无 OOM 标志次数（推算）",
+        "",
+        "按所有 attempt 统计：exit_code=137，且 infra_outcome 不属于 OOM_KILLED / AGENT_TIMEOUT / TEST_TIMEOUT；这是数据库推算值，不是 Worker 日志条数。",
+        f"报告合计：{report.sigkill_without_oom_flag_count} 次。",
+        "",
+        _md_table(
+            ["运行", "Agent", "数据集", "137 无 OOM 标志（推算）"],
+            [
+                [
+                    f"#{run.id}",
+                    run.agent_label,
+                    run.dataset_label,
+                    run.sigkill_without_oom_flag_count,
+                ]
+                for run in report.runs
+            ],
+        ),
+        "",
         "## 成本—解决率",
         "",
         _md_table(
-            ["Agent", "严格解决率", "每题成本", "P50", "P95", "费用来源"],
+            ["Agent", "数据集", "严格解决率", "每题成本", "P50", "P95", "费用来源"],
             [
                 [
                     agent.label,
+                    agent.dataset_label,
                     _pct(agent.resolve_rate_mean),
                     _money(agent.cost_per_task),
                     _money(agent.cost_distribution.p50_usd),
@@ -159,21 +254,43 @@ def render_markdown(report: ReportData) -> str:
         rows: list[list[object]] = []
         for agent in report.agents:
             rows.extend(
-                [agent.label, cell.value, f"{cell.resolved}/{cell.total}", _pct(cell.resolve_rate)]
+                [
+                    agent.label,
+                    agent.dataset_label,
+                    cell.value,
+                    f"{cell.resolved}/{cell.total}",
+                    _pct(cell.resolve_rate),
+                ]
                 for cell in agent.facets.get(facet, [])
             )
-        lines += ["", f"### 按{title}", "", _md_table(["Agent", title, "解决数", "解决率"], rows)]
+        lines += [
+            "",
+            f"### 按{title}",
+            "",
+            _md_table(["Agent", "数据集", title, "解决数", "解决率"], rows),
+        ]
 
     lines += [
         "",
         "## 每题结果与制品",
         "",
         _md_table(
-            ["运行", "Agent", "题目", "平台结果", "Agent 结果", "成本来源", "成本", "制品"],
+            [
+                "运行",
+                "Agent",
+                "数据集",
+                "题目",
+                "平台结果",
+                "Agent 结果",
+                "成本来源",
+                "成本",
+                "制品",
+            ],
             [
                 [
                     f"#{row.run_id}",
                     row.agent_label,
+                    row.dataset_label or _MISSING,
                     f"{row.task_id} — {row.issue_title}",
                     row.infra_outcome or _MISSING,
                     row.agent_outcome or _MISSING,
@@ -257,11 +374,12 @@ def render_markdown(report: ReportData) -> str:
         "### Top 失败案例",
         "",
         _md_table(
-            ["运行", "Agent", "题目", "类别", "判定", "制品"],
+            ["运行", "Agent", "数据集", "题目", "类别", "判定", "制品"],
             [
                 [
                     f"#{case.run_id}",
                     case.agent_label,
+                    case.dataset_label,
                     f"{case.task_id} — {case.issue_title}",
                     case.category or "UNATTRIBUTED",
                     case.agent_outcome or case.infra_outcome or _MISSING,
@@ -297,9 +415,9 @@ def _scatter(report: ReportData) -> str:
         color = ("#36c5b0", "#ffb454", "#8da2fb", "#f07178")[index % 4]
         circles.append(
             f'<circle cx="{x:.1f}" cy="{y:.1f}" r="7" fill="{color}"><title>'
-            f"{escape(agent.label)}：{escape(_money(agent.cost_per_task))} / {escape(_pct(agent.resolve_rate_mean))}"
+            f"{escape(agent.label)} × {escape(agent.dataset_label)}：{escape(_money(agent.cost_per_task))} / {escape(_pct(agent.resolve_rate_mean))}"
             "</title></circle>"
-            f'<text x="{x + 11:.1f}" y="{y + 4:.1f}">{escape(agent.label)}</text>'
+            f'<text x="{x + 11:.1f}" y="{y + 4:.1f}">{escape(agent.label)} · {escape(agent.dataset_label)}</text>'
         )
     return (
         '<svg class="chart" viewBox="0 0 680 360" role="img" aria-label="成本解决率散点图">'
@@ -327,6 +445,7 @@ def _task_result_table(rows: Sequence[TaskResult]) -> str:
     body = "".join(
         "<tr>"
         f"<td>#{row.run_id}</td><td>{escape(row.agent_label)}</td>"
+        f"<td>{escape(row.dataset_label or _MISSING)}</td>"
         f"<td>{escape(row.task_id)} — {escape(row.issue_title)}</td>"
         f"<td>{escape(row.infra_outcome or _MISSING)}</td>"
         f"<td>{escape(row.agent_outcome or _MISSING)}</td>"
@@ -336,7 +455,7 @@ def _task_result_table(rows: Sequence[TaskResult]) -> str:
         for row in rows
     )
     return (
-        '<div class="table-wrap"><table><thead><tr><th>运行</th><th>Agent</th>'
+        '<div class="table-wrap"><table><thead><tr><th>运行</th><th>Agent</th><th>数据集</th>'
         "<th>题目</th><th>平台结果</th><th>Agent 结果</th><th>成本来源</th>"
         f"<th>成本</th><th>制品</th></tr></thead><tbody>{body}</tbody></table></div>"
     )
@@ -351,13 +470,19 @@ def render_html(report: ReportData) -> str:
     agent_rows = [
         [
             a.label,
+            a.dataset_label
+            or (f"{report.dataset.slug}@{report.dataset.version}" if report.dataset else _MISSING),
             a.model_name,
             a.run_count,
             _pct(a.resolve_rate_mean),
             _pct(a.effective_resolve_rate_mean),
             _pct(a.resolve_rate_spread),
             _pct(a.task_outcome_flip_rate),
+            f"{a.patch_different_flip_count}（{_pct(a.patch_different_flip_rate)}）",
+            f"{a.same_nonempty_patch_flip_count}（{_pct(a.same_nonempty_patch_flip_rate)}）"
+            + (" ⚠ 平台报警" if a.patch_consistency_alarm else ""),
             a.infra_failure_total,
+            a.sigkill_without_oom_flag_count,
             a.retry_total,
         ]
         for a in report.agents
@@ -365,6 +490,7 @@ def render_html(report: ReportData) -> str:
     cost_rows = [
         [
             a.label,
+            a.dataset_label,
             _pct(a.resolve_rate_mean),
             _money(a.cost_per_task),
             _money(a.cost_distribution.p50_usd),
@@ -394,6 +520,7 @@ def render_html(report: ReportData) -> str:
     top_rows = "".join(
         "<tr>"
         f"<td>#{case.run_id}</td><td>{escape(case.agent_label)}</td>"
+        f"<td>{escape(case.dataset_label or _MISSING)}</td>"
         f"<td>{escape(case.task_id)} — {escape(case.issue_title)}</td>"
         f"<td>{escape(case.category or 'UNATTRIBUTED')}</td>"
         f"<td>{escape(case.agent_outcome or case.infra_outcome or _MISSING)}</td>"
@@ -401,6 +528,28 @@ def render_html(report: ReportData) -> str:
         for case in report.failures.top_cases
     )
     projection = "不可用"
+    combined = ""
+    if report.combined_agents:
+        combined = (
+            "<h2>跨数据集合并表</h2><p>每个来源分别统计；总题数为各版题数之和，不计算混合解决率。</p>"
+            + _html_table(_combined_headers(report), _combined_cells(report))
+        )
+    dataset_meta = "、".join(
+        f"{item.slug}@{item.version} · {item.task_count} 题" for item in _datasets(report)
+    )
+    empty_patch_note = "、".join(
+        f"{agent.label} × {agent.dataset_label}: {agent.same_empty_patch_status_flip_count}"
+        for agent in report.agents
+    )
+    no_conclusion_note = "、".join(
+        f"{agent.label} × {agent.dataset_label}: {agent.no_agent_conclusion_flip_count}"
+        for agent in report.agents
+    )
+    alarm_banner = (
+        '<p class="alarm">平台报警：同一份非空标准化补丁在不同轮次得出不同结论，请核查判定证据。</p>'
+        if any(agent.patch_consistency_alarm for agent in report.agents)
+        else ""
+    )
     if report.performance.projection is not None:
         p = report.performance.projection
         projection = (
@@ -412,16 +561,21 @@ def render_html(report: ReportData) -> str:
     *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.55 system-ui,sans-serif}
     main{max-width:1180px;margin:auto;padding:38px 24px 80px}h1{font-size:34px;margin:0 0 8px}h2{margin-top:38px;border-bottom:1px solid var(--line);padding-bottom:8px}
     .meta,.missing{color:var(--muted)}.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin:18px 0}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px}
-    .stat{background:#0e1629;border-radius:8px;padding:14px}.stat b{display:block;color:var(--accent);font-size:22px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;margin:12px 0 20px}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);vertical-align:top}th{color:#b9c8e8;white-space:nowrap}a{color:#65d7c7}.chart{max-width:720px;width:100%;background:#0e1629;border-radius:10px}.chart line{stroke:#657595;stroke-width:1}.chart text{fill:#cfd8ea;font-size:12px}
+    .stat{background:#0e1629;border-radius:8px;padding:14px}.stat b{display:block;color:var(--accent);font-size:22px}.table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;margin:12px 0 20px}th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);vertical-align:top}th{color:#b9c8e8;white-space:nowrap}a{color:#65d7c7}.alarm{color:#ff6b6b;font-weight:700}.chart{max-width:720px;width:100%;background:#0e1629;border-radius:10px}.chart line{stroke:#657595;stroke-width:1}.chart text{fill:#cfd8ea;font-size:12px}
     """
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{escape(report.title)}</title><style>{css}</style></head><body><main>
 <h1>{escape(report.title)}</h1>
-<p class="meta">{escape(report.dataset.slug)}@{escape(report.dataset.version)} · {report.dataset.task_count} 题 · 运行 {escape(", ".join("#" + str(i) for i in report.run_ids))} · {escape(report.generated_at.isoformat())}</p>
+<p class="meta">{escape(dataset_meta)} · 运行 {escape(", ".join("#" + str(i) for i in report.run_ids))} · {escape(report.generated_at.isoformat())}</p>
 <section class="card"><h2>数据完整性说明</h2><ul>{warnings}</ul></section>
-<h2>Agent 对比</h2>{_html_table(["Agent", "模型", "轮数", "严格解决率", "有效解决率", "轮间极差", "逐题翻转率", "平台故障", "重试"], agent_rows)}
-<h2>成本—解决率</h2>{_scatter(report)}{_html_table(["Agent", "严格解决率", "每题成本", "P50", "P95", "费用来源"], cost_rows)}
+{combined}
+<h2>Agent 对比</h2>{alarm_banner}{_html_table(["Agent", "数据集", "模型", "轮数", "严格解决率", "有效解决率", "轮间极差", "逐题翻转率", "补丁不同", "同补丁不同结论", "平台故障", "137 无 OOM 标志（推算）", "重试"], agent_rows)}
+<p>同补丁只统计同一份非空标准化补丁；空补丁失败状态变化单独记录，不触发平台报警。空补丁状态变化：{escape(empty_patch_note)}。</p>
+<p>无 Agent 结论的翻转：{escape(no_conclusion_note)}；保留在总翻转率中，不纳入补丁对比。</p>
+<h3>137 无 OOM 标志次数（推算）</h3><p>按所有 attempt 统计：exit_code=137，且 infra_outcome 不属于 OOM_KILLED / AGENT_TIMEOUT / TEST_TIMEOUT；这是数据库推算值，不是 Worker 日志条数。报告合计：{report.sigkill_without_oom_flag_count} 次。</p>
+{_html_table(["运行", "Agent", "数据集", "137 无 OOM 标志（推算）"], [[f"#{run.id}", run.agent_label, run.dataset_label, run.sigkill_without_oom_flag_count] for run in report.runs])}
+<h2>成本—解决率</h2>{_scatter(report)}{_html_table(["Agent", "数据集", "严格解决率", "每题成本", "P50", "P95", "费用来源"], cost_rows)}
 <h2>每题结果与制品</h2>{_task_result_table(report.task_results)}
 <h2>性能与容量</h2><div class="grid">
 <div class="stat"><span>批次 makespan</span><b>{escape(_seconds(report.performance.batch_makespan_minutes * 60 if report.performance.batch_makespan_minutes is not None else None))}</b></div>
@@ -437,7 +591,7 @@ def render_html(report: ReportData) -> str:
 <p>LLM 归因：{escape(_availability(report.failures.llm_attribution))}<br>
 盲检准确率：{escape(_availability(report.failures.review_accuracy, _pct(report.failures.review_accuracy_value)))}<br>
 Cohen's κ：{escape(_availability(report.failures.kappa, f"{report.failures.kappa_value:.3f}" if report.failures.kappa_value is not None else None))}</p>
-<h3>Top 失败案例</h3><div class="table-wrap"><table><thead><tr><th>运行</th><th>Agent</th><th>题目</th><th>类别</th><th>判定</th><th>制品</th></tr></thead><tbody>{top_rows}</tbody></table></div>
+<h3>Top 失败案例</h3><div class="table-wrap"><table><thead><tr><th>运行</th><th>Agent</th><th>数据集</th><th>题目</th><th>类别</th><th>判定</th><th>制品</th></tr></thead><tbody>{top_rows}</tbody></table></div>
 </main></body></html>"""
 
 

@@ -26,7 +26,7 @@ class Availability(ReportModel):
 
 
 class DatasetInfo(ReportModel):
-    """本报告对应的唯一数据集快照。"""
+    """本报告涉及的一版数据集快照。"""
 
     id: int
     slug: str
@@ -61,6 +61,8 @@ class RunSummary(ReportModel):
     external_wait_ms: int
     dirty: bool
     excluded_reason: str | None
+    sigkill_without_oom_flag_count: int = 0
+    dataset_label: str = ""
 
 
 class FacetMetric(ReportModel):
@@ -112,6 +114,34 @@ class AgentSummary(ReportModel):
     infra_failure_rate: Decimal | None
     retry_total: int
     facets: dict[str, list[FacetMetric]]
+    dataset_label: str = ""
+    patch_different_flip_count: int = 0
+    patch_different_flip_rate: Decimal | None = None
+    same_nonempty_patch_flip_count: int = 0
+    same_nonempty_patch_flip_rate: Decimal | None = None
+    same_empty_patch_status_flip_count: int = 0
+    missing_patch_flip_count: int = 0
+    no_agent_conclusion_flip_count: int = 0
+    patch_consistency_alarm: bool = False
+    sigkill_without_oom_flag_count: int = 0
+
+
+class CombinedSourceResult(ReportModel):
+    """合并表中一个 Agent 在一版题集上的各轮结果。"""
+
+    dataset_label: str
+    task_count: int
+    run_ids: list[int]
+    resolved_counts: list[int]
+
+
+class CombinedAgentRow(ReportModel):
+    """合并表的一行；各来源各算各的解决数，不合算解决率。"""
+
+    agent_config_id: int
+    label: str
+    model_name: str
+    sources: list[CombinedSourceResult]
 
 
 class StageMetric(ReportModel):
@@ -207,6 +237,7 @@ class FailureCase(ReportModel):
     patch_url: str | None
     log_url: str | None
     trajectory_url: str | None
+    dataset_label: str = ""
 
 
 class TaskResult(ReportModel):
@@ -225,6 +256,7 @@ class TaskResult(ReportModel):
     patch_url: str | None
     log_url: str | None
     trajectory_url: str | None
+    dataset_label: str = ""
 
 
 class FailureSummary(ReportModel):
@@ -246,23 +278,29 @@ class FailureSummary(ReportModel):
 class ReportData(ReportModel):
     """HTML、Markdown、JSON 共用的唯一报告数据。"""
 
-    schema_version: str = "1.0"
+    schema_version: str = "2.0"
     generated_at: datetime
     title: str
     scope: str
     run_ids: list[int]
-    dataset: DatasetInfo
+    dataset: DatasetInfo | None
     warnings: list[str]
     runs: list[RunSummary]
     agents: list[AgentSummary]
     task_results: list[TaskResult]
     performance: PerformanceSummary
     failures: FailureSummary
+    datasets: list[DatasetInfo] = []
+    combined_task_count: int | None = None
+    combined_agents: list[CombinedAgentRow] = []
+    sigkill_without_oom_flag_count: int = 0
 
 
 __all__ = [
     "AgentSummary",
     "Availability",
+    "CombinedAgentRow",
+    "CombinedSourceResult",
     "ConcurrencyMetric",
     "ConcurrencyPoint",
     "CostDistribution",
