@@ -77,6 +77,10 @@ make check       # 全套检查，应该全绿
 
 跑 `python3 scripts/check_env.py` 可以自检环境，它把踩过的坑固化成了检查项。
 
+**只想把平台跑起来、不改代码**（验收、演示、换机器）：不用装 uv 和 Node，走 docker compose，
+看 [`docs/deployment.md`](docs/deployment.md)。装好之后怎么用看 [`docs/usage.md`](docs/usage.md)，
+代码怎么组织、为什么这么分层看 [`docs/architecture.md`](docs/architecture.md)（第 4 节的模块依赖方向在那里有完整版）。
+
 ---
 
 ## 1.5 接手一份已有的环境
@@ -318,4 +322,8 @@ make migrate-check   # 检查模型和迁移有没有对不上
 make seed            # 写入哨兵 Agent
 
 make report          # 改完 docs/plan/*.md 之后重新生成规划报告
+
+make compose-up      # docker compose 一键部署（见 docs/deployment.md）
+make compose-smoke   # 部署冒烟：Golden 4 题 Oracle 4/4、Noop 0/4（别在开发主仓库跑，理由见那份文档 §3 第 6 步）
+make compose-cli CMD="python -m cli.experiment status"   # 在容器里跑一条平台命令
 ```
