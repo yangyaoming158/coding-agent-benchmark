@@ -275,8 +275,10 @@ Agent 容器走桥接网络、环境变量按白名单注入（`AGENT_ENV_ALLOWL
 错误响应统一 `{code, message}`。排行榜的准入六条写在 `api/leaderboard.py` 的 `ELIGIBILITY_RULES`，随响应返回。
 
 前端 `frontend/`：Next.js 16 + React 19 + TypeScript，类型从后端 OpenAPI 生成（`make gen-api`，**不手写**，手写的漂移了不报错只会运行时拿到 undefined）。
-现在有两页：`/`（平台自检，把前端 → 后端 → 数据库这条链真跑通一次）和 `/review`（人工盲检工作台，E6-T3）。其余页面（实验列表、单次执行详情、排行榜…）是 E7，队友在做。
-实时性用轮询，不做 WebSocket（§29 NOT NOW）。
+十个页面（`docs/usage.md` §7.3 有表）：总览 `/`、数据集 `/benchmarks` 与 `/benchmarks/[slug]`、题 `/tasks/[taskId]`、Agent `/agents`、
+实验 `/runs` 与 `/runs/[id]`、单次执行 `/task-runs/[id]`、排行榜 `/leaderboard`、人工盲检 `/review`（E6-T3）。展示口径（枚举翻译、格子判定、
+排行榜数字、谁算参赛者）是 `src/lib/*.ts` 里的纯函数，`npm run check` 的断言脚本钉住。管理员令牌在页面上输入、只存当前标签页的 sessionStorage，
+不打进 JS。实时性用轮询（Run Detail 3 秒、列表和首页 10 秒，只在有活着的实验时开），不做 WebSocket（§29 NOT NOW）。
 
 ---
 
