@@ -56,7 +56,7 @@ function ResultRow({ row }: { row: TestResultRow }) {
   return (
     <tr className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50">
       <td className="px-3 py-2 font-mono text-xs text-neutral-800" title={row.test_id}>
-        <span className="block max-w-md truncate">{row.test_id}</span>
+        <span className="block max-w-xs truncate">{row.test_id}</span>
       </td>
       <td className="whitespace-nowrap px-3 py-2">
         <ToneBadge tone={ROLE_TONE[row.role]}>{row.role}</ToneBadge>
@@ -67,7 +67,7 @@ function ResultRow({ row }: { row: TestResultRow }) {
       <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-xs text-neutral-500">
         {formatMillis(row.duration_ms)}
       </td>
-      <td className="px-3 py-2 text-xs leading-relaxed text-neutral-600">
+      <td className="min-w-56 px-3 py-2 text-xs leading-relaxed text-neutral-600">
         {row.message_excerpt !== null && (
           <span className="line-clamp-2" title={row.message_excerpt}>
             {row.message_excerpt}
@@ -81,13 +81,19 @@ function ResultRow({ row }: { row: TestResultRow }) {
 export function TestResultTable({
   taskRunId,
   live = false,
+  defaultStatus = "",
 }: {
   taskRunId: number;
   /** 执行还没到终态时跟着轮询 —— 测试跑完一批就会多出一批结果。 */
   live?: boolean;
+  /**
+   * 初始的状态筛选。有用例挂了的执行传 "FAILED"：1320 条里挂了 4 条，
+   * 后端按用例 id 排、又是分页的，不筛的话那 4 条可能在第 3 页 —— 判定的依据要先看到。
+   */
+  defaultStatus?: TestStatus | "";
 }) {
   const [role, setRole] = useState<TestRole | "">("");
-  const [status, setStatus] = useState<TestStatus | "">("");
+  const [status, setStatus] = useState<TestStatus | "">(defaultStatus);
   const [offset, setOffset] = useState(0);
 
   const { data, error, isLoading, isFetching } = useTaskRunTests(
@@ -164,7 +170,7 @@ export function TestResultTable({
         {data && data.items.length === 0 && (
           <p className="rounded-md border border-neutral-200 bg-white px-4 py-6 text-sm text-neutral-500">
             {filtered
-              ? "这个筛选条件下没有用例。"
+              ? "这个筛选条件下没有用例。挂掉的用例可能记成了「错误」而不是「失败」，把状态切到全部看。"
               : "这次执行还没有用例结果 —— 判定还没走到测试那一步，或者执行提前终止了。"}
           </p>
         )}
@@ -180,7 +186,9 @@ export function TestResultTable({
                   <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                     耗时
                   </th>
-                  <th className="px-3 py-2 text-xs font-medium text-neutral-600">失败信息</th>
+                  <th className="whitespace-nowrap px-3 py-2 text-xs font-medium text-neutral-600">
+                    失败信息
+                  </th>
                 </tr>
               </thead>
               <tbody>

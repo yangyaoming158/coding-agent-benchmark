@@ -476,7 +476,7 @@ export function ReviewWorkbench() {
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">人工盲检</h1>
-          <Badge tone="warn">后端强制隐藏自动答案</Badge>
+          <Badge tone="warn">提交前接口不返回自动答案</Badge>
         </div>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
           两名标注者先独立判断；意见不一致时由第三人仲裁。提交有效类别前，接口不会返回自动归因类别、理由、置信度或 evidence。

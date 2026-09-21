@@ -57,7 +57,7 @@ sessionStorage 里（`src/lib/admin-token.ts`），关掉标签页即失效。
 | `/tasks/[taskId]` | 单题详情：Issue 原文、F2P/P2P 清单、验证证据与隔离记录、各 Agent 历史表现 | E7-T5 |
 | `/runs` | 实验运行列表 + 新建实验 | E7-T2 |
 | `/runs/[id]` | 运行详情：进度、分组网格、取消与重试 | E7-T2 |
-| `/task-runs/[id]` | 单题运行详情：Patch Viewer、测试结果表、日志搜索、轨迹时间线 | E7-T3 |
+| `/task-runs/[id]` | 单题运行详情：判定三字段、Patch Viewer、测试结果表（有挂的默认只列失败）、日志搜索、轨迹时间线、失败归因（#127） | E7-T3 |
 | `/agents` | Agent 与配置：Agent / 版本 / 模型 / 单价（$/MTok） | E7-T1 |
 | `/leaderboard` | 排行榜：数据集下拉、多指标排序、成本-解决率散点、分面矩阵、口径自证；`?set=<slug>&version=<v>` 深链 | E7-T4 · E7-T5 |
 | `/review` | 人工复核：抽检队列、三栏证据、盲态分类（E6-T3） | E6-T3 |

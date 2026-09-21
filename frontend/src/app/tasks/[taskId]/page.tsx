@@ -11,6 +11,7 @@
  * 超出本卡范围（卡片"不做"里写明了）。
  */
 
+import { IssueTitle } from "@/components/issue-title";
 import { use } from "react";
 import Link from "next/link";
 import { Stat } from "@/components/stat";
@@ -85,7 +86,7 @@ export default function TaskDetailPage(props: PageProps<"/tasks/[taskId]">) {
 
       <header className="mt-3 border-b border-neutral-200 pb-6">
         <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">{detail.issue_title}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight"><IssueTitle title={detail.issue_title} /></h1>
           <ToneBadge tone={validation.tone}>{validation.label}</ToneBadge>
           <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">
             {difficultyLabel(detail.difficulty)}

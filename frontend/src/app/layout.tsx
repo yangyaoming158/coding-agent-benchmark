@@ -20,9 +20,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     <html lang="zh-CN" className="h-full antialiased">
       <body className="min-h-full bg-neutral-50 text-neutral-900">
         <Providers>
-          {/* 应用外壳：左侧导航固定宽度，右侧内容区自适应 */}
+          {/* 应用外壳：左侧导航固定宽度，右侧内容区自适应。
+              宽度按"1200 宽窗口 + 浏览器 125% 缩放"（答辩投影）定：那时视口只有 960 CSS px，
+              侧栏 224 + 两侧内边距 64 曾把内容区挤到 655 px，排行榜最右的实验链接被推出屏幕外。 */}
           <div className="flex min-h-screen">
-            <aside className="w-56 shrink-0 border-r border-neutral-200 bg-white px-3 py-6">
+            <aside className="w-48 shrink-0 border-r border-neutral-200 bg-white px-3 py-6">
               <div className="px-3">
                 <p className="text-sm font-semibold tracking-tight">
                   AI Coding Agent
@@ -31,7 +33,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </div>
               <AppNav />
             </aside>
-            <main className="min-w-0 flex-1 px-8 py-8">{children}</main>
+            <main className="min-w-0 flex-1 px-5 py-8">{children}</main>
           </div>
         </Providers>
       </body>

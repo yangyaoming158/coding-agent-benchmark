@@ -38,7 +38,7 @@ export function AdminTokenField({ hint }: { hint?: string }) {
 
   return (
     <label className="block text-xs text-neutral-600">
-      管理员令牌
+      <span className="block">管理员令牌</span>
       <input
         type="password"
         autoComplete="off"

@@ -43,7 +43,7 @@ export function ToneBadge({
   children: React.ReactNode;
 }) {
   return (
-    <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${BADGE[tone]}`}>
+    <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-xs font-medium ${BADGE[tone]}`}>
       {children}
     </span>
   );
