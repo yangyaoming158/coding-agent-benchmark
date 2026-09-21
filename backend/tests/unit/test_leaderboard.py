@@ -179,8 +179,8 @@ def test_cost_source_null_attempts_count_as_neither() -> None:
     assert row.cost_estimated_attempts == 0
 
 
-def test_cost_per_task_is_unknown_when_any_attempt_could_not_report() -> None:
-    """有 attempt 报不出成本时，每题成本是 None，不是一个偏小的数。
+def test_cost_per_task_is_unknown_when_no_attempt_could_report() -> None:
+    """一次都报不出成本时，每题成本是 None，不是 $0。
 
     这条挡的是一个会让排行榜颠倒的错：claude-code 走中转端点时 44 次全报
     `unavailable`，总额是 $0.00。按"已知部分 / 全部题数"算出来就是每题 $0，
@@ -193,9 +193,68 @@ def test_cost_per_task_is_unknown_when_any_attempt_could_not_report() -> None:
     )
 
     assert rows[0].cost_per_task is None
+    assert rows[0].cost_lower_bound is True
     # 金额本身照样给出来，配上计数让人自己判断有多少水分
     assert rows[0].cost_usd_total == Decimal("0")
     assert rows[0].cost_unavailable_attempts == 22
+
+
+def test_partially_unavailable_cost_is_a_flagged_lower_bound() -> None:
+    """部分 attempt 报不出成本时，每题成本是"已知部分 / 全部题数"的下界，并打上标记。
+
+    E10-T4 两轮真实数据：claude-code 84 次 attempt 缺 2 次（两次鉴权失败的重试），
+    第一版"有一次缺就 None"让三个参赛者两个没有每题成本、散点图只剩一个点。
+    2/84 的缺口值得的是一个标明"只会更高"的下界，不是把整列抹掉（2026-09-21）。
+    """
+    rows = summarize(
+        [run(1, cost="0.82", tasks=41)],
+        costs=[
+            CostSourceCount(1, CostSource.ESTIMATED, 39),
+            CostSourceCount(1, CostSource.UNAVAILABLE, 2),
+        ],
+    )
+
+    row = rows[0]
+    assert row.cost_per_task == Decimal("0.020000")  # 0.82 / 41
+    assert row.cost_lower_bound is True
+    assert row.cost_unavailable_attempts == 2
+
+
+def test_complete_cost_is_not_flagged_as_lower_bound() -> None:
+    """全部 attempt 都报得出成本时，每题成本不是下界。"""
+    rows = summarize(
+        [run(1, cost="0.82", tasks=41)],
+        costs=[CostSourceCount(1, CostSource.REPORTED, 41)],
+    )
+
+    assert rows[0].cost_per_task == Decimal("0.020000")
+    assert rows[0].cost_lower_bound is False
+
+
+def test_lower_bound_rows_rank_after_complete_rows_on_cost() -> None:
+    """按成本排时，下界行排在成本完整的行后面 —— 哪怕它的下界数字更小。
+
+    "报不出成本 ≠ 最便宜"（§14.5 第五条）在放宽成下界之后仍然要成立：
+    一个只报得出一半的参赛者不能凭一个偏小的数上位。
+    """
+    rows = summarize(
+        [
+            run(1, config_id=1, label="complete@m", cost="0.44"),
+            run(2, config_id=2, label="partial@m", cost="0.10"),
+            run(3, config_id=3, label="silent@m", cost="0"),
+        ],
+        costs=[
+            CostSourceCount(1, CostSource.REPORTED, 22),
+            CostSourceCount(2, CostSource.REPORTED, 11),
+            CostSourceCount(2, CostSource.UNAVAILABLE, 11),
+            CostSourceCount(3, CostSource.UNAVAILABLE, 22),
+        ],
+        metric=LeaderboardMetric.COST,
+    )
+
+    assert [r.label for r in rows] == ["complete@m", "partial@m", "silent@m"]
+    assert rows[1].cost_per_task is not None and rows[1].cost_lower_bound
+    assert rows[2].cost_per_task is None
 
 
 def test_contestant_with_unknown_cost_does_not_win_the_cost_ranking() -> None:

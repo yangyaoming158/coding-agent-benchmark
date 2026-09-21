@@ -199,9 +199,12 @@ class LeaderboardRow:
     cost_usd_total: Decimal
     #: 每题成本 = 总成本 / 总题数（轮数 × 每轮题数）。
     #:
-    #: **只要有一次 attempt 报不出成本，这里就是 None**，不是一个偏小的数。
-    #: 理由见 `_cost_per_task()`。
+    #: **一次都报不出成本时是 None**；部分报不出时是一个**下界**（只加了报得出的部分），
+    #: 同时 `cost_lower_bound` 置 True。理由见 `_cost_per_task()`。
     cost_per_task: Decimal | None
+    #: `cost_per_task` 是不是下界（有 attempt 报不出成本）。True 时前端要标 "≥"，
+    #: 按成本排名时这样的行排在成本完整的行后面（见 `_sort_key`）。
+    cost_lower_bound: bool
     #: 成本来源构成（协议纪律 3 要求三种来源区分显示）。
     cost_reported_attempts: int
     cost_estimated_attempts: int
@@ -418,6 +421,7 @@ def _build_row(
         ).quantize(_RATE_PLACES),
         cost_usd_total=cost_total,
         cost_per_task=_cost_per_task(cost_total, tasks_total, counts),
+        cost_lower_bound=counts[CostSource.UNAVAILABLE] > 0,
         cost_reported_attempts=counts[CostSource.REPORTED],
         cost_estimated_attempts=counts[CostSource.ESTIMATED],
         cost_unavailable_attempts=counts[CostSource.UNAVAILABLE],
@@ -433,23 +437,27 @@ def _build_row(
 def _cost_per_task(
     cost_total: Decimal, tasks_total: int, counts: dict[CostSource, int]
 ) -> Decimal | None:
-    """每题成本。**有任何一次 attempt 报不出成本就返回 None。**
+    """每题成本。**一次都报不出成本时返回 None；部分报不出时返回下界。**
 
-    为什么不返回"已知部分的平均"：`cost_usd_total` 是把报不出成本的 attempt
-    跳过之后加出来的，用它除以**全部**题数，算出来的是一个偏小的数，
-    而且偏小多少完全取决于缺了几次 —— 它既不是真实成本，也不是任何一个
-    有意义的下界。
+    第一版的规则是"有任何一次报不出就 None"，挡的是这个错：claude-code 走中转
+    端点时 44 次全报 `unavailable`（E3-T5 定的规矩），总额是 $0.00 —— 按
+    "已知部分 / 全部题数"算出来是每题 $0，于是 `?metric=cost` 把它排在解决率
+    13.6% 的 aider 前面，而 §18.6 第七节手算出来它是 **$0.042/题，比 aider 贵 2.4 倍**。
+    这一档（全缺）现在仍然是 None。
 
-    这不是理论担心。claude-code 走中转端点时 44 次全报 `unavailable`
-    （E3-T5 定的规矩），总额是 $0.00 —— 于是 `?metric=cost` 会把它排在
-    解决率 13.6% 的 aider 前面，理由是"它每题花 $0"。而 §18.6 第七节手算出来
-    它其实是 **$0.042/题，比 aider 贵 2.4 倍**。
+    2026-09-21 放宽的是**部分缺**：E10-T4 两轮真实数据里，claude-code 84 次
+    attempt 缺 2 次（两次 `AGENT_AUTH_ERROR` 重试，没花钱）、aider 缺 2 次
+    （两次 `AGENT_TIMEOUT`，被平台掐掉、没来得及报），按第一版规则三个参赛者
+    两个没有每题成本、散点图只剩一个点 —— 为了 2/84 把整列抹掉，比给一个
+    标明"只会更高"的下界更误导。所以：只要有一次报得出，就返回
+    `已知部分 / 全部题数`，并由 `cost_lower_bound` 告诉前端它是下界。
 
-    返回 None 之后，排序把它垫到最后（见 `_sort_key`），前端显示"成本不可用"。
-    金额本身照样在 `cost_usd_total` 里，配上三个来源计数，
-    看的人自己判断那笔钱有多少水分。
+    "报不出成本 ≠ 最便宜"（§14.5 第五条）仍然成立：`_sort_key` 按成本排名时把
+    下界行排在成本完整的行后面，不让它凭一个偏小的数上位。
     """
-    if not tasks_total or counts[CostSource.UNAVAILABLE] > 0:
+    unavailable = counts[CostSource.UNAVAILABLE]
+    known = counts[CostSource.REPORTED] + counts[CostSource.ESTIMATED]
+    if not tasks_total or (unavailable > 0 and known == 0):
         return None
     return (cost_total / Decimal(tasks_total)).quantize(_COST_PLACES)
 
@@ -534,7 +542,9 @@ def _sort_key(metric: LeaderboardMetric):  # type: ignore[no-untyped-def]
         duration = Decimal(row.makespan_ms_mean) if row.makespan_ms_mean is not None else _LAST
         tokens = Decimal(row.tokens_per_task) if row.tokens_per_task is not None else _LAST
         if metric is LeaderboardMetric.COST:
-            primary: tuple[object, ...] = (cost, -rate)
+            # 成本完整的排前面，下界（有 attempt 报不出）的排后面，全缺的垫底：
+            # "报不出成本 ≠ 最便宜"（§14.5 第五条）
+            primary: tuple[object, ...] = (int(row.cost_lower_bound), cost, -rate)
         elif metric is LeaderboardMetric.DURATION:
             primary = (duration, -rate)
         elif metric is LeaderboardMetric.TOKENS:

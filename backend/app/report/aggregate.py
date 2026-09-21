@@ -268,6 +268,7 @@ def _agent_summaries(
                 task_outcome_flip_rate=flip_rate,
                 cost_usd_total=row.cost_usd_total,
                 cost_per_task=row.cost_per_task,
+                cost_lower_bound=row.cost_lower_bound,
                 cost_reported_attempts=row.cost_reported_attempts,
                 cost_estimated_attempts=row.cost_estimated_attempts,
                 cost_unavailable_attempts=row.cost_unavailable_attempts,

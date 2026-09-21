@@ -118,8 +118,8 @@ dev-web:             ## 只起前端
 web-install:         ## 装前端依赖
 	cd $(FRONTEND) && npm install
 
-web-lint:            ## 前端检查（eslint + tsc）
-	cd $(FRONTEND) && npm run lint && npm run typecheck
+web-lint:            ## 前端检查（eslint + tsc + 展示语义断言）
+	cd $(FRONTEND) && npm run lint && npm run typecheck && npm run check
 
 web-build:           ## 前端生产构建
 	cd $(FRONTEND) && npm run build

@@ -3,6 +3,8 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { components } from "@/lib/api-types";
+import { MarkdownBody } from "@/components/markdown-body";
+import { useAdminToken } from "@/lib/admin-token";
 import { API_BASE, apiGet, apiPost, apiText } from "@/lib/api";
 
 type ReviewQueue = components["schemas"]["ReviewQueueResponse"];
@@ -87,7 +89,8 @@ function PatchViewer({ text }: { text: string }) {
 
 function SetupForm({ onStart }: { onStart: (session: ActiveSession) => void }) {
   const [reviewer, setReviewer] = useState("");
-  const [token, setToken] = useState("");
+  // 令牌和实验页共用同一处保管（sessionStorage）：在任一处输过一次，这里就带出来了
+  const [token, setToken] = useAdminToken();
   const [seed, setSeed] = useState("20260920");
 
   return (
@@ -218,9 +221,9 @@ function CaseEvidence({
             {reviewCase.repository} · {reviewCase.difficulty}
           </p>
           <h3 className="mt-1 font-semibold">{reviewCase.issue_title}</h3>
-          <p className="mt-3 whitespace-pre-wrap text-sm leading-6 text-neutral-700">
-            {reviewCase.issue_body}
-          </p>
+          <div className="mt-3 max-h-[60vh] overflow-auto">
+            <MarkdownBody text={reviewCase.issue_body} />
+          </div>
         </div>
         <div>
           <h3 className="text-xs font-semibold uppercase tracking-wide text-neutral-500">
@@ -480,7 +483,7 @@ export function ReviewWorkbench() {
   });
 
   return (
-    <main className="mx-auto w-full max-w-[1680px] px-4 py-6 lg:px-6">
+    <div className="mx-auto w-full max-w-[1680px]">
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">人工盲检</h1>
@@ -562,6 +565,6 @@ export function ReviewWorkbench() {
           </div>
         </div>
       )}
-    </main>
+    </div>
   );
 }

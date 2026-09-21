@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import { AppShell } from "@/components/app-shell";
+import { AppNav } from "@/components/app-nav";
 import { Providers } from "@/components/providers";
 
 export const metadata: Metadata = {
@@ -9,14 +9,30 @@ export const metadata: Metadata = {
     "把开源项目里已经修好的真 bug 回退到修复前，把当初那份 issue 交给被测 AI，再用项目自己的测试验证它的补丁。",
 };
 
+/**
+ * 根布局：左侧固定导航 + 右侧内容区，所有页面共用，不在每页重复造导航。
+ *
+ * 字体用系统栈，不引 next/font/google：构建时要联网拉字体文件，
+ * 这台机器走代理，拉不到就整个构建失败。为了两个字形不值得。
+ */
 export default function RootLayout({ children }: LayoutProps<"/">) {
-  // 字体用系统栈，不引 next/font/google：构建时要联网拉字体文件，
-  // 这台机器走代理，拉不到就整个构建失败。为了两个字形不值得。
   return (
     <html lang="zh-CN" className="h-full antialiased">
-      <body className="min-h-full flex flex-col bg-neutral-50 text-neutral-900">
+      <body className="min-h-full bg-neutral-50 text-neutral-900">
         <Providers>
-          <AppShell>{children}</AppShell>
+          {/* 应用外壳：左侧导航固定宽度，右侧内容区自适应 */}
+          <div className="flex min-h-screen">
+            <aside className="w-56 shrink-0 border-r border-neutral-200 bg-white px-3 py-6">
+              <div className="px-3">
+                <p className="text-sm font-semibold tracking-tight">
+                  AI Coding Agent
+                </p>
+                <p className="mt-0.5 text-xs text-neutral-500">评测基准平台</p>
+              </div>
+              <AppNav />
+            </aside>
+            <main className="min-w-0 flex-1 px-8 py-8">{children}</main>
+          </div>
         </Providers>
       </body>
     </html>

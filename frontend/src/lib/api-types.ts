@@ -890,6 +890,8 @@ export interface components {
             cost_usd_total: string;
             /** Cost Per Task */
             cost_per_task: string | null;
+            /** Cost Lower Bound */
+            cost_lower_bound: boolean;
             /** Cost Reported Attempts */
             cost_reported_attempts: number;
             /** Cost Estimated Attempts */
