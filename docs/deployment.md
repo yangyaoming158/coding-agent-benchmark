@@ -40,7 +40,8 @@
 容器里的路径和宿主机不一样，dockerd 就会在宿主机上新建一个同名空目录挂进去，评测容器看到的是空工作区，而且不报错。
 细账在 `docker-compose.yml` 顶部注释和 `docs/plan/05-sandbox.md` §10.6。对你的影响只有两条：
 
-- 改代码不用重建镜像，重启容器就生效；只有 `backend/pyproject.toml` / `backend/uv.lock` 变了才要重建。
+- **后端**改代码不用重建镜像，重启容器就生效；只有 `backend/pyproject.toml` / `backend/uv.lock` 变了才要重建。
+  **前端不一样**：`deploy/frontend/Dockerfile` 把 `frontend/` 复制进镜像、构建时编译，改了前端要 `make compose-build` 重建一次（§4 更新代码那一行）。
 - 仓库的绝对路径要传给 compose（环境变量 `BENCH_REPO_DIR`）。`make compose-*` 会自动传，你不用管；
   只有绕开 `make` 直接敲 `docker compose` 时才要自己写进 `.env`。
 
@@ -271,7 +272,7 @@ Noop   #2: COMPLETED  解决 0/4  平台故障 0  dirty=false
 | 跑一条平台命令 | `make compose-cli CMD="python -m cli.experiment status"` | 在临时容器里跑，跑完容器自动删；命令的工作目录是 `backend/`，所以仓库里其他文件写 `../datasets/…` |
 | 停掉 | `make compose-down` | 删容器、**保留数据**（数据库在命名卷 `pgdata` 里，`var/` 在宿主机） |
 | 再起来 | `make compose-up` | 实测停了再起，之前的实验都还在 |
-| 更新代码 | `git pull && make compose-down && make compose-up` | 代码是挂进来的，不用重建镜像；`pyproject.toml` / `uv.lock` 变了 `compose-up` 自带的 build 会重建；新加的数据库迁移由 `migrate` 自动跑 |
+| 更新代码 | `git pull && make compose-down && make compose-up` | 后端代码是挂进来的，不用重建镜像；`compose-up` 自带的 `compose-build` 会重建两个镜像——`pyproject.toml` / `uv.lock` 没变时后端那一步秒过，**前端只要 `frontend/` 有改动就会真的重建**（几分钟，代码是打进镜像的）；新加的数据库迁移由 `migrate` 自动跑 |
 | 彻底删掉 | `BENCH_REPO_DIR="$PWD" docker compose down -v`，再手动删 `var/` | `-v` 连数据库卷一起删，**不可恢复**；`var/` 里的工作区、制品、git 镜像 compose 不管，要自己删 |
 
 实测 `make compose-down` 再 `make compose-up`（22 秒）之后：

@@ -365,8 +365,38 @@ python -m cli.report generate --run 158 --run 159 --run 161 --run 165 --run 167 
 
 ### 7.3 前端
 
-现在只有两页：`/`（平台自检）和 `/review`（人工盲检工作台，§8.2）。排行榜、实验列表、单次执行详情这些页面在做（E7），
-做好之前用上面的 HTTP 接口看 —— `http://localhost:8000/docs` 是可以点着试的接口文档。
+开发模式 `http://localhost:3000`，compose 部署默认同一个端口。页面（`frontend/src/app/`）：
+
+| 路由 | 看什么 |
+|:---|:---|
+| `/` | 总览：几版数据集、几个参赛者、跑了多少次实验、正在跑的进度、最近 5 次实验；底下是平台自检（后端连不上先看这里） |
+| `/benchmarks` | 数据集版本列表：哪几版、各多少题、发布状态 |
+| `/benchmarks/[slug]?version=` | 一版数据集：语言 / 来源构成、Oracle / Noop 门禁证据、逐题表（仓库 / 难度 / 语言 / 状态筛选 + 搜索）。链接带 `version`，不带的话打开的是最新已发布版 |
+| `/tasks/[taskId]` | 一道题：issue 原文、F2P / P2P 清单、验证证据与隔离记录、各 Agent 在这道题上的历史表现 |
+| `/agents` | Agent 与配置：适配器 / 版本 / 模型 / 单价 |
+| `/runs` | 实验列表 + **新建实验**；带 `dirty` / 已排除标记 |
+| `/runs/[id]` | 一次实验：实时进度、按结论分组的逐题网格、汇总，**取消 / 重试失败项** |
+| `/task-runs/[id]` | 一次执行：判定三字段、补丁 diff（原样 / 标准化两份对比）、逐条用例、日志搜索、轨迹时间线、失败归因（§8.1） |
+| `/leaderboard` | 排行榜：数据集下拉、多指标排序、成本-解决率散点、分面矩阵、准入规则和被排除的实验 |
+| `/review` | 人工盲检工作台（§8.2） |
+
+"某个 Agent 在某道题上为什么失败"三次点击：排行榜点参赛者 → 实验的逐题网格点一格 → 单次执行页。
+和 §6 的 HTTP 接口看的是同一份数据；`http://localhost:8000/docs` 是可以点着试的接口文档。
+
+**写按钮要管理员令牌。** 新建实验、取消、重试、人工复核这几处旁边都有一个令牌输入框，粘进 `.env` 里的 `ADMIN_TOKEN` 就行，
+输入即保存，**只存在当前标签页的 sessionStorage** —— 关掉标签页就没了，换个标签页要重输，一处输过同页其他按钮都能用。
+没有登录页，也不会打进 JS（构建期的 `NEXT_PUBLIC_ADMIN_TOKEN` 那条路 2026-09-21 起废掉了：它会把令牌发给所有下载页面的人，
+而且 compose 构建镜像时根本不传它，部署环境里写按钮一律 401）。只读页面不要令牌。
+
+**compose 部署更新前端要重建一次前端镜像。** 后端代码是按原路径挂进容器的，改了重启就生效；前端不是——`deploy/frontend/Dockerfile`
+把 `frontend/` 复制进镜像、构建时就编译好了。所以拉了前端改动之后：
+
+```bash
+git pull && make compose-build && make compose-up      # compose-build 会分别重建 api 和 frontend 两个镜像（几分钟，全走国内源）
+```
+
+只重建前端也行：`BENCH_REPO_DIR="$PWD" docker compose build frontend && BENCH_REPO_DIR="$PWD" docker compose up -d frontend`。
+改了 `NEXT_PUBLIC_API_BASE` 同样要重建（`docs/deployment.md` §5）。
 
 ---
 
