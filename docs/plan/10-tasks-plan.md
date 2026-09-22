@@ -1486,7 +1486,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   ⑨ 实验列表显示 `dirty` / 已排除标记。
 - **顺带改了后端**：排行榜每题成本"有一次报不出就 None"放宽为下界（`cost_lower_bound`），
   细账在 `07-platform-architecture.md` §14.5 第五条；不改判定、不碰冻结件。
-- **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检，2026-09-21 晚补上，见 E7-T8 卡）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
+- **没做**：E7-T6 失败分析（2026-09-22 补上，见 E7-T6 卡）、E7-T8 Dashboard（首页仍是平台自检，2026-09-21 晚补上，见 E7-T8 卡）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
   归因结果在单题运行页只留了一段说明——后端没有归因端点（E7-T6 的活）。
 - **单题页接上归因**（2026-09-21 晚，E7-T3 的补丁）：`GET /api/task-runs/{id}` 多带 `failure_attribution`
   （`failure_attributions` 一行：类别、层级、置信度、状态、证据、中文理由；`raw_response` 不透出）和
@@ -1497,7 +1497,27 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   没做成按 `human_reviews` 自动推断，因为批次刚建、还没人提交时库里没有任何痕迹。细账在
   `07-platform-architecture.md` §16.5。实测：#2562（F6，规则层）显示类别 + 判据，#2544（规则分不出、没跑 LLM）
   显示"还没有归因结论"，开关开着时 JSON 里搜不到类别字符串。
-### E7-T6 Failure Analysis（分布图/热力图/Top 案例） · **P1 · C:M · E:1.5d**
+### E7-T6 Failure Analysis（分布图/热力图/Top 案例） ✅ 已于 2026-09-22 完成 · **P1 · C:M · E:1.5d**
+- **Goal**：`/analysis` 一页回答"没修好的题都是哪一类原因"：归因分布堆叠柱、Agent × 类别热力图、
+  Top 失败案例（§16.2）
+- **AC**（开工前定的）：1. 后端只加一个只读端点，口径不重写——报告 JSON `failures` 段那个函数直接公开给
+  API 层调；2. 按数据集查时的实验集合 = 排行榜准入（复用 `eligible_runs()`），榜上多少轮这里就多少轮；
+  3. "规则分不出、还没结论"的失败不进任何类别、单独一个数；4. LLM 行落库后自动进来，NEEDS_HUMAN 单独标；
+  5. 不许 N+1；6. 展示口径是纯函数 + 断言脚本
+- **实际交付**（2026-09-22）：后端 `app/report/aggregate.failure_summary()`（`_failures()` 的公开包装，
+  `FailureSummary` 加 `needs_human_failures` / `llm_attributed_failures` 两个计数）+ `app/api/analysis.py`
+  `GET /api/analysis?set=&version=` 或 `?run=…&run=…`（二者都给 / 都不给是 422，实验号不存在 404；
+  `BENCH_BLIND_REVIEW` 开着时逐案例的类别 / 状态 / 理由置空、分布照常，`attribution_withheld=true`）；
+  6 条集成测试（`tests/integration/test_api_analysis.py`：准入过滤、按号不过滤、作用域校验、NEEDS_HUMAN / LLM
+  计数、盲检、SQL 条数 1 个实验和 4 个实验相同）。前端 `lib/analysis.ts`（33 条断言 `check-analysis.mjs`，
+  `npm run check` 217 → 250）+ `components/failure-distribution.tsx`（recharts 堆叠柱，一柱一类别、分段是参赛者，
+  颜色按字母序固定、第六个起折"其他"）+ `failure-heatmap.tsx`（深浅按占该 Agent 失败的比例分五档，空格 "—"
+  不是 0）+ `app/analysis/page.tsx`；侧栏加"失败分析"。
+  **实测**（开发库 2026-09-22）：`benchmark-cn-v1@v2` 准入 6 次实验 #158/#159/#161/#165/#167/#169，失败 148、
+  已归因 148（规则 63 · LLM 85）、还没结论 0；F7 空补丁 49（MiniAgent 29）、F4 逻辑错误 46；claude-code 19 次失败
+  里 F4 占 10。`swebench-verified-subset@v3` 失败 195 全归因（LLM 92，N1 平台故障 3 = #170 那 3 道）。
+  `?run=157&run=160`（被排除的两次）失败 53、还没结论 33——排除的实验没跑 LLM，这一格就是给它们看的。
+  **没做**：抽检准确率 / κ 那一行显示后端给的"暂无 + 原因"，等 E6-T4。
 ### E7-T7 Human Review 页 · **P1 · C:M · E:1.5d**
 ### E7-T8 Dashboard ✅ 已于 2026-09-21 完成 · **P1 · C:S · E:0.5d**
 - **Goal**：首页一屏回答"平台里有什么、现在在干什么"：几版数据集、几个参赛者、跑了多少次实验、

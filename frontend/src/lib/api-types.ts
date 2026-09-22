@@ -358,6 +358,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analysis
+         * @description 失败分析：类别分布、Agent × 类别热力图、Top 失败案例。
+         *
+         *     查询条数固定（数据集 1 + 准入 1 + 归因 4），不随实验数或题数增长（AC-7）。
+         */
+        get: operations["get_analysis_api_analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/review/queue": {
         parameters: {
             query?: never;
@@ -510,6 +532,21 @@ export interface components {
             created_at: string;
         };
         /**
+         * AnalysisResponse
+         * @description 失败分析 = 报告的 failures 段 + 它是按哪几次实验算的。
+         */
+        AnalysisResponse: {
+            /** Benchmark Set */
+            benchmark_set: string | null;
+            /** Benchmark Set Id */
+            benchmark_set_id: number | null;
+            /** Run Ids */
+            run_ids: number[];
+            failures: components["schemas"]["FailureSummary"];
+            /** Attribution Withheld */
+            attribution_withheld: boolean;
+        };
+        /**
          * ArtifactKind
          * @description 制品的种类。日志、补丁、轨迹这些都可达数 MB，一律不入库，只在库里留索引行。
          * @enum {string}
@@ -566,6 +603,16 @@ export interface components {
             /** Reasoning Zh */
             reasoning_zh: string | null;
             status: components["schemas"]["AttributionStatus"];
+        };
+        /**
+         * Availability
+         * @description 一个指标是否真的采到了，避免把缺数据展示成 0。
+         */
+        Availability: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * BenchmarkSetDetail
@@ -782,6 +829,43 @@ export interface components {
             created_at: string;
         };
         /**
+         * FailureCase
+         * @description Top-N 失败案例及其证据链接。
+         */
+        FailureCase: {
+            /** Task Run Id */
+            task_run_id: number;
+            /** Run Id */
+            run_id: number;
+            /** Agent Label */
+            agent_label: string;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            /** Infra Outcome */
+            infra_outcome: string | null;
+            /** Agent Outcome */
+            agent_outcome: string | null;
+            /** Category */
+            category: string | null;
+            /** Attribution Status */
+            attribution_status: string | null;
+            /** Reasoning Zh */
+            reasoning_zh: string | null;
+            /** Patch Url */
+            patch_url: string | null;
+            /** Log Url */
+            log_url: string | null;
+            /** Trajectory Url */
+            trajectory_url: string | null;
+            /**
+             * Dataset Label
+             * @default
+             */
+            dataset_label: string;
+        };
+        /**
          * FailureCategory
          * @description 失败原因分类（`docs/plan/06-judge-attribution.md` §12.1）。
          *
@@ -791,6 +875,55 @@ export interface components {
          * @enum {string}
          */
         FailureCategory: "F1_REQUIREMENT_MISUNDERSTANDING" | "F2_WRONG_FILE_LOCALIZATION" | "F3_INCOMPLETE_FIX" | "F4_INCORRECT_LOGIC" | "F5_SYNTAX_OR_BUILD_ERROR" | "F6_REGRESSION" | "F7_EMPTY_OR_INVALID_PATCH" | "F8_AGENT_TOOL_OR_BUDGET_FAILURE" | "N1_INFRASTRUCTURE_FAILURE" | "N2_TASK_DEFECT";
+        /**
+         * FailureCell
+         * @description Agent × 失败类别热力图中的一个格子。
+         */
+        FailureCell: {
+            /** Agent Label */
+            agent_label: string;
+            /** Category */
+            category: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * FailureSummary
+         * @description DEL-04 的现有数据；没有完成的归因和盲检必须显式缺席。
+         */
+        FailureSummary: {
+            /** Total Failures */
+            total_failures: number;
+            /** Attributed Failures */
+            attributed_failures: number;
+            /** Unattributed Failures */
+            unattributed_failures: number;
+            /**
+             * Needs Human Failures
+             * @default 0
+             */
+            needs_human_failures: number;
+            /**
+             * Llm Attributed Failures
+             * @default 0
+             */
+            llm_attributed_failures: number;
+            /** Category Counts */
+            category_counts: {
+                [key: string]: number;
+            };
+            /** Heatmap */
+            heatmap: components["schemas"]["FailureCell"][];
+            /** Top Cases */
+            top_cases: components["schemas"]["FailureCase"][];
+            llm_attribution: components["schemas"]["Availability"];
+            review_accuracy: components["schemas"]["Availability"];
+            /** Review Accuracy Value */
+            review_accuracy_value: number | null;
+            kappa: components["schemas"]["Availability"];
+            /** Kappa Value */
+            kappa_value: number | null;
+        };
         /**
          * GoldPatchSummary
          * @description 官方补丁只给人工看文件与规模，不返回代码正文。
@@ -2484,6 +2617,53 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["LeaderboardResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_analysis_api_analysis_get: {
+        parameters: {
+            query?: {
+                /** @description 数据集 slug；取这一版上所有排行榜准入的实验 */
+                set?: string | null;
+                /** @description 数据集版本，配合 set 用 */
+                version?: string | null;
+                /** @description 实验号，可重复给；和 set 二选一 */
+                run?: number[] | null;
+                /** @description Top 失败案例条数 */
+                top_n?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResponse"];
                 };
             };
             /** @description 资源不存在 */
