@@ -18,10 +18,12 @@
 iptables 规则在 DooD 模式下要改宿主机，compose 部署做不到；而且规则漏一条就是
 静默放行，没人会发现。`internal` 是 docker 自己保证的，少一层我们自己维护的东西。
 
-## 代理容器不带 bench 的所有者标签
+## 代理容器必须**改写** `bench.owner` 标签
 
-`reap_orphans()` 在 Worker 启动时会删掉所有带 `bench.owner` 标签的容器。代理是
-常驻的，用另一个标签（`bench.role=egress-proxy`）区分。
+`reap_orphans()` 在 Worker 启动时会删掉所有 `bench.owner=coding-agent-benchmark` 的容器。
+光"不加这个标签"不够：`bench-base:py311` 镜像里烤着这个标签，容器会**继承**镜像的标签
+（2026-09-22 实测：Worker 一启动就把刚起的代理删了，`reaped_orphan_containers count=1`）。
+所以这里显式把 `bench.owner` 写成另一个值，容器标签覆盖镜像标签，回收器就认不出它。
 """
 
 from __future__ import annotations
@@ -39,6 +41,7 @@ from app.infrastructure.config import (
 )
 from app.infrastructure.logging import get_logger
 from app.sandbox.container import (
+    BENCH_LABEL,
     ContainerSpec,
     ImageNotFoundError,
     NetworkMode,
@@ -59,7 +62,14 @@ PROXY_PORT = EGRESS_PROXY_PORT
 DEFAULT_IMAGE = "bench-base:py311"
 ROLE_LABEL = "bench.role"
 ROLE_PROXY = "egress-proxy"
+#: 覆盖镜像里的 `bench.owner`，让 `reap_orphans()` 的过滤器（等值匹配）认不出它
+OWNER_PROXY = "coding-agent-benchmark-egress"
 NETWORK_LABEL = "bench.network"
+
+
+def proxy_labels(network: str = EGRESS_NETWORK) -> dict[str, str]:
+    """代理容器的标签。`bench.owner` 必须覆盖成非 bench 的值，理由见模块开头。"""
+    return {BENCH_LABEL: OWNER_PROXY, ROLE_LABEL: ROLE_PROXY, NETWORK_LABEL: network}
 
 
 def proxy_url(container: str = PROXY_CONTAINER, port: int = PROXY_PORT) -> str:
@@ -176,7 +186,7 @@ def start_proxy(
             name=name,
             command=["python", "-c", proxy_program()],
             environment=env,
-            labels={ROLE_LABEL: ROLE_PROXY, NETWORK_LABEL: network},
+            labels=proxy_labels(network),
             user=default_container_user(),
             network=network,
             hostname=name,
