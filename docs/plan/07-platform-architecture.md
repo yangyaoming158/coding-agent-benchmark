@@ -788,7 +788,8 @@ API 类型：从 FastAPI 的 OpenAPI 用 `openapi-typescript` 生成，避免手
 下方提供 F1～F8/N1/N2 选择、备注、双人进度和第三人仲裁状态。
 
 自动归因对照区只渲染后端实际返回的字段；前端没有提前拿到答案再隐藏。管理员 token
-只保存在当前 React 内存状态，不写 localStorage/sessionStorage。准确率、kappa 和混淆
+存在当前标签页的 sessionStorage（`frontend/src/lib/admin-token.ts`，#126 起和实验页共用一处，
+关掉标签页即失效），不写 localStorage，也不打进构建产物。准确率、kappa 和混淆
 矩阵属于 E6-T4，本卡只保存计算所需的原始标签。
 
 ## 16.5 单题页的归因区块与盲检开关（2026-09-21）

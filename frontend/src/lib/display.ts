@@ -331,6 +331,57 @@ export function ruleNameLabel(rule: string): string {
 }
 
 /**
+ * `agent_outcome` 的中文名。`cellVerdict` 里那份是"网格格子怎么显示"（带 tone、和
+ * lifecycle 一起判），这份只是枚举值本身怎么念，给三字段一行和判据表用。
+ */
+const AGENT_OUTCOME_TEXT: Record<AgentOutcome, string> = {
+  RESOLVED: "已解决",
+  UNRESOLVED: "未解决",
+  EMPTY_PATCH: "空补丁",
+  INVALID_PATCH: "补丁无效",
+  NOT_ATTEMPTED: "未尝试",
+};
+
+export function agentOutcomeLabel(outcome: AgentOutcome): string {
+  return AGENT_OUTCOME_TEXT[outcome];
+}
+
+/**
+ * 规则层判据表的键名（`app/attribution/rules.py` 写进 `evidence.facts` 的那几个）。
+ * 认不出的键原样显示 —— 规则加了新判据，页面宁可露英文也不能把它吞掉。
+ */
+const FACT_KEY_TEXT: Record<string, string> = {
+  f2p: "F2P 通过",
+  p2p: "P2P 通过",
+  agent_outcome: "AI 结论",
+  infra_outcome: "平台结论",
+  lifecycle_status: "流程状态",
+  empty_kind: "空的类型",
+  raw_patch_empty: "原样补丁为空",
+  protected_path_edit_attempted: "碰过受保护路径",
+  error_code: "错误码",
+  exit_code: "退出码",
+};
+
+/** 判据的值：枚举翻成中文、布尔翻成"是 / 否"，其余原样。 */
+const FACT_VALUE_TEXT: Record<string, string> = {
+  ...AGENT_OUTCOME_TEXT,
+  ...INFRA_TEXT,
+  true: "是",
+  false: "否",
+  nothing_changed: "什么都没改",
+  only_protected_paths: "只改了受保护路径",
+};
+
+export function factLabel(key: string): string {
+  return FACT_KEY_TEXT[key] ?? key;
+}
+
+export function factValueLabel(value: string): string {
+  return FACT_VALUE_TEXT[value] ?? value;
+}
+
+/**
  * `evidence` 这个 JSON 在两层归因里长得不一样，页面按形状渲染：
  *
  * - 规则层：`{ rule, facts: {...} }` → 规则名 + 判据键值表
@@ -379,6 +430,47 @@ export function evidenceView(evidence: Record<string, unknown>): EvidenceView {
   }
   if (Object.keys(evidence).length === 0) return { kind: "none" };
   return { kind: "raw", json: JSON.stringify(evidence, null, 2) };
+}
+
+// ── 标题里的行内代码 ────────────────────────────────────────
+
+/**
+ * issue 标题是 Markdown，里面常有 `flag_value` 这种反引号包着的标识符。
+ * 页面标题不走完整的 Markdown 渲染（标题里不该出现链接、图片），只认反引号：
+ * 拆成"普通文字 / 代码"两种片段，组件把代码片段套 <code>。
+ *
+ * 反引号不成对时最后那个当普通字符，不吞字。
+ */
+export interface TitleSegment {
+  code: boolean;
+  text: string;
+}
+
+export function titleSegments(title: string): TitleSegment[] {
+  const segments: TitleSegment[] = [];
+  let rest = title;
+  while (rest.length > 0) {
+    const open = rest.indexOf("`");
+    if (open === -1) break;
+    const close = rest.indexOf("`", open + 1);
+    if (close === -1) break;
+    if (open > 0) segments.push({ code: false, text: rest.slice(0, open) });
+    segments.push({ code: true, text: rest.slice(open + 1, close) });
+    rest = rest.slice(close + 1);
+  }
+  if (rest.length > 0) segments.push({ code: false, text: rest });
+  return segments;
+}
+
+// ── 通过比的色调 ────────────────────────────────────────────
+
+/**
+ * "F2P 5 / 5"、"P2P 1311 / 1315" 这种格子的颜色：全过绿、有挂红、没数据中性。
+ * 判定本身来自后端（C-10），这里只是让"修好一个、弄坏四个"那一格一眼能看出来。
+ */
+export function passRatioTone(passed: number | null, total: number | null): Tone {
+  if (total === null || total === 0) return "neutral";
+  return (passed ?? 0) >= total ? "ok" : "bad";
 }
 
 // ── 数字格式化 ──────────────────────────────────────────────
@@ -451,4 +543,18 @@ export function formatTime(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("zh-CN", { hour12: false });
+}
+
+/** 列表里用的短时间：到分钟、不带年。秒在列表里没人看，年在表格里只占宽度。 */
+export function formatTimeMinute(iso: string | null): string {
+  if (iso === null) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString("zh-CN", {
+    hour12: false,
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
