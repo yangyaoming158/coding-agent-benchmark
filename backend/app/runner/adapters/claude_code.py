@@ -64,6 +64,7 @@ from typing import Any
 from app.domain.enums import CostSource
 from app.infrastructure.logging import get_logger
 from app.runner.adapters.cli_text import failure_excerpt, shared_failure
+from app.runner.adapters.network import agent_network
 from app.runner.adapters.prompt import build_task_prompt
 from app.runner.patch import capture_workspace_diff
 from app.runner.protocol import (
@@ -85,7 +86,6 @@ from app.sandbox.container import (
     BindMount,
     ContainerResult,
     ContainerSpec,
-    NetworkMode,
     Stage,
     agent_limits,
     get_docker_client,
@@ -114,6 +114,9 @@ DEFAULT_MAX_TURNS = 40
 #: 容器超时后留给它落盘的宽限期（秒）。和 Aider 用同一个数，
 #: 理由也一样：协议 C-09a 要求超时也要保存补丁。
 CLAUDE_STOP_GRACE_S = 20
+#: 被测 AI 不准用的工具。两个都是联网工具：WebFetch 从容器里发请求（白名单代理能拦），
+#: WebSearch 由 API 服务端代搜（**代理拦不住**），所以必须在命令行上关掉。
+DISALLOWED_TOOLS = ("WebFetch", "WebSearch")
 
 #: `run()` 至少要有这么多秒才值得起容器。低于它直接按截止已过返回 ——
 #: 起容器、拉起 node、装载 CLI 本身就要十几秒。
@@ -466,6 +469,11 @@ def build_command(
         "bypassPermissions",
         "--max-turns",
         str(max_turns),
+        # 关掉两个联网工具（E2-T4）。WebSearch 是 API 服务端执行的，沙箱的网络白名单
+        # 拦不住它；2026-09-22 查实 case-041 正是先 WebSearch 到修复 commit、再 curl 下 diff。
+        # 值写成一个逗号分隔的参数，不能空格分开：这个开关是变长的，会把后面的东西都吞掉
+        "--disallowedTools",
+        ",".join(DISALLOWED_TOOLS),
         "--model",
         model,
         *extra_args,
@@ -638,6 +646,7 @@ class ClaudeCodeRunner:
     def _spec(
         self, task: AgentTaskInput, workspace: Any, config: AgentConfig, *, timeout_s: int
     ) -> ContainerSpec:
+        network, network_name = agent_network(task, config)
         return ContainerSpec(
             image=config.image or self._image or DEFAULT_CLAUDE_CODE_IMAGE,
             command=build_command(
@@ -648,9 +657,10 @@ class ClaudeCodeRunner:
             ),
             timeout_s=timeout_s,
             stage=Stage.AGENT,
-            # 被测 AI 要连大模型 API，所以 Agent 阶段是联网的。测试阶段永远断网（C-31），
-            # 那由测试执行器自己保证，两边互不影响
-            network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
+            # 被测 AI 要连大模型 API，所以 Agent 阶段是联网的——但只能经出站白名单代理
+            # （E2-T4，`adapters/network.py`）。测试阶段永远断网（C-31），由测试执行器自己保证
+            network=network,
+            network_name=network_name,
             mounts=(BindMount.workspace(Path(workspace.path)),),
             workdir=WORKSPACE_TARGET,
             # 限额显式给（E9-T2），理由同 aider.py

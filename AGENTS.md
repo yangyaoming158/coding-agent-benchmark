@@ -397,6 +397,9 @@ python3 docs/plan/_build_report.py .
 # 环境自检（E0-T2 完成后可用）
 python3 scripts/check_env.py
 
+# Agent 容器的出网笼子（E2-T4）：跑真实 AI 之前先起代理、再验收，五条全绿才建实验
+python -m cli.egress up && python -m cli.egress check
+
 # 确认连的是原生 docker 而不是 Docker Desktop
 docker info --format '{{.Name}} {{.DockerRootDir}}'
 # 期望输出：DESKTOP-D3QQNH3 /var/lib/docker

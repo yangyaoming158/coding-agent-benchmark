@@ -213,7 +213,7 @@ Worker 主循环（`app/worker/loop.py`）：
 测试容器的隔离由 `sandbox/container.py` 设：非 root（跟 harness 的 uid，harness 是 root 时退到 nobody）、`cap_drop=ALL`、`no-new-privileges`、
 `pids-limit`（挡 fork 炸弹）、内存和 CPU 限额（从 `benchmark_tasks` 三列读）、`--network none`（协议 C-31，测试可能去 PyPI 装包就不可复现了）。
 四条负例（内存炸弹被 OOM 杀、fork 炸弹被拦、死循环被按时杀且不留容器、断网真连不上）在 `05-sandbox.md` §10.3 有实测。
-Agent 容器走桥接网络、环境变量按白名单注入（`AGENT_ENV_ALLOWLIST`：几家的 Key、`*_BASE_URL`、代理三件套）。
+Agent 容器接 `internal` 网络 `bench-egress`（没有网关，直连 IP 也不通），只能经代理容器 `bench-egress-proxy` 访问 `SANDBOX_EGRESS_ALLOW` 里的域名（E2-T4，`app/sandbox/egress.py`；代理本身是 `egress_proxy.py` 一段标准库 Python，只认 `CONNECT host:443`）；claude-code 另加 `--disallowedTools WebFetch,WebSearch`。环境变量按白名单注入（`AGENT_ENV_ALLOWLIST`：几家的 Key、`*_BASE_URL`、代理三件套）。
 
 **OOM 和超时的退出码都是 137，不能靠退出码区分**（`AGENTS.md` §5.4）：判据是 `docker inspect` 的 `.State.OOMKilled`，
 但并发下 dockerd 有 3–5% 概率漏收 OOM 通知（§10.10 实测）。目前只告警（日志事件 `container_sigkilled_without_oom_flag`）不改判定 —— 改判定要动协议冻结件。

@@ -419,6 +419,12 @@ def test_agent_stage_has_network_but_only_when_the_task_allows_it(
     assert fake_offline.spec is not None
     assert fake_offline.spec.network is NetworkMode.NONE
 
+    # harness 给了出站白名单网络时接它，不再是 BRIDGE（E2-T4）
+    caged, _ = run_with(workspace, task, config=AgentConfig(egress_network="bench-egress"))
+    assert caged.spec is not None
+    assert caged.spec.network is NetworkMode.EGRESS
+    assert caged.spec.network_name == "bench-egress"
+
 
 def test_env_and_image_come_from_the_agent_config(
     workspace: Workspace, task: AgentTaskInput

@@ -63,6 +63,7 @@ from app.runner.adapters.cli_text import (
     squash,
     unwrap,
 )
+from app.runner.adapters.network import agent_network
 from app.runner.adapters.prompt import build_task_prompt as build_message
 from app.runner.patch import capture_workspace_diff
 from app.runner.protocol import (
@@ -84,7 +85,6 @@ from app.sandbox.container import (
     BindMount,
     ContainerResult,
     ContainerSpec,
-    NetworkMode,
     Stage,
     agent_limits,
     get_docker_client,
@@ -413,14 +413,16 @@ class AiderRunner:
             # 只读挂进去，再用开关指过去：aider 不会自己去找 /opt 下的文件
             mounts.append(BindMount(self._model_settings, MODEL_SETTINGS_TARGET, read_only=True))
             extra_args = ("--model-settings-file", MODEL_SETTINGS_TARGET, *extra_args)
+        network, network_name = agent_network(task, config)
         return ContainerSpec(
             image=config.image or self._image or DEFAULT_AIDER_IMAGE,
             command=build_command(task, self._model_for(task), extra_args=extra_args),
             timeout_s=timeout_s,
             stage=Stage.AGENT,
-            # 被测 AI 要连大模型 API，所以 Agent 阶段是联网的。测试阶段永远断网（C-31），
-            # 那由测试执行器自己保证，两边互不影响
-            network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
+            # 被测 AI 要连大模型 API，所以 Agent 阶段是联网的——但只能经出站白名单代理
+            # （E2-T4，`adapters/network.py`）。测试阶段永远断网（C-31），由测试执行器自己保证
+            network=network,
+            network_name=network_name,
             mounts=tuple(mounts),
             workdir=WORKSPACE_TARGET,
             # 限额显式给（E9-T2）。不给的话吃的是 ResourceLimits() 按测试容器定的

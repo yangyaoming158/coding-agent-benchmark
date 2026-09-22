@@ -259,6 +259,31 @@ Noop   #2: COMPLETED  解决 0/4  平台故障 0  dirty=false
 **⚠ 别在开发机的主仓库跑这条。** compose 起的是一个新库，实验号从 1 开始编，制品会写进宿主机 `var/artifacts/runs/1/`，
 和开发库里已有的 1 号实验混在一起。只在干净目录（比如这次的验证副本）里跑。
 
+### 第 7 步：关上 Agent 的出网笼子（跑真实 AI 之前必做）
+
+冒烟用的哨兵不起 Agent 容器，所以第 6 步不需要这一步；但接真实 AI 之前必须做。Agent 容器接在一个
+没有出口的 `internal` 网络上，只能经代理容器访问 `.env` 里 `SANDBOX_EGRESS_ALLOW` 列的域名（默认只有 `api.deepseek.com`）：
+
+```bash
+make compose-cli CMD="python -m cli.egress up"       # 建网络 bench-egress + 起代理容器 bench-egress-proxy
+make compose-cli CMD="python -m cli.egress check"    # 验收：Agent 同款网络里跑五条 curl
+```
+
+`check` 必须五条全 ✅（2026-09-22 开发机实测回显）：
+
+```
+✅ 过代理访问 github.com 必须被拒            exit=56 curl: (56) CONNECT tunnel failed, response 403
+✅ 绕开代理直连 github.com 必须不通            exit=6  curl: (6) Could not resolve host: github.com
+✅ 直连 IP（140.82.112.3，GitHub）必须不通     exit=7  curl: (7) Failed to connect to 140.82.112.3 port 443
+✅ 过代理 CONNECT 到裸 IP 必须被拒            exit=56 curl: (56) CONNECT tunnel failed, response 403
+✅ 过代理访问 api.deepseek.com 必须通          exit=0  401
+✅ 5/5 条通过：Agent 容器只能经代理访问 api.deepseek.com
+```
+
+任何一条 ❌ 都不要建实验。代理容器 `restart=always`，随 dockerd 自启；改了名单要重新 `up`。
+为什么要有这一步：2026-09-22 查实没有笼子时 claude-code 会 `curl` 下载上游修复的 diff，四轮结果作废
+（`docs/plan/05-sandbox.md` §10.5）。
+
 到这里部署完成。接下来看 [`usage.md`](usage.md)。
 
 ---
@@ -269,6 +294,7 @@ Noop   #2: COMPLETED  解决 0/4  平台故障 0  dirty=false
 |:---|:---|:---|
 | 看五个服务的状态 | `make compose-ps` | |
 | 看日志 | `make compose-logs SERVICE=worker` | 跟随模式，Ctrl-C 退出；不给 `SERVICE=` 就是全部 |
+| 出网笼子在不在 | `make compose-cli CMD="python -m cli.egress status"` | 代理没在跑就 `… cli.egress up`；`… cli.egress logs` 看 ALLOW / DENY 记录 |
 | 跑一条平台命令 | `make compose-cli CMD="python -m cli.experiment status"` | 在临时容器里跑，跑完容器自动删；命令的工作目录是 `backend/`，所以仓库里其他文件写 `../datasets/…` |
 | 停掉 | `make compose-down` | 删容器、**保留数据**（数据库在命名卷 `pgdata` 里，`var/` 在宿主机） |
 | 再起来 | `make compose-up` | 实测停了再起，之前的实验都还在 |

@@ -470,12 +470,22 @@
   `pytest --import-mode=importlib tests/ tests_v1/` 是 359 条零错误。配方因此加了
   `test_args` 字段（进配方哈希），它之后会变成 `environment_specs.test_command` 的一部分。
 
-### E2-T4 出站网络白名单代理
+### E2-T4 出站网络白名单代理 ✅ 已于 2026-09-22 完成
 - **Goal**：Agent 阶段只放行 LLM API 域名，禁止 github.com
 - **Req**：FR-07, NFR-04 · **Deps**：E2-T2
-- **AC**：容器内 `curl https://github.com` 失败、`curl <LLM API>` 成功
+- **AC**：容器内 `curl https://github.com` 失败、`curl <LLM API>` 成功；**2026-09-22 追加**：绕开代理直连域名不通、直连 IP（`curl https://140.82.112.3`）不通、过代理 CONNECT 裸 IP 被拒——只查域名不查 IP 不算过
 - **Risk**：中（HTTPS 代理配置）→ 降级方案见 §10.5
 - **P1 · C:M · E:1d · 🐳**
+- **实际交付**（2026-09-22）：起因是 MET-04 复核抽到 case-041，原始日志确认 claude-code 在默认桥接下 `curl` 到了上游修复的 diff，
+  #158/#162/#167/#168 四轮整轮 `exclude`。做法和原稿有三处不同，细节和验收回显见 `05-sandbox.md` §10.5：
+  ① 代理是标准库 Python（`app/sandbox/egress_proxy.py`，只认 `CONNECT host:443`、按主机名判名单、不解析 DNS），
+  `python -c` 塞进 `bench-base:py311`，不拉新镜像；② Agent 容器接 docker `internal` 网络 `bench-egress`，没有网关，
+  直连 IP 和域名都是"没有路"而不是"被规则拦"；③ claude-code 命令行加 `--disallowedTools WebFetch,WebSearch`（WebSearch 是 API 服务端代搜，网络拦不住）。
+  `NetworkMode.EGRESS` + `ContainerSpec.network_name`，三个真实适配器经 `adapters/network.py` 一处选网络；
+  `AgentConfig.egress_network` 由 Worker 从 `Settings.sandbox_egress_network` 填，`agent_env_for()` 注 `HTTP_PROXY=http://bench-egress-proxy:3128` 并清空 `NO_PROXY`。
+  `python -m cli.egress up / status / check / logs / down`；`check` 五条全 ✅，端到端 claude-code 经代理调 API 成功且回答 "WebFetch is not available"。
+  单测 21 条（真 socket），`make check` 2156 passed；`.env.example`、`scripts/check_env.py`、`deployment.md` 第 7 步、`usage.md` §5、AGENTS.md 常用命令同步。
+  **未做**：§10.5 降级方案里的"轨迹检测 → POSSIBLE_LEAK"——笼子关上后它只剩事后取证价值，代理日志的 DENY 行已经能替代。
 
 ---
 
@@ -2233,6 +2243,11 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   触发项目代码 NameError），#119 只认了 conftest 那一种。#121 泛化了判据（零用例 + 启动 traceback 里有工作区帧 → 收集错误 → C-13 (b)）。
   这 3 道已有 canonical 结论，按 C-25 不回改；3/75 = 4% 未过 C-26 线，#170 仍有效；影响只是平台故障率虚高，
   不影响 aider 的解决率（它们本来也是没修对）。
+  **2026-09-22 复核**：把 #2643/#2651/#2653 三份原始 `test.log` 用当前 `parse_pytest_text()` + `judge()` 重跑，
+  收集错误分别归到 `sklearn/utils/_set_output.py`、`sphinx/util/typing.py`、`sphinx/domains/std.py`——三个都正是 Agent 补丁改的唯一文件，
+  `blames_harness=False`，三条都会判 `COMPLETED / SUCCESS / UNRESOLVED`。历史行照旧不改。
+  **副作用要记住**：MET-04 盲审证据包直接抄库里的 `infra_outcome`，这 3 道在包里仍显示 `HARNESS_ERROR`，
+  已经把一个复核模型带偏成 N1（case-025）；重抽样时要么跳过这类行，要么在证据包里把 `infra_outcome` 换成按当前判据重算的值。
 - **AC 对账（2026-09-21）**：1 ✅（03 §8.13）；2 ✅（3 Agent × 2 数据集 × 2 轮，12 个运行全部 `dirty=false`）；
   3 ✅——排行榜与单数据集解决率分开；跨数据集合并表 #52–#54 来源分列，总题数 116，696 条逐题结果均标明版本；
   4 ✅（报告每题带补丁 / 日志 / 轨迹链接）；5 ✅——平台故障率、重试次数和 137 无 OOM 标志推算次数均进报告，

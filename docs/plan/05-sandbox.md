@@ -127,6 +127,37 @@ Agent 阶段需要访问 LLM API，但**绝不能**访问 github.com（会搜到
 实现：一个 tinyproxy/mitm 风格的轻量 HTTP(S) 代理容器，接在 `bench-egress` 网络上，只放行配置的域名（如各 LLM 提供方 API 域名）。Agent 容器注入 `HTTP_PROXY/HTTPS_PROXY/NO_PROXY`，并 `--dns` 指向不解析其他域名。
 **降级方案（若代理调试超时）**：Agent 容器直接联网，但在 `AgentTaskInput` 中不含 repo URL/PR 编号，并在归因阶段用规则检测轨迹中是否出现 `github.com/<repo>/pull` 访问 → 标记 `POSSIBLE_LEAK` 并从统计中剔除。风险披露写进报告。
 
+**2026-09-22 实测：代理没做、降级方案也没做，claude-code 四轮结果已作废。** 起因是 MET-04 复核抽到 case-041（run 1944，click-3678）：原始 `agent.log` 的 tool_result 里 `curl` 拿到了上游修复 commit 3495fba 的 diff（263 行，含 `src/click/core.py` 和三个测试文件），随后 `Read /tmp/fix.diff` 读到了全文——这一条是**看原始日志确认**的。当时 `NetworkMode.BRIDGE` 就是 docker 默认桥接（`container.py` 模块注释明写能连整个互联网），`.env` 的 `SANDBOX_HTTP_PROXY` 为空，代码里也没有 `POSSIBLE_LEAK` 检测。
+
+顺手扫了全部 959 条轨迹（`var/met04_private/leak_scan_2026-09-22.json`），按"工具调用里出现 PR/commit 的 `.diff`/`.patch`/`/files`"口径，命中集中在 claude-code 的四个 E10-T4 run：#158 17 题、#162 16 题、#167 9 题、#168 11 题；aider / miniagent 一条都没有（它们没有 WebFetch/WebSearch，也没主动 curl）。**扫描命中只是排查线索**，只说明它发起过请求，不等于每条都下载成功、更不等于用上了；要下"确认读到"的结论，得像 case-041 那样看原始 tool_result。
+
+处理：用 `cli.experiment exclude` 把 #158/#162/#167/#168 整轮排除出排行榜（原始执行和判定不改，`include` 可撤销）。已生成的静态报告不会跟着数据库标记变，所以这四轮的旧解决率（31/41、65/75、32/41、68/75）和三 Agent 对比图**一律标为失效，不用于答辩**。
+
+下一步：补做 E2-T4，验收必须在 Agent 容器内做三件事——`curl https://github.com` 失败、直连 IP（如 `curl https://140.82.112.3`）也失败、LLM API 仍可访问——然后用**新实验号**重跑 claude-code 四轮。只查域名不查 IP 不算过：Agent 会自己解析地址绕过域名规则。
+
+**2026-09-22 晚：E2-T4 做完，五条验收在开发机全绿。** 实现和 §10.5 原稿有三处不同，都是被这台机器逼的：
+
+1. **不用 tinyproxy，代理是 100 多行标准库 Python**（`app/sandbox/egress_proxy.py`）。拉 alpine 镜像走境外代理两分钟没拉完，而 `bench-base:py311` 本来就有 Python；整段源码由 `app.sandbox.egress` 读出来、`python -c` 塞进容器，不需要新镜像、不需要挂载。它只认 `CONNECT host:443`，判名单看 CONNECT 行里的主机名、不解析 DNS，所以 `CONNECT 140.82.112.3:443` 和 `GET http://…` 一律 403。每个连接一行 `ALLOW` / `DENY` 写 stdout，就是取证材料。
+2. **不用 `--dns` 指向不解析的地址，用 docker 的 `internal` 网络**。Agent 容器接在 `bench-egress`（`internal: true`）上，没有网关：直连 IP 是 `Failed to connect`，域名是 `Could not resolve host`，都不是靠规则拦的，是根本没有路。代理容器同时接 `bench-egress` 和默认 bridge，是笼子唯一的门。
+3. **claude-code 加 `--disallowedTools WebFetch,WebSearch`**。WebSearch 是 API 服务端代搜的，沙箱网络拦不住；case-041 正是先 WebSearch 到修复 commit 的哈希、再 curl 下 diff。
+
+其它几件事：`~/.docker/config.json` 的 `proxies.default` 会往每个容器注 `HTTP_PROXY=172.30.80.1:10808`——docker-py 是把它**放在前面**、显式 env 在后面覆盖，所以 Agent 拿到的是 `http://bench-egress-proxy:3128`，且 `NO_PROXY` 被显式清空；代理容器不带 `bench.owner` 标签（Worker 启动的孤儿回收会删掉所有带这个标签的容器），用 `bench.role=egress-proxy`；没起代理就跑实验，Agent 容器起不来记 `HARNESS_ERROR`，**故意不退回 BRIDGE**。
+
+验收回显（`python -m cli.egress check`，探针走的就是 `run_in_container()` + `NetworkMode.EGRESS`，和真实评测同一条路）：
+
+```
+✅ 过代理访问 github.com 必须被拒            exit=56 curl: (56) CONNECT tunnel failed, response 403
+✅ 绕开代理直连 github.com 必须不通            exit=6  curl: (6) Could not resolve host: github.com
+✅ 直连 IP（140.82.112.3，GitHub）必须不通     exit=7  curl: (7) Failed to connect to 140.82.112.3 port 443 after 0 ms
+✅ 过代理 CONNECT 到裸 IP 必须被拒            exit=56 curl: (56) CONNECT tunnel failed, response 403
+✅ 过代理访问 api.deepseek.com 必须通          exit=0  401
+```
+
+端到端：用真实的 `bench-agent:py311-claude-code` 镜像在同一网络里跑一条提示（`--disallowedTools WebFetch,WebSearch`），
+API 调用经代理成功（代理日志 `ALLOW api.deepseek.com:443`），模型回答 "WebFetch is not available in my toolset"。
+配置三项：`SANDBOX_EGRESS_NETWORK`（默认 `bench-egress`，空 = 退回直连、只准调试）、`SANDBOX_EGRESS_ALLOW`（默认 `api.deepseek.com`）、
+`SANDBOX_EGRESS_UPSTREAM`（名单有境外域名时给代理容器配的上游）。单测 21 条（真 socket 打真代理，不 mock），`make check` 2156 passed。
+
 ## 10.6 Docker 客户端与 Day-0 阻塞
 - 平台通过 **docker SDK for Python** 操作本机 daemon（`/var/run/docker.sock`）。
 - API 服务与 Worker 用 docker compose 起；**Worker 需要挂载 docker.sock**（DooD 模式，非 DinD）。这引入宿主机权限暴露——在单机实训环境可接受，但必须在部署文档中明示，并把 Worker 容器限制为非公开端口。
