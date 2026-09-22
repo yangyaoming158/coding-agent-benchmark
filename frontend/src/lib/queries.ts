@@ -193,6 +193,40 @@ export function useRuns(params: RunsParams = {}, options?: QueryOpts<RunPage>) {
   });
 }
 
+/**
+ * 把全部实验拉回来（翻页到凑齐 `total`）。
+ *
+ * `/agents` 页要按"最近一次实验是哪条配置跑的"区分同名的新旧配置（E7 走查 #19），
+ * 这个判断得看到全部实验、不能只看第一页——旧配置的实验可能已经翻到后面去了。
+ */
+export async function fetchAllRuns(
+  params: Omit<RunsParams, "limit" | "offset"> = {},
+): Promise<RunSummary[]> {
+  const first = await apiGet<RunPage>(
+    withQuery("/api/runs", { ...params, limit: MAX_PAGE_LIMIT, offset: 0 }),
+  );
+  const items = [...first.items];
+  while (items.length < first.total) {
+    const page = await apiGet<RunPage>(
+      withQuery("/api/runs", { ...params, limit: MAX_PAGE_LIMIT, offset: items.length }),
+    );
+    if (page.items.length === 0) break;
+    items.push(...page.items);
+  }
+  return items;
+}
+
+export function useAllRuns(
+  params: Omit<RunsParams, "limit" | "offset"> = {},
+  options?: QueryOpts<RunSummary[]>,
+) {
+  return useQuery({
+    queryKey: ["runs", "all", params],
+    queryFn: () => fetchAllRuns(params),
+    ...options,
+  });
+}
+
 export function useRun(id: number, options?: QueryOpts<RunDetail>) {
   return useQuery({
     queryKey: queryKeys.run(id),
