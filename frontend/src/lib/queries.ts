@@ -22,6 +22,7 @@ import type { components } from "./api-types";
 type Schemas = components["schemas"];
 
 // —— 类型再导出：页面只 import 这一个文件就够，不用记 api-types 里的编码命名 ——
+export type AnalysisResponse = Schemas["AnalysisResponse"];
 export type RunSummary = Schemas["RunSummary"];
 export type RunDetail = Schemas["RunDetail"];
 export type TaskRunSummary = Schemas["TaskRunSummary"];
@@ -48,6 +49,8 @@ export type AgentPage = Schemas["Page_AgentSummary_"];
 export type AgentConfigPage = Schemas["Page_AgentConfigSummary_"];
 export type BenchmarkSetPage = Schemas["Page_BenchmarkSetSummary_"];
 export type TaskPage = Schemas["Page_TaskSummary_"];
+export type ReportBatch = Schemas["ReportBatchResponse"];
+export type ReportPage = Schemas["Page_ReportBatchResponse_"];
 
 // —— 各端点的查询参数（照抄后端 OpenAPI 里的定义，别自己发明字段）——
 
@@ -85,6 +88,15 @@ export interface TaskRunTestsParams {
  */
 export type ArtifactTextKind = Schemas["ArtifactKind"] | Schemas["AgentPatchKind"];
 
+export interface AnalysisParams {
+  /** 数据集 slug：这一版上所有排行榜准入的实验 */
+  set?: string;
+  version?: string;
+  /** 实验号，和 set 二选一 */
+  run?: number[];
+  top_n?: number;
+}
+
 export interface LeaderboardParams {
   /** 数据集 slug。不给就取最新已发布的那一版 */
   set?: string;
@@ -117,6 +129,11 @@ export interface TasksParams {
   offset?: number;
 }
 
+export interface ReportsParams {
+  limit?: number;
+  offset?: number;
+}
+
 /** 查询 key 工厂。层级：资源 → 参数，便于按前缀失效。 */
 export const queryKeys = {
   health: ["health"] as const,
@@ -131,6 +148,7 @@ export const queryKeys = {
     ["task-run", taskRunId, "artifact", kind] as const,
   leaderboard: (params: LeaderboardParams = {}) =>
     ["leaderboard", params] as const,
+  analysis: (params: AnalysisParams = {}) => ["analysis", params] as const,
   agents: ["agents"] as const,
   agentConfigs: ["agent-configs"] as const,
   benchmarkSets: (params: BenchmarkSetsParams = {}) =>
@@ -139,13 +157,16 @@ export const queryKeys = {
     ["benchmark-set", slug, version ?? null] as const,
   tasks: (params: TasksParams = {}) => ["tasks", params] as const,
   task: (taskId: string) => ["task", taskId] as const,
+  reports: (params: ReportsParams = {}) => ["reports", params] as const,
 };
 
-/** 拼查询串；空值（undefined / null / ""）直接丢掉，不产出 `?set=` 这种空参数。 */
+/** 拼查询串；空值（undefined / null / ""）直接丢掉，不产出 `?set=` 这种空参数。数组展开成重复参数（`run=1&run=2`）。 */
 function withQuery<T extends object>(path: string, params: T): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, String(item));
+    } else if (value !== undefined && value !== null && value !== "") {
       search.set(key, String(value));
     }
   }
@@ -168,6 +189,40 @@ export function useRuns(params: RunsParams = {}, options?: QueryOpts<RunPage>) {
   return useQuery({
     queryKey: queryKeys.runs(params),
     queryFn: () => apiGet<RunPage>(withQuery("/api/runs", params)),
+    ...options,
+  });
+}
+
+/**
+ * 把全部实验拉回来（翻页到凑齐 `total`）。
+ *
+ * `/agents` 页要按"最近一次实验是哪条配置跑的"区分同名的新旧配置（E7 走查 #19），
+ * 这个判断得看到全部实验、不能只看第一页——旧配置的实验可能已经翻到后面去了。
+ */
+export async function fetchAllRuns(
+  params: Omit<RunsParams, "limit" | "offset"> = {},
+): Promise<RunSummary[]> {
+  const first = await apiGet<RunPage>(
+    withQuery("/api/runs", { ...params, limit: MAX_PAGE_LIMIT, offset: 0 }),
+  );
+  const items = [...first.items];
+  while (items.length < first.total) {
+    const page = await apiGet<RunPage>(
+      withQuery("/api/runs", { ...params, limit: MAX_PAGE_LIMIT, offset: items.length }),
+    );
+    if (page.items.length === 0) break;
+    items.push(...page.items);
+  }
+  return items;
+}
+
+export function useAllRuns(
+  params: Omit<RunsParams, "limit" | "offset"> = {},
+  options?: QueryOpts<RunSummary[]>,
+) {
+  return useQuery({
+    queryKey: ["runs", "all", params],
+    queryFn: () => fetchAllRuns(params),
     ...options,
   });
 }
@@ -300,6 +355,17 @@ export function useLeaderboard(
   });
 }
 
+export function useAnalysis(
+  params: AnalysisParams = {},
+  options?: QueryOpts<AnalysisResponse>,
+) {
+  return useQuery({
+    queryKey: queryKeys.analysis(params),
+    queryFn: () => apiGet<AnalysisResponse>(withQuery("/api/analysis", params)),
+    ...options,
+  });
+}
+
 export function useAgentConfigs(options?: QueryOpts<AgentConfigPage>) {
   return useQuery({
     queryKey: queryKeys.agentConfigs,
@@ -359,6 +425,18 @@ export function useTasks(
   return useQuery({
     queryKey: queryKeys.tasks(params),
     queryFn: () => apiGet<TaskPage>(withQuery("/api/tasks", params)),
+    ...options,
+  });
+}
+
+/** 生成过的报告列表；不轮询——报告是命令行手动生成的，不会在页面开着的时候自己冒出来。 */
+export function useReports(
+  params: ReportsParams = {},
+  options?: QueryOpts<ReportPage>,
+) {
+  return useQuery({
+    queryKey: queryKeys.reports(params),
+    queryFn: () => apiGet<ReportPage>(withQuery("/api/reports", params)),
     ...options,
   });
 }

@@ -67,6 +67,11 @@ try {
     formatRate,
     formatTokens,
     isLiveRun,
+    titleSegments,
+    passRatioTone,
+    factLabel,
+    factValueLabel,
+    agentOutcomeLabel,
   } = await import(pathToFileURL(join(outDir, "display.js")).href);
 
   const base = { infra_outcome: "SUCCESS", agent_outcome: null, error_code: null };
@@ -210,6 +215,48 @@ try {
   check("COMPLETED 停轮询", isLiveRun("COMPLETED"), false);
   check("FAILED 停轮询", isLiveRun("FAILED"), false);
   check("CANCELLED 停轮询", isLiveRun("CANCELLED"), false);
+
+  // ── 标题里的反引号（issue 标题是 Markdown，大标题只认行内代码）──
+  check(
+    "成对反引号拆成代码片段",
+    titleSegments("click 8.3.0 里用类当 `flag_value` 时，默认值会被实例化"),
+    [
+      { code: false, text: "click 8.3.0 里用类当 " },
+      { code: true, text: "flag_value" },
+      { code: false, text: " 时，默认值会被实例化" },
+    ],
+  );
+  check("没有反引号 → 整句一段", titleSegments("plain title"), [{ code: false, text: "plain title" }]);
+  check(
+    "反引号不成对 → 当普通字符，不吞字",
+    titleSegments("a `b c"),
+    [{ code: false, text: "a `b c" }],
+  );
+  check(
+    "开头就是代码、连续两段代码",
+    titleSegments("`a``b` x"),
+    [
+      { code: true, text: "a" },
+      { code: true, text: "b" },
+      { code: false, text: " x" },
+    ],
+  );
+  check("空标题 → 空数组", titleSegments(""), []);
+
+  // ── 通过比的色调（"修好一个、弄坏四个"那一格要红）──
+  check("F2P 5/5 → 绿", passRatioTone(5, 5), "ok");
+  check("P2P 1311/1315 → 红", passRatioTone(1311, 1315), "bad");
+  check("passed 缺省当 0：0/1 → 红", passRatioTone(null, 1), "bad");
+  check("total 为空 → 中性", passRatioTone(null, null), "neutral");
+  check("total 为 0 → 中性（没有用例不算通过）", passRatioTone(0, 0), "neutral");
+
+  // ── 判据表的翻译：认识的翻，不认识的原样 ──
+  check("判据键 f2p", factLabel("f2p"), "F2P 通过");
+  check("判据键认不出 → 原样", factLabel("some_new_fact"), "some_new_fact");
+  check("判据值 UNRESOLVED", factValueLabel("UNRESOLVED"), "未解决");
+  check("判据值 true", factValueLabel("true"), "是");
+  check("判据值 1311/1315 → 原样", factValueLabel("1311/1315"), "1311/1315");
+  check("agent_outcome EMPTY_PATCH", agentOutcomeLabel("EMPTY_PATCH"), "空补丁");
 } finally {
   rmSync(outDir, { recursive: true, force: true });
 }

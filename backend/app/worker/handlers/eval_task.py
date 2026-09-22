@@ -300,6 +300,8 @@ def _agent_config(ctx: JobContext, loaded: _Loaded) -> AgentRunnerConfig:
         image=str(image) if image else None,
         env=build_env(ctx.settings.agent_env_for(loaded.model_name)),
         extra_args=tuple(str(arg) for arg in extra_args),
+        # 出站白名单网络（E2-T4）。配置里留空就是 BRIDGE 直连——那样的结果不该进排行榜
+        egress_network=ctx.settings.sandbox_egress_network,
         # Agent 容器的限额从配置来（E9-T2）。不传的话适配器会用沙箱层的默认值，
         # 那样这台机器的内存账就有一半不受配置控制
         memory_mb=ctx.settings.agent_memory_mb,

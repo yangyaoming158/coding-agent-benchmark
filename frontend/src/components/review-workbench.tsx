@@ -7,10 +7,12 @@ import { MarkdownBody } from "@/components/markdown-body";
 import { useAdminToken } from "@/lib/admin-token";
 import { API_BASE, apiGet, apiPost, apiText } from "@/lib/api";
 import { FAILURE_CATEGORIES, failureCategoryLabel } from "@/lib/display";
+import { buildConfusionMatrix, formatRatePercent } from "@/lib/review-metrics";
 
 type ReviewQueue = components["schemas"]["ReviewQueueResponse"];
 type ReviewCase = components["schemas"]["ReviewCaseResponse"];
 type ReviewSubmit = components["schemas"]["ReviewSubmitResponse"];
+type ReviewMetricsResponse = components["schemas"]["ReviewMetricsResponse"];
 type FailureCategory = components["schemas"]["FailureCategory"];
 
 type ActiveSession = {
@@ -389,12 +391,113 @@ function ReviewForm({
   );
 }
 
+function MetricsPanel({
+  metrics,
+  scopeToBatch,
+  onScopeChange,
+  hasActiveBatch,
+}: {
+  metrics: ReviewMetricsResponse;
+  scopeToBatch: boolean;
+  onScopeChange: (value: boolean) => void;
+  hasActiveBatch: boolean;
+}) {
+  const matrix = useMemo(() => buildConfusionMatrix(metrics.confusion_matrix), [metrics]);
+  return (
+    <Panel title="标注质量（E6-T4）">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2 text-xs">
+          <Badge>{metrics.sample_count} 条可统计的标注</Badge>
+          <Badge tone={metrics.accuracy.available ? "ok" : "neutral"}>
+            准确率 {formatRatePercent(metrics.accuracy_value)}
+          </Badge>
+          <Badge tone={metrics.kappa.available ? "ok" : "neutral"}>
+            Cohen&apos;s κ {formatRatePercent(metrics.kappa_value)}
+          </Badge>
+        </div>
+        <label className="flex items-center gap-1.5 text-xs text-neutral-600">
+          <input
+            type="checkbox"
+            checked={scopeToBatch}
+            disabled={!hasActiveBatch}
+            onChange={(event) => onScopeChange(event.target.checked)}
+          />
+          只看当前抽检批次
+        </label>
+      </div>
+      {!metrics.accuracy.available && (
+        <p className="text-xs text-neutral-500">准确率算不出来：{metrics.accuracy.reason}</p>
+      )}
+      {metrics.accuracy.available && !metrics.kappa.available && (
+        <p className="text-xs text-neutral-500">κ 算不出来：{metrics.kappa.reason}</p>
+      )}
+      {matrix.automaticCategories.length > 0 && (
+        <div className="overflow-auto">
+          <table className="min-w-full border-collapse text-xs">
+            <caption className="mb-2 text-left text-neutral-500">
+              行 = 自动归因判的类别，列 = 人工判的类别；对角线是两边一致
+            </caption>
+            <thead>
+              <tr>
+                <th className="whitespace-nowrap border-b border-neutral-200 px-2 py-1.5 text-left">
+                  自动 \ 人工
+                </th>
+                {matrix.humanCategories.map((category) => (
+                  <th
+                    key={category}
+                    className="whitespace-nowrap border-b border-neutral-200 px-2 py-1.5 text-left"
+                  >
+                    {failureCategoryLabel(category as FailureCategory)}
+                  </th>
+                ))}
+                <th className="whitespace-nowrap border-b border-neutral-200 px-2 py-1.5 text-left">
+                  合计
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {matrix.automaticCategories.map((automatic) => (
+                <tr key={automatic}>
+                  <th className="whitespace-nowrap px-2 py-1.5 text-left font-medium">
+                    {failureCategoryLabel(automatic as FailureCategory)}
+                  </th>
+                  {matrix.humanCategories.map((human) => {
+                    const count = matrix.countAt(automatic, human);
+                    return (
+                      <td
+                        key={human}
+                        className={`whitespace-nowrap px-2 py-1.5 ${
+                          automatic === human && count > 0
+                            ? "bg-emerald-50 font-medium text-emerald-900"
+                            : count > 0
+                              ? "bg-amber-50 text-amber-900"
+                              : "text-neutral-300"
+                        }`}
+                      >
+                        {count || "·"}
+                      </td>
+                    );
+                  })}
+                  <td className="whitespace-nowrap px-2 py-1.5 font-medium">
+                    {matrix.rowTotal(automatic)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Panel>
+  );
+}
+
 /** E6-T3 盲检工作台。自动答案是否可见只由后端响应决定。 */
 export function ReviewWorkbench() {
   const queryClient = useQueryClient();
   const [session, setSession] = useState<ActiveSession | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [scopeToBatch, setScopeToBatch] = useState(false);
 
   const queueQuery = useQuery({
     queryKey: ["review-queue", session?.reviewer, session?.seed],
@@ -427,6 +530,17 @@ export function ReviewWorkbench() {
       );
     },
     enabled: Boolean(session && activeBatchId && effectiveSelected !== null),
+  });
+
+  const metricsBatchId = scopeToBatch ? activeBatchId : undefined;
+  const metricsQuery = useQuery({
+    queryKey: ["review-metrics", session?.token, metricsBatchId],
+    queryFn: () => {
+      if (!session) throw new Error("尚未进入盲检");
+      const params = metricsBatchId ? `?${new URLSearchParams({ batch_id: metricsBatchId })}` : "";
+      return apiGet<ReviewMetricsResponse>(`/api/review/metrics${params}`, session.token);
+    },
+    enabled: session !== null,
   });
 
   const normalizedPatch = useMemo(
@@ -476,7 +590,7 @@ export function ReviewWorkbench() {
       <header className="mb-6">
         <div className="flex flex-wrap items-center gap-3">
           <h1 className="text-2xl font-semibold tracking-tight">人工盲检</h1>
-          <Badge tone="warn">后端强制隐藏自动答案</Badge>
+          <Badge tone="warn">提交前接口不返回自动答案</Badge>
         </div>
         <p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-600">
           两名标注者先独立判断；意见不一致时由第三人仲裁。提交有效类别前，接口不会返回自动归因类别、理由、置信度或 evidence。
@@ -490,6 +604,22 @@ export function ReviewWorkbench() {
           setNotice(null);
         }}
       />
+
+      {metricsQuery.data && (
+        <div className="mt-4">
+          <MetricsPanel
+            metrics={metricsQuery.data}
+            scopeToBatch={scopeToBatch}
+            onScopeChange={setScopeToBatch}
+            hasActiveBatch={Boolean(activeBatchId)}
+          />
+        </div>
+      )}
+      {metricsQuery.error && (
+        <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {errorMessage(metricsQuery.error)}
+        </p>
+      )}
 
       {queueQuery.error && (
         <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">

@@ -238,7 +238,19 @@ docker image inspect bench-agent:py311-aider --format '{{.Id}}'
 
 ## 5. 建实验
 
-前提三条：数据集版本已经存在（发布过的，或 Golden 那版草稿）；Worker 在跑；工作区干净。
+前提四条：数据集版本已经存在（发布过的，或 Golden 那版草稿）；Worker 在跑；工作区干净；**出网笼子关着**。
+
+第四条是 2026-09-22 加的（E2-T4）：Agent 容器只能经白名单代理访问大模型 API，其它域名、直连 IP 一律不通。
+跑真实 AI 之前先起代理并验收，五条全 ✅ 再建实验：
+
+```bash
+python -m cli.egress up       # 建 internal 网络 bench-egress + 起代理容器，名单读 .env 的 SANDBOX_EGRESS_ALLOW
+python -m cli.egress check    # 在 Agent 同款网络里跑五条 curl：github 域名 / 直连 IP 都不通，api.deepseek.com 通
+python -m cli.egress logs     # 代理的 ALLOW / DENY 记录；查"AI 有没有碰过 github"先翻这里
+```
+
+没起代理就建实验的话，Agent 容器起不来，那一题记 `HARNESS_ERROR`——故意不退回直连。
+哨兵实验（oracle / noop / mock）不起 Agent 容器，不需要这一步。
 
 ```bash
 python -m cli.experiment start --agent oracle --set golden --name 试一下                          # 哨兵，不花钱
@@ -336,6 +348,8 @@ python -m cli.experiment retry-failed --run 158    # 只补"没有结论"的题�
 curl -s "http://localhost:8000/api/leaderboard?set=benchmark-cn-v1"                    # 不给 set 取最新已发布的那一版
 curl -s "http://localhost:8000/api/leaderboard?set=benchmark-cn-v1&version=v2&metric=cost"       # metric: resolve_rate（默认）/ cost / duration
 curl -s "http://localhost:8000/api/leaderboard?set=swebench-verified-subset&facet=repository"    # facet: difficulty / language / repository
+curl -s "http://localhost:8000/api/analysis?set=benchmark-cn-v1&version=v2"                      # 失败分析：该版排行榜准入实验的归因分布 / 热力图 / Top 案例
+curl -s "http://localhost:8000/api/analysis?run=157&run=160"                                     # 或指定实验号（看被排除的那些）
 ```
 
 响应里带 `eligibility`（准入规则原文）和 `excluded_runs`（被排除的实验和理由）。准入六条：实验状态 `COMPLETED`、`dirty=false`、没被人工排除、配置是启用的、不是哨兵、跑满了整份快照。
@@ -378,6 +392,7 @@ python -m cli.report generate --run 158 --run 159 --run 161 --run 165 --run 167 
 | `/runs/[id]` | 一次实验：实时进度、按结论分组的逐题网格、汇总，**取消 / 重试失败项** |
 | `/task-runs/[id]` | 一次执行：判定三字段、补丁 diff（原样 / 标准化两份对比）、逐条用例、日志搜索、轨迹时间线、失败归因（§8.1） |
 | `/leaderboard` | 排行榜：数据集下拉、多指标排序、成本-解决率散点、分面矩阵、准入规则和被排除的实验 |
+| `/analysis` | 失败分析：该版排行榜准入实验的归因分布堆叠柱、Agent × 类别热力图、失败案例表（每行进单次执行页）；"还没结论"的失败单独一格，NEEDS_HUMAN 黄标；`?run=…&run=…` 看指定实验 |
 | `/review` | 人工盲检工作台（§8.2） |
 
 "某个 Agent 在某道题上为什么失败"三次点击：排行榜点参赛者 → 实验的逐题网格点一格 → 单次执行页。

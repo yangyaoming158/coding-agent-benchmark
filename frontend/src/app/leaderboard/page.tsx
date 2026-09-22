@@ -225,15 +225,16 @@ function LeaderboardBody({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-neutral-200 text-left text-xs text-neutral-500">
-                  <th className="px-3 py-2 font-medium">名次</th>
-                  <th className="px-3 py-2 font-medium">参赛者</th>
-                  <th className="px-3 py-2 font-medium">协议版本</th>
-                  <th className="px-3 py-2 font-medium">解决率</th>
-                  <th className="px-3 py-2 font-medium">平台故障率</th>
-                  <th className="px-3 py-2 font-medium">每题成本</th>
-                  <th className="px-3 py-2 font-medium">耗时</th>
-                  <th className="px-3 py-2 font-medium">每题 token</th>
-                  <th className="px-3 py-2 font-medium">实验</th>
+                  {/* 列顺序：实验链接紧跟参赛者 —— 它是"榜 → 实验"这条演示主线的入口，
+                      放在最右会在窄视口被横向滚动藏掉。协议版本并进参赛者那格的小字。 */}
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">名次</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">参赛者</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">实验</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">解决率</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium" title="平台故障率：平台自己没能完成的评测占比，不记在 AI 头上">故障率</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">每题成本</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">耗时</th>
+                  <th className="whitespace-nowrap px-3 py-2 font-medium">每题 token</th>
                 </tr>
               </thead>
               <tbody>
@@ -320,12 +321,23 @@ function LeaderboardTableRow({ row, metric }: { row: LeaderboardRow; metric: Lea
     <tr className="border-b border-neutral-100 last:border-b-0 hover:bg-neutral-50">
       <td className="px-3 py-3 font-mono text-xs text-neutral-500">{row.rank}</td>
       <td className="px-3 py-3">
-        <p className="font-medium text-neutral-900">{row.label}</p>
-        <p className="mt-0.5 text-xs text-neutral-400">
-          {row.agent_display_name} · {row.model_name}
+        <p className="whitespace-nowrap font-medium text-neutral-900">{row.label}</p>
+        <p className="mt-0.5 max-w-52 text-xs text-neutral-400">
+          {row.agent_display_name} · {row.model_name} · 协议 {row.protocol_version}
         </p>
       </td>
-      <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-neutral-500">{row.protocol_version}</td>
+      <td className="whitespace-nowrap px-3 py-3 text-xs">
+        {row.run_ids.map((runId) => (
+          <Link
+            key={runId}
+            href={`/runs/${runId}`}
+            className="mr-1.5 font-mono text-neutral-600 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
+          >
+            #{runId}
+          </Link>
+        ))}
+        <p className="mt-0.5 text-neutral-400">{row.run_count} 轮 × {row.tasks_per_run} 题</p>
+      </td>
       <td className={`whitespace-nowrap px-3 py-3 font-mono text-xs ${strong(metric === "resolve_rate")}`}>
         {formatRate(row.resolve_rate_mean)}
         {spread !== null && (
@@ -337,18 +349,19 @@ function LeaderboardTableRow({ row, metric }: { row: LeaderboardRow; metric: Lea
       <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-neutral-600">
         {formatRate(infraRate === null ? null : String(infraRate))}
       </td>
-      <td className={`whitespace-nowrap px-3 py-3 font-mono text-xs ${strong(metric === "cost")}`}>
+      {/* min-w：这格有三行小字，不给下限会被自动布局挤成一列竖字 */}
+      <td className={`min-w-40 px-3 py-3 font-mono text-xs ${strong(metric === "cost")}`}>
         {row.cost_lower_bound && row.cost_per_task !== null && (
           <span title="有 attempt 报不出成本，这个数只算了报得出的部分，真实成本只会更高">≥ </span>
         )}
-        {formatCost(row.cost_per_task)}
-        <p className="mt-0.5 font-sans text-xs font-normal text-neutral-400">
+        <span className="whitespace-nowrap">{formatCost(row.cost_per_task)}</span>
+        <p className="mt-0.5 whitespace-nowrap font-sans text-xs font-normal text-neutral-400">
           总 {formatCost(row.cost_usd_total)}
           {row.cost_reported_attempts > 0 && ` · 自报 ${row.cost_reported_attempts}`}
         </p>
         {note !== null && (
           <p
-            className={`mt-0.5 font-sans text-xs font-normal ${
+            className={`mt-0.5 max-w-40 font-sans text-xs font-normal ${
               note.warn ? "text-amber-600" : "text-neutral-400"
             }`}
           >
@@ -361,18 +374,6 @@ function LeaderboardTableRow({ row, metric }: { row: LeaderboardRow; metric: Lea
       </td>
       <td className={`whitespace-nowrap px-3 py-3 font-mono text-xs ${strong(metric === "tokens")}`}>
         {formatTokens(row.tokens_per_task)}
-      </td>
-      <td className="px-3 py-3 text-xs">
-        {row.run_ids.map((runId) => (
-          <Link
-            key={runId}
-            href={`/runs/${runId}`}
-            className="mr-1.5 font-mono text-neutral-600 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
-          >
-            #{runId}
-          </Link>
-        ))}
-        <p className="mt-0.5 text-neutral-400">{row.run_count} 轮 × {row.tasks_per_run} 题</p>
       </td>
     </tr>
   );

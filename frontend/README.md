@@ -4,10 +4,10 @@
 
 Next.js 16（App Router）· React 19 · TypeScript · Tailwind CSS · TanStack Query · Recharts。
 
-**当前进度：E7-T1 ~ E7-T5 已完成**（前端骨架与导航、Runs / Run Detail、
-Task Run Detail、Leaderboard、Benchmarks / Benchmark Detail / Task Detail），
-外加 E6-T3 的人工复核页 `/review`。E7-T6 Failure Analysis、E7-T8 Dashboard
-尚未开工，卡片见 [`docs/plan/10-tasks-plan.md`](../docs/plan/10-tasks-plan.md)。
+**当前进度：E7-T1 ~ E7-T6、E7-T8 已完成**（前端骨架与导航、Runs / Run Detail、
+Task Run Detail、Leaderboard、Benchmarks / Benchmark Detail / Task Detail、
+Failure Analysis、Dashboard），外加 E6-T3 的人工复核页 `/review`（E7-T7 由它顶上）。
+卡片见 [`docs/plan/10-tasks-plan.md`](../docs/plan/10-tasks-plan.md)。
 
 ## 跑起来
 
@@ -57,9 +57,10 @@ sessionStorage 里（`src/lib/admin-token.ts`），关掉标签页即失效。
 | `/tasks/[taskId]` | 单题详情：Issue 原文、F2P/P2P 清单、验证证据与隔离记录、各 Agent 历史表现 | E7-T5 |
 | `/runs` | 实验运行列表 + 新建实验 | E7-T2 |
 | `/runs/[id]` | 运行详情：进度、分组网格、取消与重试 | E7-T2 |
-| `/task-runs/[id]` | 单题运行详情：Patch Viewer、测试结果表、日志搜索、轨迹时间线 | E7-T3 |
+| `/task-runs/[id]` | 单题运行详情：判定三字段、Patch Viewer、测试结果表（有挂的默认只列失败）、日志搜索、轨迹时间线、失败归因（#127） | E7-T3 |
 | `/agents` | Agent 与配置：Agent / 版本 / 模型 / 单价（$/MTok） | E7-T1 |
 | `/leaderboard` | 排行榜：数据集下拉、多指标排序、成本-解决率散点、分面矩阵、口径自证；`?set=<slug>&version=<v>` 深链 | E7-T4 · E7-T5 |
+| `/analysis` | 失败分析：归因分布堆叠柱、Agent × 类别热力图、失败案例表（每行进 `/task-runs/[id]`）；"还没结论"单独一格、NEEDS_HUMAN 黄标；`?set=&version=` 或 `?run=&run=` | E7-T6 |
 | `/review` | 人工复核：抽检队列、三栏证据、盲态分类（E6-T3） | E6-T3 |
 
 侧边导航在 `src/components/app-nav.tsx`，只挂已经可达的页面；新页面做完往
@@ -73,12 +74,13 @@ sessionStorage 里（`src/lib/admin-token.ts`），关掉标签页即失效。
 断言脚本：
 
 ```bash
-npm run check                # 五个一起跑
+npm run check                # 六个一起跑
 npm run check:display        # src/lib/display.ts
 npm run check:task-detail    # src/lib/diff.ts、trajectory.ts、search.ts
 npm run check:leaderboard    # src/lib/leaderboard.ts
 npm run check:tasks          # src/lib/tasks.ts
 npm run check:dashboard      # src/lib/dashboard.ts（谁算参赛者、几版数据集、什么算正在跑）
+npm run check:analysis       # src/lib/analysis.ts（未归因不进类别、堆叠柱分段之和 = 类别计数、热力图空格是 null 不是 0）
 ```
 
 零额外依赖（用仓库自带的 tsc 编译成 JS 再动态 import），不用起服务；全过时末尾打印

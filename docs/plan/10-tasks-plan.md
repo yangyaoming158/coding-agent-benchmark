@@ -470,12 +470,22 @@
   `pytest --import-mode=importlib tests/ tests_v1/` 是 359 条零错误。配方因此加了
   `test_args` 字段（进配方哈希），它之后会变成 `environment_specs.test_command` 的一部分。
 
-### E2-T4 出站网络白名单代理
+### E2-T4 出站网络白名单代理 ✅ 已于 2026-09-22 完成
 - **Goal**：Agent 阶段只放行 LLM API 域名，禁止 github.com
 - **Req**：FR-07, NFR-04 · **Deps**：E2-T2
-- **AC**：容器内 `curl https://github.com` 失败、`curl <LLM API>` 成功
+- **AC**：容器内 `curl https://github.com` 失败、`curl <LLM API>` 成功；**2026-09-22 追加**：绕开代理直连域名不通、直连 IP（`curl https://140.82.112.3`）不通、过代理 CONNECT 裸 IP 被拒——只查域名不查 IP 不算过
 - **Risk**：中（HTTPS 代理配置）→ 降级方案见 §10.5
 - **P1 · C:M · E:1d · 🐳**
+- **实际交付**（2026-09-22）：起因是 MET-04 复核抽到 case-041，原始日志确认 claude-code 在默认桥接下 `curl` 到了上游修复的 diff，
+  #158/#162/#167/#168 四轮整轮 `exclude`。做法和原稿有三处不同，细节和验收回显见 `05-sandbox.md` §10.5：
+  ① 代理是标准库 Python（`app/sandbox/egress_proxy.py`，只认 `CONNECT host:443`、按主机名判名单、不解析 DNS），
+  `python -c` 塞进 `bench-base:py311`，不拉新镜像；② Agent 容器接 docker `internal` 网络 `bench-egress`，没有网关，
+  直连 IP 和域名都是"没有路"而不是"被规则拦"；③ claude-code 命令行加 `--disallowedTools WebFetch,WebSearch`（WebSearch 是 API 服务端代搜，网络拦不住）。
+  `NetworkMode.EGRESS` + `ContainerSpec.network_name`，三个真实适配器经 `adapters/network.py` 一处选网络；
+  `AgentConfig.egress_network` 由 Worker 从 `Settings.sandbox_egress_network` 填，`agent_env_for()` 注 `HTTP_PROXY=http://bench-egress-proxy:3128` 并清空 `NO_PROXY`。
+  `python -m cli.egress up / status / check / logs / down`；`check` 五条全 ✅，端到端 claude-code 经代理调 API 成功且回答 "WebFetch is not available"。
+  单测 21 条（真 socket），`make check` 2156 passed；`.env.example`、`scripts/check_env.py`、`deployment.md` 第 7 步、`usage.md` §5、AGENTS.md 常用命令同步。
+  **未做**：§10.5 降级方案里的"轨迹检测 → POSSIBLE_LEAK"——笼子关上后它只剩事后取证价值，代理日志的 DENY 行已经能替代。
 
 ---
 
@@ -1498,7 +1508,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   ⑨ 实验列表显示 `dirty` / 已排除标记。
 - **顺带改了后端**：排行榜每题成本"有一次报不出就 None"放宽为下界（`cost_lower_bound`），
   细账在 `07-platform-architecture.md` §14.5 第五条；不改判定、不碰冻结件。
-- **没做**：E7-T6 失败分析、E7-T8 Dashboard（首页仍是平台自检，2026-09-21 晚补上，见 E7-T8 卡）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
+- **没做**：E7-T6 失败分析（2026-09-22 补上，见 E7-T6 卡）、E7-T8 Dashboard（首页仍是平台自检，2026-09-21 晚补上，见 E7-T8 卡）；E7-T7 的人工复核页由 E6-T3 的 `/review` 顶上。
   归因结果在单题运行页只留了一段说明——后端没有归因端点（E7-T6 的活）。
 - **单题页接上归因**（2026-09-21 晚，E7-T3 的补丁）：`GET /api/task-runs/{id}` 多带 `failure_attribution`
   （`failure_attributions` 一行：类别、层级、置信度、状态、证据、中文理由；`raw_response` 不透出）和
@@ -1509,7 +1519,27 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   没做成按 `human_reviews` 自动推断，因为批次刚建、还没人提交时库里没有任何痕迹。细账在
   `07-platform-architecture.md` §16.5。实测：#2562（F6，规则层）显示类别 + 判据，#2544（规则分不出、没跑 LLM）
   显示"还没有归因结论"，开关开着时 JSON 里搜不到类别字符串。
-### E7-T6 Failure Analysis（分布图/热力图/Top 案例） · **P1 · C:M · E:1.5d**
+### E7-T6 Failure Analysis（分布图/热力图/Top 案例） ✅ 已于 2026-09-22 完成 · **P1 · C:M · E:1.5d**
+- **Goal**：`/analysis` 一页回答"没修好的题都是哪一类原因"：归因分布堆叠柱、Agent × 类别热力图、
+  Top 失败案例（§16.2）
+- **AC**（开工前定的）：1. 后端只加一个只读端点，口径不重写——报告 JSON `failures` 段那个函数直接公开给
+  API 层调；2. 按数据集查时的实验集合 = 排行榜准入（复用 `eligible_runs()`），榜上多少轮这里就多少轮；
+  3. "规则分不出、还没结论"的失败不进任何类别、单独一个数；4. LLM 行落库后自动进来，NEEDS_HUMAN 单独标；
+  5. 不许 N+1；6. 展示口径是纯函数 + 断言脚本
+- **实际交付**（2026-09-22）：后端 `app/report/aggregate.failure_summary()`（`_failures()` 的公开包装，
+  `FailureSummary` 加 `needs_human_failures` / `llm_attributed_failures` 两个计数）+ `app/api/analysis.py`
+  `GET /api/analysis?set=&version=` 或 `?run=…&run=…`（二者都给 / 都不给是 422，实验号不存在 404；
+  `BENCH_BLIND_REVIEW` 开着时逐案例的类别 / 状态 / 理由置空、分布照常，`attribution_withheld=true`）；
+  6 条集成测试（`tests/integration/test_api_analysis.py`：准入过滤、按号不过滤、作用域校验、NEEDS_HUMAN / LLM
+  计数、盲检、SQL 条数 1 个实验和 4 个实验相同）。前端 `lib/analysis.ts`（33 条断言 `check-analysis.mjs`，
+  `npm run check` 217 → 250）+ `components/failure-distribution.tsx`（recharts 堆叠柱，一柱一类别、分段是参赛者，
+  颜色按字母序固定、第六个起折"其他"）+ `failure-heatmap.tsx`（深浅按占该 Agent 失败的比例分五档，空格 "—"
+  不是 0）+ `app/analysis/page.tsx`；侧栏加"失败分析"。
+  **实测**（开发库 2026-09-22）：`benchmark-cn-v1@v2` 准入 6 次实验 #158/#159/#161/#165/#167/#169，失败 148、
+  已归因 148（规则 63 · LLM 85）、还没结论 0；F7 空补丁 49（MiniAgent 29）、F4 逻辑错误 46；claude-code 19 次失败
+  里 F4 占 10。`swebench-verified-subset@v3` 失败 195 全归因（LLM 92，N1 平台故障 3 = #170 那 3 道）。
+  `?run=157&run=160`（被排除的两次）失败 53、还没结论 33——排除的实验没跑 LLM，这一格就是给它们看的。
+  **没做**：抽检准确率 / κ 那一行显示后端给的"暂无 + 原因"，等 E6-T4。
 ### E7-T7 Human Review 页 · **P1 · C:M · E:1.5d**
 ### E7-T8 Dashboard ✅ 已于 2026-09-21 完成 · **P1 · C:S · E:0.5d**
 - **Goal**：首页一屏回答"平台里有什么、现在在干什么"：几版数据集、几个参赛者、跑了多少次实验、
@@ -1527,6 +1557,16 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   参赛 Agent 3 个 · 5 条启用配置、实验 56 次、正在跑 0 个、最近 5 次是 #166–#170。
   没跑真实验去截"正在跑"的样子——建实验要干净工作区（C-27），分支上有未提交改动；
   那一段用的是 `/runs` 同一套 `StatusBadge` / `ProgressBar`。
+  **轮询实测**（2026-09-22，在 compose 验证副本 `bench-deploy-test` 上跑，不动开发库）：前端构建时把
+  `NEXT_PUBLIC_API_BASE` 指到副本的 :8001，headless Chrome 打开页面后**不刷新**、每 2 秒读一次区块文字，
+  同时用 `docker compose run cli python -m cli.queue enqueue --agent oracle --set golden` 连投 11 个
+  Golden Oracle 实验（4 题一个，副本的 Worker 每个 1–2 秒跑完）。首页：t=0 显示"正在跑 0 个 · 另有 1 个排队中"、
+  最近 5 次第一行 #12 排队中 0/4，t=+8s 原地变成已完成 4/4 100%（接口请求数 6 → 9，没有整页重载）。
+  `/runs`：t=0 #14 运行中 3/4、#15 排队中，t=+8s 两条都已完成，之后 40 秒内不再发请求（全跑完就停，
+  符合 §16.1）。**一个设计后果**：页面在没有活实验时打开，之后别处建的实验它自己不会发现——轮询只在
+  "已经看到活实验"时开；切标签页回来会触发 TanStack 的窗口聚焦重取（staleTime 5 秒），演示里建实验
+  和看进度在同一个人手上，够用，没改。Golden 实验太快（4 题 6 秒），"运行中"那一格只抓到一次，
+  想看进度条慢慢走要拿 41 题的中文集跑。
 
 ## E8 — Benchmark Dataset Production
 
@@ -2215,6 +2255,11 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
   触发项目代码 NameError），#119 只认了 conftest 那一种。#121 泛化了判据（零用例 + 启动 traceback 里有工作区帧 → 收集错误 → C-13 (b)）。
   这 3 道已有 canonical 结论，按 C-25 不回改；3/75 = 4% 未过 C-26 线，#170 仍有效；影响只是平台故障率虚高，
   不影响 aider 的解决率（它们本来也是没修对）。
+  **2026-09-22 复核**：把 #2643/#2651/#2653 三份原始 `test.log` 用当前 `parse_pytest_text()` + `judge()` 重跑，
+  收集错误分别归到 `sklearn/utils/_set_output.py`、`sphinx/util/typing.py`、`sphinx/domains/std.py`——三个都正是 Agent 补丁改的唯一文件，
+  `blames_harness=False`，三条都会判 `COMPLETED / SUCCESS / UNRESOLVED`。历史行照旧不改。
+  **副作用要记住**：MET-04 盲审证据包直接抄库里的 `infra_outcome`，这 3 道在包里仍显示 `HARNESS_ERROR`，
+  已经把一个复核模型带偏成 N1（case-025）；重抽样时要么跳过这类行，要么在证据包里把 `infra_outcome` 换成按当前判据重算的值。
 - **AC 对账（2026-09-21）**：1 ✅（03 §8.13）；2 ✅（3 Agent × 2 数据集 × 2 轮，12 个运行全部 `dirty=false`）；
   3 ✅——排行榜与单数据集解决率分开；跨数据集合并表 #52–#54 来源分列，总题数 116，696 条逐题结果均标明版本；
   4 ✅（报告每题带补丁 / 日志 / 轨迹链接）；5 ✅——平台故障率、重试次数和 137 无 OOM 标志推算次数均进报告，
@@ -2256,7 +2301,7 @@ C-20 的对照组执行（够单开一个任务）；限流令牌桶和 `externa
 - **Goal**：5 分钟能把"这个平台怎么给 AI 打分、分数从哪来、能不能复核"讲清；现场任何一环挂了都有东西可放
 - **实际交付**（2026-09-21）：`docs/demo.md`。主线按 §16.3 那条核心旅程走：**排行榜（切中文集）→ 实验 →
   逐题网格 → 单题证据**，每步给"屏幕上该看到的数字"和台词，数字全从开发库和接口对过：首页 3 个数据集 · 6 版 · 138 题 / 3 参赛者 /
-  56 次实验；`benchmark-cn-v1@v2` 榜 claude-code 76.8%（75.6 / 78.0）、MiniAgent 28.0%、aider 14.6%，榜底 #157 / #160 排除理由；
+  56 次实验；`benchmark-cn-v1@v2` 榜 claude-code 76.8%（75.6 / 78.0）、MiniAgent 28.1%（26.8 / 29.3）、aider 14.6%，榜底 #157 / #160 排除理由；
   实验 #167 41/41、78.0%、故障 0、dirty=false；单题 #2444（click-3225）**F2P 5/5 但 P2P 1311/1315——修好一个弄坏四个，判未解决**，
   归因 F6（规则层）；收尾门禁 Oracle 41/41、Noop 0/41。§26.3 原脚本里的"新建 Mock 实验看状态机"和"改测试的 Mock Agent"两段
   没有进主线：现场起 Worker 跑容器是最大的不确定因素，而且防作弊有现成的真实证据——`/task-runs/806`（aider+autotest 诊断跑，

@@ -105,7 +105,12 @@ export default function RunDetailPage(props: PageProps<"/runs/[id]">) {
             </div>
             <p className="mt-1 font-mono text-xs text-neutral-400">
               #{detail.id} · {detail.benchmark_set} ·{" "}
-              {detail.agent_config_label} · 协议 {detail.protocol_version}
+              {detail.agent_config_label} · 协议 {detail.protocol_version} ·{" "}
+              {/* dirty=false 也要写出来：结果绑定一个干净的 git commit 是"可复现"的前提（C-27/C-28），
+                  演示时要指得到；true 的情况下面另有黄框说明 */}
+              <span title="跑的时候工作区有没有未提交改动（C-27）；有的话结果不得进排行榜（C-28）">
+                {detail.dirty ? "dirty=true" : "工作区干净（dirty=false）"}
+              </span>
             </p>
           </div>
           <div className="shrink-0 text-right">
@@ -115,7 +120,7 @@ export default function RunDetailPage(props: PageProps<"/runs/[id]">) {
               tone={runStatusTone(detail.status)}
             />
             <p className="mt-1 text-xs text-neutral-400">
-              并发 {detail.agent_concurrency} / {detail.sandbox_concurrency}
+              Agent 并发 {detail.agent_concurrency} · 沙箱并发 {detail.sandbox_concurrency}
             </p>
           </div>
         </div>
@@ -154,12 +159,14 @@ export default function RunDetailPage(props: PageProps<"/runs/[id]">) {
           value={formatDuration(detail.makespan_ms)}
           hint={`${formatTokens(detail.total_tokens)} tokens`}
         />
+        {/* value 是最终还挂着的平台故障数（重试救回的不算，C-25）；
+            过程中发生过几次另写在 hint 里，不然"0 · 其中 2 次被救回"读起来自相矛盾 */}
         <Stat
           label="平台故障"
           value={detail.infra_failure_count}
           hint={
             detail.recovered_infra_failure_count > 0
-              ? `其中 ${detail.recovered_infra_failure_count} 次被重试救回（C-56）`
+              ? `最终 ${detail.infra_failure_count} · 过程中 ${detail.recovered_infra_failure_count} 次被重试救回（C-56）`
               : undefined
           }
         />

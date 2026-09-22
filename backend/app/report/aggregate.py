@@ -20,14 +20,15 @@ from sqlalchemy.orm import Session
 
 from app.analytics import concurrency as concurrency_mod
 from app.analytics import leaderboard, timing
+from app.attribution import review_service
 from app.domain.enums import (
     AgentKind,
     AgentOutcome,
     ArtifactKind,
     ArtifactOwnerType,
     AttributionStage,
+    AttributionStatus,
     CostSource,
-    HumanReviewAction,
     InfraOutcome,
     PatchKind,
     ReportScope,
@@ -35,7 +36,7 @@ from app.domain.enums import (
 from app.domain.makespan import MakespanInputs, project
 from app.infrastructure.models.agent import Agent, AgentConfig
 from app.infrastructure.models.artifact import Artifact
-from app.infrastructure.models.attribution import FailureAttribution, HumanReview
+from app.infrastructure.models.attribution import FailureAttribution
 from app.infrastructure.models.benchmark import BenchmarkSet, BenchmarkTask
 from app.infrastructure.models.evaluation import EvaluationRun, EvaluationTaskRun, PatchArtifact
 from app.report.models import (
@@ -560,71 +561,18 @@ def _performance(
     )
 
 
-def _review_label(review: HumanReview, automatic: str) -> str | None:
-    if review.action is HumanReviewAction.ACCEPT:
-        return automatic
-    if review.action is HumanReviewAction.MARK_TASK_DEFECT:
-        return "N2_TASK_DEFECT"
-    if review.action is HumanReviewAction.CORRECT and review.corrected_category is not None:
-        return review.corrected_category.value
-    return None
-
-
 def _review_metrics(
     session: Session, run_ids: Sequence[int]
 ) -> tuple[Availability, float | None, Availability, float | None]:
-    rows = session.execute(
-        sa.select(HumanReview, FailureAttribution.category)
-        .join(
-            FailureAttribution,
-            FailureAttribution.evaluation_task_run_id == HumanReview.evaluation_task_run_id,
-        )
-        .join(
-            EvaluationTaskRun,
-            EvaluationTaskRun.id == HumanReview.evaluation_task_run_id,
-        )
-        .where(EvaluationTaskRun.evaluation_run_id.in_(list(run_ids)))
-        .order_by(HumanReview.evaluation_task_run_id, HumanReview.reviewed_at, HumanReview.id)
-    ).all()
-    labelled: list[tuple[int, str, str]] = []
-    correct = 0
-    for review, automatic_category in rows:
-        automatic = automatic_category.value
-        label = _review_label(review, automatic)
-        if label is None:
-            continue
-        labelled.append((review.evaluation_task_run_id, review.reviewer, label))
-        correct += int(label == automatic)
-    if not labelled:
-        reason = "没有可用于统计的人工盲检记录（E6-T3/E6-T4 未完成）"
-        return (
-            Availability(available=False, reason=reason),
-            None,
-            Availability(available=False, reason=reason),
-            None,
-        )
-
-    accuracy = correct / len(labelled)
-    by_task: dict[int, list[str]] = defaultdict(list)
-    for task_run_id, _reviewer, label in labelled:
-        by_task[task_run_id].append(label)
-    pairs = [(labels[0], labels[1]) for labels in by_task.values() if len(labels) >= 2]
-    if not pairs:
-        return (
-            Availability(available=True),
-            accuracy,
-            Availability(available=False, reason="没有同一案例的双人标注，无法计算 κ"),
-            None,
-        )
-    observed = sum(1 for left, right in pairs if left == right) / len(pairs)
-    left_counts = Counter(left for left, _ in pairs)
-    right_counts = Counter(right for _, right in pairs)
-    labels = set(left_counts) | set(right_counts)
-    expected = sum(
-        left_counts[label] / len(pairs) * right_counts[label] / len(pairs) for label in labels
+    """报告口径的准确率 / κ；实际计算在 review_service（E6-T4 抽出来共用）。"""
+    metrics = review_service.review_metrics(session, run_ids=run_ids)
+    accuracy_state = Availability(
+        available=metrics.accuracy is not None, reason=metrics.accuracy_unavailable_reason
     )
-    kappa = 1.0 if expected == 1.0 and observed == 1.0 else (observed - expected) / (1 - expected)
-    return Availability(available=True), accuracy, Availability(available=True), kappa
+    kappa_state = Availability(
+        available=metrics.kappa is not None, reason=metrics.kappa_unavailable_reason
+    )
+    return accuracy_state, metrics.accuracy, kappa_state, metrics.kappa
 
 
 def _evidence_links(
@@ -762,6 +710,7 @@ def _failures(
     heatmap: Counter[tuple[str, str]] = Counter()
     attributed = 0
     llm_count = 0
+    needs_human = 0
     cases: list[FailureCase] = []
     for (
         task_run,
@@ -780,6 +729,8 @@ def _failures(
             heatmap[(label, category)] += 1
         if attribution is not None and attribution.stage is AttributionStage.LLM:
             llm_count += 1
+        if attribution is not None and attribution.status is AttributionStatus.NEEDS_HUMAN:
+            needs_human += 1
         if len(cases) < top_n:
             patch_url, log_url, trajectory_url = links[task_run.id]
             cases.append(
@@ -815,6 +766,8 @@ def _failures(
         total_failures=len(rows),
         attributed_failures=attributed,
         unattributed_failures=len(rows) - attributed,
+        needs_human_failures=needs_human,
+        llm_attributed_failures=llm_count,
         category_counts=dict(sorted(categories.items())),
         heatmap=[
             FailureCell(agent_label=label, category=category, count=count)
@@ -827,6 +780,22 @@ def _failures(
         kappa=kappa_state,
         kappa_value=kappa,
     )
+
+
+def failure_summary(
+    session: Session,
+    run_ids: Sequence[int],
+    *,
+    base_url: str = "http://localhost:8000",
+    top_n: int = 10,
+) -> FailureSummary:
+    """失败分析（E7-T6 的 `/api/analysis` 用）。
+
+    和报告 JSON 的 `failures` 段是**同一个函数算出来的**：类别分布、Agent × 类别热力图、
+    Top 案例、规则分不出的条数、抽检准确率 / κ。页面和报告口径不一致时，错的一定是
+    调用方传的 run_ids，不是算法。查询条数固定 4 条，不随题数增长。
+    """
+    return _failures(session, run_ids, base_url=base_url, top_n=top_n)
 
 
 def _combined_agents(
@@ -955,4 +924,4 @@ def build_report(
     )
 
 
-__all__ = ["ReportInputError", "build_report"]
+__all__ = ["ReportInputError", "build_report", "failure_summary"]

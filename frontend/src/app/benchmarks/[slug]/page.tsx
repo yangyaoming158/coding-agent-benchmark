@@ -11,6 +11,7 @@
  * 任务表格用 `keepPreviousData` 保活：切筛选时表格不闪空（E7-T4 的经验）。
  */
 
+import { IssueTitle } from "@/components/issue-title";
 import { Suspense, use, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -331,25 +332,25 @@ function BenchmarkDetailPage(props: PageProps<"/benchmarks/[slug]">) {
                 <table className="w-full">
                   <thead>
                     <tr className="whitespace-nowrap border-b border-neutral-200 bg-neutral-50 text-left">
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         题号
                       </th>
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         标题
                       </th>
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         仓库
                       </th>
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         语言
                       </th>
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         难度
                       </th>
-                      <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                         验证状态
                       </th>
-                      <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
+                      <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                         F2P / P2P
                       </th>
                     </tr>
@@ -362,7 +363,7 @@ function BenchmarkDetailPage(props: PageProps<"/benchmarks/[slug]">) {
                           key={task.id}
                           className="border-b border-neutral-200 last:border-b-0 hover:bg-neutral-50"
                         >
-                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
+                          <td className="whitespace-nowrap px-3 py-3 font-mono text-xs">
                             <Link
                               href={`/tasks/${encodeURIComponent(task.task_id)}`}
                               className="text-neutral-700 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
@@ -370,29 +371,31 @@ function BenchmarkDetailPage(props: PageProps<"/benchmarks/[slug]">) {
                               {task.task_id}
                             </Link>
                           </td>
-                          <td className="min-w-72 px-4 py-3">
+                          {/* 标题一行截断、悬停看全：中文题面折成三行会把 41 行的表撑到两屏 */}
+                          <td className="px-3 py-3">
                             <Link
                               href={`/tasks/${encodeURIComponent(task.task_id)}`}
-                              className="text-sm text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
+                              title={task.issue_title}
+                              className="block max-w-xs truncate text-sm text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
                             >
-                              {task.issue_title}
+                              <IssueTitle title={task.issue_title} />
                             </Link>
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 font-mono text-xs text-neutral-600">
+                          <td className="whitespace-nowrap px-3 py-3 font-mono text-xs text-neutral-600">
                             {task.repository}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-xs text-neutral-600">
+                          <td className="whitespace-nowrap px-3 py-3 text-xs text-neutral-600">
                             {issueLanguageLabel(task.issue_language)}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-xs text-neutral-600">
+                          <td className="whitespace-nowrap px-3 py-3 text-xs text-neutral-600">
                             {difficultyLabel(task.difficulty)}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3">
+                          <td className="whitespace-nowrap px-3 py-3">
                             <ToneBadge tone={validation.tone}>
                               {validation.label}
                             </ToneBadge>
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-600">
+                          <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs text-neutral-600">
                             {task.fail_to_pass_count} / {task.pass_to_pass_count} 条
                           </td>
                         </tr>

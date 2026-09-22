@@ -358,6 +358,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/analysis": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Analysis
+         * @description 失败分析：类别分布、Agent × 类别热力图、Top 失败案例。
+         *
+         *     查询条数固定（数据集 1 + 准入 1 + 归因 4），不随实验数或题数增长（AC-7）。
+         */
+        get: operations["get_analysis_api_analysis_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/review/queue": {
         parameters: {
             query?: never;
@@ -370,6 +392,29 @@ export interface paths {
          * @description 新建或恢复抽检批次，并返回当前标注者尚未处理的案例。
          */
         get: operations["get_review_queue_api_review_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/review/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Review Metrics
+         * @description 人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。
+         *
+         *     不给 ``batch_id`` 就统计全库已入库的标注；给了就只看那一批。口径全在
+         *     ``app.attribution.review_service.review_metrics``，这里只拼装响应。
+         */
+        get: operations["get_review_metrics_api_review_metrics_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -396,6 +441,46 @@ export interface paths {
          * @description 保存一条标签或备注。COMMENT 不算标注，也不会解锁自动答案。
          */
         post: operations["post_review_api_review__task_run_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reports
+         * @description 列出生成过的报告，按生成时间倒序，最新的在最前面。
+         */
+        get: operations["list_reports_api_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/{report_record_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Report
+         * @description 下载某一份报告制品。每个 `report_record_id` 已经唯一对应一种格式。
+         */
+        get: operations["download_report_api_reports__report_record_id__download_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -510,6 +595,21 @@ export interface components {
             created_at: string;
         };
         /**
+         * AnalysisResponse
+         * @description 失败分析 = 报告的 failures 段 + 它是按哪几次实验算的。
+         */
+        AnalysisResponse: {
+            /** Benchmark Set */
+            benchmark_set: string | null;
+            /** Benchmark Set Id */
+            benchmark_set_id: number | null;
+            /** Run Ids */
+            run_ids: number[];
+            failures: components["schemas"]["FailureSummary"];
+            /** Attribution Withheld */
+            attribution_withheld: boolean;
+        };
+        /**
          * ArtifactKind
          * @description 制品的种类。日志、补丁、轨迹这些都可达数 MB，一律不入库，只在库里留索引行。
          * @enum {string}
@@ -566,6 +666,16 @@ export interface components {
             /** Reasoning Zh */
             reasoning_zh: string | null;
             status: components["schemas"]["AttributionStatus"];
+        };
+        /**
+         * Availability
+         * @description 一个指标是否真的采到了，避免把缺数据展示成 0。
+         */
+        Availability: {
+            /** Available */
+            available: boolean;
+            /** Reason */
+            reason?: string | null;
         };
         /**
          * BenchmarkSetDetail
@@ -662,6 +772,18 @@ export interface components {
         CompositionCell: {
             /** Value */
             value: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * ConfusionCellResponse
+         * @description 混淆矩阵一格：自动归因判了什么类别、人工判了什么类别、出现几次。
+         */
+        ConfusionCellResponse: {
+            /** Automatic Category */
+            automatic_category: string;
+            /** Human Category */
+            human_category: string;
             /** Count */
             count: number;
         };
@@ -782,6 +904,43 @@ export interface components {
             created_at: string;
         };
         /**
+         * FailureCase
+         * @description Top-N 失败案例及其证据链接。
+         */
+        FailureCase: {
+            /** Task Run Id */
+            task_run_id: number;
+            /** Run Id */
+            run_id: number;
+            /** Agent Label */
+            agent_label: string;
+            /** Task Id */
+            task_id: string;
+            /** Issue Title */
+            issue_title: string;
+            /** Infra Outcome */
+            infra_outcome: string | null;
+            /** Agent Outcome */
+            agent_outcome: string | null;
+            /** Category */
+            category: string | null;
+            /** Attribution Status */
+            attribution_status: string | null;
+            /** Reasoning Zh */
+            reasoning_zh: string | null;
+            /** Patch Url */
+            patch_url: string | null;
+            /** Log Url */
+            log_url: string | null;
+            /** Trajectory Url */
+            trajectory_url: string | null;
+            /**
+             * Dataset Label
+             * @default
+             */
+            dataset_label: string;
+        };
+        /**
          * FailureCategory
          * @description 失败原因分类（`docs/plan/06-judge-attribution.md` §12.1）。
          *
@@ -791,6 +950,55 @@ export interface components {
          * @enum {string}
          */
         FailureCategory: "F1_REQUIREMENT_MISUNDERSTANDING" | "F2_WRONG_FILE_LOCALIZATION" | "F3_INCOMPLETE_FIX" | "F4_INCORRECT_LOGIC" | "F5_SYNTAX_OR_BUILD_ERROR" | "F6_REGRESSION" | "F7_EMPTY_OR_INVALID_PATCH" | "F8_AGENT_TOOL_OR_BUDGET_FAILURE" | "N1_INFRASTRUCTURE_FAILURE" | "N2_TASK_DEFECT";
+        /**
+         * FailureCell
+         * @description Agent × 失败类别热力图中的一个格子。
+         */
+        FailureCell: {
+            /** Agent Label */
+            agent_label: string;
+            /** Category */
+            category: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * FailureSummary
+         * @description DEL-04 的现有数据；没有完成的归因和盲检必须显式缺席。
+         */
+        FailureSummary: {
+            /** Total Failures */
+            total_failures: number;
+            /** Attributed Failures */
+            attributed_failures: number;
+            /** Unattributed Failures */
+            unattributed_failures: number;
+            /**
+             * Needs Human Failures
+             * @default 0
+             */
+            needs_human_failures: number;
+            /**
+             * Llm Attributed Failures
+             * @default 0
+             */
+            llm_attributed_failures: number;
+            /** Category Counts */
+            category_counts: {
+                [key: string]: number;
+            };
+            /** Heatmap */
+            heatmap: components["schemas"]["FailureCell"][];
+            /** Top Cases */
+            top_cases: components["schemas"]["FailureCase"][];
+            llm_attribution: components["schemas"]["Availability"];
+            review_accuracy: components["schemas"]["Availability"];
+            /** Review Accuracy Value */
+            review_accuracy_value: number | null;
+            kappa: components["schemas"]["Availability"];
+            /** Kappa Value */
+            kappa_value: number | null;
+        };
         /**
          * GoldPatchSummary
          * @description 官方补丁只给人工看文件与规模，不返回代码正文。
@@ -996,6 +1204,17 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** Page[ReportBatchResponse] */
+        Page_ReportBatchResponse_: {
+            /** Items */
+            items: components["schemas"]["ReportBatchResponse"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
         /** Page[RunSummary] */
         Page_RunSummary_: {
             /** Items */
@@ -1072,6 +1291,44 @@ export interface components {
             /** Applies Cleanly */
             applies_cleanly: boolean | null;
         };
+        /** ReportArtifactLink */
+        ReportArtifactLink: {
+            format: components["schemas"]["ReportFormat"];
+            /** Report Record Id */
+            report_record_id: number;
+        };
+        /**
+         * ReportBatchResponse
+         * @description 一批报告（同一次生成的最多三种格式）。
+         */
+        ReportBatchResponse: {
+            /** Id */
+            id: number;
+            scope: components["schemas"]["ReportScope"];
+            /** Run Ids */
+            run_ids: number[];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Dataset Labels */
+            dataset_labels: string[];
+            /** Formats */
+            formats: components["schemas"]["ReportArtifactLink"][];
+        };
+        /**
+         * ReportFormat
+         * @description 报告格式。
+         * @enum {string}
+         */
+        ReportFormat: "HTML" | "MARKDOWN" | "JSON";
+        /**
+         * ReportScope
+         * @description 报告覆盖范围：单次实验，还是多次实验横向对比。
+         * @enum {string}
+         */
+        ReportScope: "SINGLE_RUN" | "COMPARISON";
         /**
          * RetryResponse
          * @description 补跑的结果。
@@ -1149,6 +1406,22 @@ export interface components {
             progress: components["schemas"]["ReviewProgressResponse"];
             own_selected_category?: components["schemas"]["FailureCategory"] | null;
             automatic_attribution?: components["schemas"]["AutomaticAttributionResponse"] | null;
+        };
+        /**
+         * ReviewMetricsResponse
+         * @description 人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。
+         */
+        ReviewMetricsResponse: {
+            /** Sample Count */
+            sample_count: number;
+            accuracy: components["schemas"]["Availability"];
+            /** Accuracy Value */
+            accuracy_value: number | null;
+            kappa: components["schemas"]["Availability"];
+            /** Kappa Value */
+            kappa_value: number | null;
+            /** Confusion Matrix */
+            confusion_matrix: components["schemas"]["ConfusionCellResponse"][];
         };
         /** ReviewPatchSummary */
         ReviewPatchSummary: {
@@ -2506,6 +2779,53 @@ export interface operations {
             };
         };
     };
+    get_analysis_api_analysis_get: {
+        parameters: {
+            query?: {
+                /** @description 数据集 slug；取这一版上所有排行榜准入的实验 */
+                set?: string | null;
+                /** @description 数据集版本，配合 set 用 */
+                version?: string | null;
+                /** @description 实验号，可重复给；和 set 二选一 */
+                run?: number[] | null;
+                /** @description Top 失败案例条数 */
+                top_n?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnalysisResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     get_review_queue_api_review_queue_get: {
         parameters: {
             query: {
@@ -2529,6 +2849,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewQueueResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_metrics_api_review_metrics_get: {
+        parameters: {
+            query?: {
+                batch_id?: string | null;
+            };
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewMetricsResponse"];
                 };
             };
             /** @description 请求有问题 */
@@ -2705,6 +3094,97 @@ export interface operations {
             };
             /** @description 当前状态下做不了这件事 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_reports_api_reports_get: {
+        parameters: {
+            query?: {
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ReportBatchResponse_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    download_report_api_reports__report_record_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_record_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 报告内容（流式） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "*/*": unknown;
+                };
+            };
+            /** @description 重定向到签名 URL */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 资源不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

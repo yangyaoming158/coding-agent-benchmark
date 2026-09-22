@@ -3,6 +3,7 @@
 import { use } from "react";
 import Link from "next/link";
 import { AttributionPanel } from "@/components/attribution-panel";
+import { IssueTitle } from "@/components/issue-title";
 import { DiffViewer } from "@/components/diff-viewer";
 import { LogViewer } from "@/components/log-viewer";
 import { ToneBadge } from "@/components/run-status";
@@ -11,6 +12,7 @@ import { TestResultTable } from "@/components/test-result-table";
 import { TrajectoryTimeline } from "@/components/trajectory-timeline";
 import { API_BASE, errorMessage } from "@/lib/api";
 import {
+  agentOutcomeLabel,
   cellVerdict,
   costSourceLabel,
   formatBytes,
@@ -18,9 +20,12 @@ import {
   formatDuration,
   formatTime,
   formatTokens,
+  infraLabel,
   isLiveTaskRun,
+  lifecycleLabel,
+  passRatioTone,
 } from "@/lib/display";
-import { useTaskRun } from "@/lib/queries";
+import { useRun, useTaskRun } from "@/lib/queries";
 
 /** 和 Run Detail 同一个档位：还在动就 3 秒看一眼。 */
 const POLL_MS = 3000;
@@ -47,6 +52,12 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
       query.state.data && isLiveTaskRun(query.state.data.lifecycle_status)
         ? POLL_MS
         : false,
+  });
+
+  // 所属实验：拿实验名和参赛者配置标签放进副标题。单题接口本身不带这两样，
+  // 而"这是哪个 Agent 哪份配置跑的"是看单题证据时第一个要知道的事。
+  const run = useRun(taskRun.data?.evaluation_run_id ?? 0, {
+    enabled: taskRun.data !== undefined,
   });
 
   if (taskRun.isLoading) {
@@ -82,21 +93,36 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
           className="text-xs text-neutral-500 transition-colors hover:text-neutral-900"
         >
           ← 实验运行 #{detail.evaluation_run_id}
+          {run.data !== undefined && ` · ${run.data.name}`}
         </Link>
 
         <div className="mt-2 flex flex-wrap items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-xl font-semibold tracking-tight">
-                {detail.issue_title}
+                <IssueTitle title={detail.issue_title} />
               </h1>
               <ToneBadge tone={verdict.tone}>{verdict.label}</ToneBadge>
             </div>
             <p className="mt-1 font-mono text-xs text-neutral-400">
-              #{detail.id} · {detail.task_id} · 第 {detail.attempt_no} 次尝试
+              #{detail.id} · {detail.task_id}
+              {run.data !== undefined && ` · ${run.data.agent_config_label}`}
+              {" "}· 第 {detail.attempt_no} 次尝试
               {detail.is_canonical && " · 统计依据（canonical）"}
               {detail.retry_of_id !== null && ` · 重试自 #${detail.retry_of_id}`}
-              {detail.worker_id !== null && ` · ${detail.worker_id}`}
+            </p>
+            {/* 三个互相独立的字段原样透出（C-04/05/06）：上面的徽章是它们合起来的结论，
+                这一行是原始值 —— "平台有没有做完"和"AI 有没有修好"分开记是协议最核心的一条 */}
+            <p className="mt-1 text-xs text-neutral-500">
+              <span title="lifecycle_status：这次执行走到哪一步了">流程 {lifecycleLabel(detail.lifecycle_status)}</span>
+              {" · "}
+              <span title="infra_outcome：平台有没有正确完成这次评测">
+                平台 {detail.infra_outcome === null ? "—" : infraLabel(detail.infra_outcome)}
+              </span>
+              {" · "}
+              <span title="agent_outcome：被测 AI 有没有把 bug 修好">
+                AI {detail.agent_outcome === null ? "—" : agentOutcomeLabel(detail.agent_outcome)}
+              </span>
             </p>
           </div>
         </div>
@@ -107,8 +133,8 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
         {detail.protected_path_edit_attempted === true && (
           <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3">
             <p className="text-xs leading-relaxed text-red-800">
-              这次改动碰了<strong>受保护路径</strong>（测试文件、配置等），那部分
-              改动已在标准化时丢弃。按协议 C-13d 这种情况要人工复核。
+              这次改动碰了<strong>受保护路径</strong>（测试文件、配置等），那部分改动已在标准化时丢弃。按协议
+              C-13d 这种情况要人工复核。
             </p>
           </div>
         )}
@@ -148,21 +174,18 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
 
       {/* ── 判定与规模 ── */}
       <section className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {/* 全过绿、有挂红：判定来自后端，颜色只是让"修好一个、弄坏四个"一眼看出来 */}
         <Stat
           label="F2P 通过"
           value={
-            detail.f2p_total !== null
-              ? `${detail.f2p_passed ?? 0} / ${detail.f2p_total}`
-              : "—"
+            <PassRatio passed={detail.f2p_passed} total={detail.f2p_total} />
           }
           hint="修复前失败的用例，修好后必须全过"
         />
         <Stat
           label="P2P 通过"
           value={
-            detail.p2p_total !== null
-              ? `${detail.p2p_passed ?? 0} / ${detail.p2p_total}`
-              : "—"
+            <PassRatio passed={detail.p2p_passed} total={detail.p2p_total} />
           }
           hint="改动不许弄坏的用例"
         />
@@ -254,7 +277,17 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
       <section className="mt-8">
         <h2 className="text-sm font-semibold text-neutral-900">逐条用例</h2>
         <div className="mt-3">
-          <TestResultTable taskRunId={taskRunId} live={live} />
+          <TestResultTable
+            taskRunId={taskRunId}
+            live={live}
+            // 有用例挂了就默认只列失败的：那几条是判定的依据，不该埋在一千多条通过里
+            defaultStatus={
+              passRatioTone(detail.f2p_passed, detail.f2p_total) === "bad" ||
+              passRatioTone(detail.p2p_passed, detail.p2p_total) === "bad"
+                ? "FAILED"
+                : ""
+            }
+          />
         </div>
       </section>
 
@@ -289,6 +322,11 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
             全部制品（{detail.artifacts.length}）
           </summary>
           <div className="border-t border-neutral-200">
+            {detail.worker_id !== null && (
+              <p className="px-4 py-2 font-mono text-xs text-neutral-400">
+                worker {detail.worker_id}
+              </p>
+            )}
             {detail.artifacts.length === 0 ? (
               <p className="px-4 py-3 text-xs text-neutral-500">
                 这次执行没有产出任何制品。
@@ -326,6 +364,19 @@ export default function TaskRunDetailPage(props: PageProps<"/task-runs/[id]">) {
         </details>
       </section>
     </div>
+  );
+}
+
+/** "5 / 5"、"1311 / 1315" 这种通过比，全过绿、有挂红（`passRatioTone`）。 */
+function PassRatio({ passed, total }: { passed: number | null; total: number | null }) {
+  if (total === null) return <>—</>;
+  const tone = passRatioTone(passed, total);
+  const color =
+    tone === "ok" ? "text-emerald-700" : tone === "bad" ? "text-red-700" : "text-neutral-900";
+  return (
+    <span className={color}>
+      {passed ?? 0} / {total}
+    </span>
   );
 }
 

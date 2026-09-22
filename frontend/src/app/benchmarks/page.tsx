@@ -21,6 +21,9 @@ import { benchmarkSetStatusText } from "@/lib/tasks";
 export default function BenchmarksPage() {
   const { data, error, isLoading } = useBenchmarkSets();
 
+  // 描述列：一版都没写描述就整列不渲染（现在 7 版全空，一列 "—" 只占宽度）
+  const hasDescription = data?.items.some((set) => set.description) ?? false;
+
   return (
     <div className="mx-auto w-full max-w-5xl">
       <header className="border-b border-neutral-200 pb-6">
@@ -57,6 +60,7 @@ export default function BenchmarksPage() {
 
         {data && data.items.length > 0 && (
           <div className="overflow-x-auto rounded-md border border-neutral-200 bg-white">
+            {/* hasDescription：现在库里 7 版一条描述都没有，整列 "—" 只占宽度 */}
             <table className="w-full">
               <thead>
                 <tr className="whitespace-nowrap border-b border-neutral-200 bg-neutral-50 text-left">
@@ -72,23 +76,31 @@ export default function BenchmarksPage() {
                   <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
                     发布时间
                   </th>
-                  <th className="px-4 py-2 text-xs font-medium text-neutral-600">
-                    描述
-                  </th>
+                  {hasDescription && (
+                    <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                      描述
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {data.items.map((set) => {
                   const status = benchmarkSetStatusText(set.status);
+                  const muted = set.status === "DRAFT";
                   return (
                     <tr
                       key={set.id}
-                      className="border-b border-neutral-200 last:border-b-0 hover:bg-neutral-50"
+                      // 草稿（没过门禁、没发布）置灰：榜上只认已发布的版本，别和它们混成一色
+                      className={`border-b border-neutral-200 last:border-b-0 hover:bg-neutral-50 ${
+                        muted ? "text-neutral-400" : ""
+                      }`}
                     >
                       <td className="px-4 py-3">
                         <Link
                           href={`/benchmarks/${encodeURIComponent(set.slug)}?version=${encodeURIComponent(set.version)}`}
-                          className="text-sm font-medium text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
+                          className={`text-sm font-medium underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900 ${
+                            muted ? "text-neutral-500" : "text-neutral-900"
+                          }`}
                         >
                           {set.title}
                         </Link>
@@ -105,14 +117,16 @@ export default function BenchmarksPage() {
                       <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-500">
                         {formatTime(set.published_at)}
                       </td>
-                      <td className="px-4 py-3">
-                        <p
-                          className="max-w-md truncate text-xs text-neutral-600"
-                          title={set.description ?? undefined}
-                        >
-                          {set.description ?? "—"}
-                        </p>
-                      </td>
+                      {hasDescription && (
+                        <td className="px-4 py-3">
+                          <p
+                            className="max-w-md truncate text-xs text-neutral-600"
+                            title={set.description ?? undefined}
+                          >
+                            {set.description ?? "—"}
+                          </p>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}

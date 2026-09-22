@@ -10,7 +10,7 @@ import hashlib
 import json
 import random
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -196,18 +196,127 @@ def resolve_labels(labels: Sequence[HumanLabel]) -> ReviewResolution:
     return ReviewResolution(ReviewPhase.COMPLETE, labels[2].category)
 
 
+@dataclass(frozen=True, slots=True)
+class LabelledReview:
+    """一条能推出确定人工类别的标注（COMMENT 或缺失改判类别的 CORRECT 不算）。"""
+
+    task_run_id: int
+    reviewer: str
+    human_category: str
+    automatic_category: str
+
+
+@dataclass(frozen=True, slots=True)
+class ConfusionCell:
+    """混淆矩阵里的一格：自动归因判了什么、人工判了什么、出现几次。"""
+
+    automatic_category: str
+    human_category: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ReviewMetrics:
+    """人工盲检的质量指标（E6-T4）：准确率、Cohen's kappa、混淆矩阵。
+
+    κ 只在同一案例有两人独立标注时才算得出来；样本不够时对应字段为 None，
+    原因写在 ``*_unavailable_reason`` 里，不能悄悄显示成 0。
+    """
+
+    sample_count: int
+    accuracy: float | None
+    accuracy_unavailable_reason: str | None
+    kappa: float | None
+    kappa_unavailable_reason: str | None
+    confusion_matrix: tuple[ConfusionCell, ...]
+
+
+def review_label(
+    *, action: HumanReviewAction, corrected_category: FailureCategory | None, automatic: str
+) -> str | None:
+    """把一条 ``human_reviews`` 记录换算成人工类别字符串；COMMENT 或缺类别的 CORRECT 记 None。"""
+    if action is HumanReviewAction.ACCEPT:
+        return automatic
+    if action is HumanReviewAction.MARK_TASK_DEFECT:
+        return FailureCategory.N2_TASK_DEFECT.value
+    if action is HumanReviewAction.CORRECT and corrected_category is not None:
+        return corrected_category.value
+    return None
+
+
+def compute_review_metrics(labelled: Sequence[LabelledReview]) -> ReviewMetrics:
+    """从一批已换算好人工类别的标注，算准确率 / κ / 混淆矩阵。不连数据库，可单测。"""
+    if not labelled:
+        reason = "没有可用于统计的人工盲检记录（E6-T3/E6-T4 未完成）"
+        return ReviewMetrics(
+            sample_count=0,
+            accuracy=None,
+            accuracy_unavailable_reason=reason,
+            kappa=None,
+            kappa_unavailable_reason=reason,
+            confusion_matrix=(),
+        )
+
+    correct = sum(1 for item in labelled if item.human_category == item.automatic_category)
+    accuracy = correct / len(labelled)
+
+    confusion_counts: Counter[tuple[str, str]] = Counter(
+        (item.automatic_category, item.human_category) for item in labelled
+    )
+    confusion_matrix = tuple(
+        ConfusionCell(automatic_category=automatic, human_category=human, count=count)
+        for (automatic, human), count in sorted(confusion_counts.items())
+    )
+
+    by_task: dict[int, list[str]] = defaultdict(list)
+    for item in labelled:
+        by_task[item.task_run_id].append(item.human_category)
+    pairs = [(labels[0], labels[1]) for labels in by_task.values() if len(labels) >= 2]
+    if not pairs:
+        return ReviewMetrics(
+            sample_count=len(labelled),
+            accuracy=accuracy,
+            accuracy_unavailable_reason=None,
+            kappa=None,
+            kappa_unavailable_reason="没有同一案例的双人标注，无法计算 κ",
+            confusion_matrix=confusion_matrix,
+        )
+    observed = sum(1 for left, right in pairs if left == right) / len(pairs)
+    left_counts = Counter(left for left, _ in pairs)
+    right_counts = Counter(right for _, right in pairs)
+    categories = set(left_counts) | set(right_counts)
+    expected = sum(
+        left_counts[category] / len(pairs) * right_counts[category] / len(pairs)
+        for category in categories
+    )
+    kappa = 1.0 if expected == 1.0 and observed == 1.0 else (observed - expected) / (1 - expected)
+    return ReviewMetrics(
+        sample_count=len(labelled),
+        accuracy=accuracy,
+        accuracy_unavailable_reason=None,
+        kappa=kappa,
+        kappa_unavailable_reason=None,
+        confusion_matrix=confusion_matrix,
+    )
+
+
 __all__ = [
     "DEFAULT_SAMPLE_SIZE",
     "MINIMUM_PER_CATEGORY",
+    "ConfusionCell",
     "HumanLabel",
+    "LabelledReview",
     "ReviewBatchSpec",
     "ReviewCandidate",
+    "ReviewMetrics",
     "ReviewPhase",
     "ReviewResolution",
     "batch_digest",
+    "compute_review_metrics",
     "label_from_review",
     "make_batch_spec",
     "parse_batch_id",
     "resolve_labels",
+    "review_label",
     "stratified_sample",
 ]

@@ -8,6 +8,8 @@ import {
   evidenceView,
   failureCategoryLabel,
   failureCategoryTone,
+  factLabel,
+  factValueLabel,
   formatConfidence,
   formatTime,
   ruleNameLabel,
@@ -71,9 +73,12 @@ export function AttributionPanel({ detail }: { detail: TaskRunDetail }) {
         </ToneBadge>
         <ToneBadge tone="neutral">{attributionStageLabel(attribution.stage)}</ToneBadge>
         <ToneBadge tone={status.tone}>{status.label}</ToneBadge>
-        <span className="font-mono text-xs text-neutral-500" title="规则层是确定性判定，没有置信度">
-          置信度 {formatConfidence(attribution.confidence)}
-        </span>
+        {/* 规则层是确定性判定，没有置信度这个概念：不显示，免得"可信"旁边挂个"置信度 —" */}
+        {attribution.confidence !== null && (
+          <span className="font-mono text-xs text-neutral-500">
+            置信度 {formatConfidence(attribution.confidence)}
+          </span>
+        )}
         {attribution.secondary_category !== null && (
           <span className="text-xs text-neutral-500">
             候选：{failureCategoryLabel(attribution.secondary_category)}
@@ -96,8 +101,12 @@ export function AttributionPanel({ detail }: { detail: TaskRunDetail }) {
             <dl className="mt-2 grid gap-x-6 gap-y-1 text-xs sm:grid-cols-2">
               {evidence.facts.map(([key, value]) => (
                 <div key={key} className="flex gap-2">
-                  <dt className="font-mono text-neutral-500">{key}</dt>
-                  <dd className="font-mono text-neutral-800">{value}</dd>
+                  <dt className="text-neutral-500" title={key}>
+                    {factLabel(key)}
+                  </dt>
+                  <dd className="font-mono text-neutral-800" title={value}>
+                    {factValueLabel(value)}
+                  </dd>
                 </div>
               ))}
             </dl>

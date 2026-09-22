@@ -9,7 +9,7 @@ import {
   formatCost,
   formatDuration,
   formatRate,
-  formatTime,
+  formatTimeMinute,
   isLiveRun,
   runStatusLabel,
   runStatusTone,
@@ -32,10 +32,13 @@ const STATUSES: RunStatus[] = [
 function RunRow({ run }: { run: RunSummary }) {
   return (
     <tr className="border-b border-neutral-200 last:border-b-0 hover:bg-neutral-50">
-      <td className="min-w-72 px-4 py-3">
+      {/* 实验名一行截断、悬停看全：名字里已经带了数据集和参赛者，下面那行小字是准确版本 */}
+      <td className="px-3 py-3">
+        {/* max-w 要放在链接上：表格自动布局下 td 的 max-width 不生效，截断就不会发生 */}
         <Link
           href={`/runs/${run.id}`}
-          className="text-sm font-medium text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
+          title={run.name}
+          className="block max-w-xs truncate text-sm font-medium text-neutral-900 underline decoration-neutral-300 underline-offset-2 hover:decoration-neutral-900"
         >
           {run.name}
         </Link>
@@ -59,10 +62,10 @@ function RunRow({ run }: { run: RunSummary }) {
           )}
         </p>
       </td>
-      <td className="whitespace-nowrap px-4 py-3">
+      <td className="whitespace-nowrap px-3 py-3">
         <StatusBadge status={run.status} />
       </td>
-      <td className="whitespace-nowrap px-4 py-3">
+      <td className="whitespace-nowrap px-3 py-3">
         <ProgressBar
           completed={run.completed_tasks}
           total={run.total_tasks}
@@ -70,19 +73,19 @@ function RunRow({ run }: { run: RunSummary }) {
         />
       </td>
       <td
-        className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-600"
+        className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs text-neutral-600"
         title="严格解决率：已解决的题数 / 题库里的全部题数（协议 C-21）"
       >
         {formatRate(run.strict_resolve_rate)}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-600">
+      <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs text-neutral-600">
         {formatCost(run.total_cost_usd)}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-600">
+      <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs text-neutral-600">
         {formatDuration(run.makespan_ms)}
       </td>
-      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-xs text-neutral-500">
-        {formatTime(run.created_at)}
+      <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs text-neutral-500">
+        {formatTimeMinute(run.created_at)}
       </td>
     </tr>
   );
@@ -192,25 +195,25 @@ export default function RunsPage() {
             <table className="w-full">
               <thead>
                 <tr className="whitespace-nowrap border-b border-neutral-200 bg-neutral-50 text-left">
-                  <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                     实验 · 数据集 · 参赛者
                   </th>
-                  <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                     状态
                   </th>
-                  <th className="px-4 py-2 text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-xs font-medium text-neutral-600">
                     进度
                   </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                     解决率
                   </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                     成本
                   </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                     耗时
                   </th>
-                  <th className="px-4 py-2 text-right text-xs font-medium text-neutral-600">
+                  <th className="px-3 py-2 text-right text-xs font-medium text-neutral-600">
                     创建时间
                   </th>
                 </tr>

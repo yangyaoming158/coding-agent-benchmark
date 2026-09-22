@@ -452,6 +452,10 @@ class AgentConfig:
     artifact_dir: Path | None = None
     #: 追加给底层 CLI 的参数。
     extra_args: tuple[str, ...] = ()
+    #: 出站白名单网络的名字（E2-T4）。给了它，Agent 容器就接这个 internal 网络、
+    #: 只能经 `env` 里的 HTTP_PROXY 访问名单里的域名；不给就退回默认桥接（能连整个互联网，
+    #: 只准开发机调试用）。名字由 harness 从 `Settings.sandbox_egress_network` 取。
+    egress_network: str | None = None
     #: Agent 容器的内存上限（MiB）。None = 用沙箱层 `agent_limits()` 的默认值。
     #:
     #: 这里只放两个数而不是一个 `ResourceLimits`，是为了让协议本身不依赖沙箱

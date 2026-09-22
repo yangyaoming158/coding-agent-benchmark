@@ -458,6 +458,11 @@ def test_agent_stage_has_network_but_only_when_the_task_allows_it(
     fake, _ = run_with(workspace, offline)
     assert fake.spec is not None and fake.spec.network is NetworkMode.NONE
 
+    # harness 给了出站白名单网络时接它，不再是 BRIDGE（E2-T4）
+    fake, _ = run_with(workspace, task, config=AgentConfig(egress_network="bench-egress"))
+    assert fake.spec is not None and fake.spec.network is NetworkMode.EGRESS
+    assert fake.spec.network_name == "bench-egress"
+
 
 def test_the_command_carries_the_configured_budget(
     workspace: Workspace, task: AgentTaskInput

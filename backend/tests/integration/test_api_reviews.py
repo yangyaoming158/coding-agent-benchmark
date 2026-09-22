@@ -416,3 +416,99 @@ def test_automatic_attribution_is_frozen_after_the_first_human_label(
     assert report.protected == 1
     assert attribution is not None
     assert attribution.category is FailureCategory.F6_REGRESSION
+
+
+def test_metrics_reports_accuracy_kappa_and_confusion_matrix(
+    client: TestClient, admin_token: str, review_world: ReviewWorld
+) -> None:
+    queue = _queue(client, admin_token)
+    batch_id = queue["batch"]["batch_id"]
+    t0, t1, _t2 = review_world.task_run_ids
+
+    # t0 的自动类别是 F1，两个标注者都接受——一对双人标注、结论一致
+    for reviewer in ("alice", "bob"):
+        response = client.post(
+            f"/api/review/{t0}",
+            headers=_headers(admin_token),
+            json={
+                "batch_id": batch_id,
+                "reviewer": reviewer,
+                "category": "F1_REQUIREMENT_MISUNDERSTANDING",
+            },
+        )
+        assert response.status_code == 200, response.text
+
+    # t1 的自动类别是 F3，人工改判成 F4——只有一人标注，算不进 κ 但算准确率
+    response = client.post(
+        f"/api/review/{t1}",
+        headers=_headers(admin_token),
+        json={"batch_id": batch_id, "reviewer": "alice", "category": "F4_INCORRECT_LOGIC"},
+    )
+    assert response.status_code == 200, response.text
+
+    metrics = client.get("/api/review/metrics", headers=_headers(admin_token))
+    assert metrics.status_code == 200, metrics.text
+    body = metrics.json()
+
+    assert body["sample_count"] == 3
+    assert body["accuracy"] == {"available": True, "reason": None}
+    assert body["accuracy_value"] == pytest.approx(2 / 3)
+    assert body["kappa"] == {"available": True, "reason": None}
+    assert body["kappa_value"] == pytest.approx(1.0)
+    confusion = {
+        (cell["automatic_category"], cell["human_category"]): cell["count"]
+        for cell in body["confusion_matrix"]
+    }
+    assert confusion == {
+        ("F1_REQUIREMENT_MISUNDERSTANDING", "F1_REQUIREMENT_MISUNDERSTANDING"): 2,
+        ("F3_INCOMPLETE_FIX", "F4_INCORRECT_LOGIC"): 1,
+    }
+
+
+def test_metrics_is_unavailable_without_any_labelled_review_and_requires_admin_token(
+    client: TestClient, admin_token: str, review_world: ReviewWorld
+) -> None:
+    metrics = client.get("/api/review/metrics", headers=_headers(admin_token))
+    assert metrics.status_code == 200, metrics.text
+    body = metrics.json()
+
+    assert body["sample_count"] == 0
+    assert body["accuracy"]["available"] is False
+    assert body["accuracy_value"] is None
+    assert body["kappa"]["available"] is False
+    assert body["kappa_value"] is None
+    assert body["confusion_matrix"] == []
+
+    unauthorized = client.get("/api/review/metrics")
+    assert unauthorized.status_code == 403
+    assert unauthorized.json()["code"] == "MISSING_TOKEN"
+
+
+def test_metrics_batch_id_filter_excludes_reviews_from_other_batches(
+    client: TestClient, admin_token: str, review_world: ReviewWorld
+) -> None:
+    queue = _queue(client, admin_token)
+    batch_id = queue["batch"]["batch_id"]
+    client.post(
+        f"/api/review/{review_world.task_run_ids[0]}",
+        headers=_headers(admin_token),
+        json={
+            "batch_id": batch_id,
+            "reviewer": "alice",
+            "category": "F1_REQUIREMENT_MISUNDERSTANDING",
+        },
+    )
+
+    scoped = client.get(
+        "/api/review/metrics",
+        params={"batch_id": "review-v1-s0-a0-n1-d" + "0" * 32},
+        headers=_headers(admin_token),
+    )
+    assert scoped.status_code == 200, scoped.text
+    assert scoped.json()["sample_count"] == 0
+
+    matching = client.get(
+        "/api/review/metrics", params={"batch_id": batch_id}, headers=_headers(admin_token)
+    )
+    assert matching.status_code == 200, matching.text
+    assert matching.json()["sample_count"] == 1
