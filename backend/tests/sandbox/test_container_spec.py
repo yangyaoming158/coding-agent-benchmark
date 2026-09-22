@@ -359,10 +359,30 @@ def test_read_capped_keeps_everything_under_the_limit() -> None:
 
 
 def test_read_capped_cuts_at_the_limit() -> None:
-    """跑飞的 Agent 能刷出几个 GB，全读进内存会把 Worker 撑爆。"""
-    text, truncated = _read_capped([b"a" * 6, b"b" * 6], 8)
+    """跑飞的 Agent 能刷出几个 GB，全读进内存会把 Worker 撑爆。不留尾巴时只保开头。"""
+    text, truncated = _read_capped([b"a" * 6, b"b" * 6], 8, tail=0)
     assert text == "a" * 6 + "b" * 2
     assert truncated
+
+
+def test_read_capped_keeps_the_tail_when_truncating() -> None:
+    """Claude Code 把 `result` 事件放在最后一行：只留开头的话，一次输出超过上限的
+    正常运行就成了"没有 result → 崩在半路"（2026-09-22 笼内重跑 33 次）。
+    所以截断时开头留 `limit - tail`、结尾留 `tail`，中间放一行标记。"""
+    chunks = [b"h" * 4, b"m" * 100, b"t" * 4, b"END"]
+    text, truncated = _read_capped(chunks, 10, tail=5)
+    assert truncated
+    assert text.startswith("hhhhm")  # 开头 limit - tail = 5 字节
+    assert text.endswith("ttEND")  # 结尾 tail = 5 字节
+    assert "log truncated" in text
+    # 尾巴是滚动的，内存有界：中间那 100 个 m 没有全留下来
+    assert text.count("m") < 20
+
+
+def test_read_capped_tail_never_exceeds_half_the_limit() -> None:
+    text, truncated = _read_capped([b"x" * 50], 10, tail=100)
+    assert truncated
+    assert text.count("x") == 10
 
 
 def test_read_capped_survives_invalid_utf8() -> None:

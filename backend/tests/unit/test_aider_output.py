@@ -271,6 +271,21 @@ def test_insufficient_balance_is_not_the_agents_fault() -> None:
     assert has_model_side_failure(text)
 
 
+def test_bare_40x_inside_stream_json_is_not_an_auth_failure() -> None:
+    """Claude Code 的 stream-json 每个事件带一个 uuid，几万个里必有 `-402c-` 这样的段；
+    `"input_tokens":401,` 这种计数也躲不掉。2026-09-22 笼内重跑：33 次正常运行因此
+    被判成鉴权失败、白重试。状态码只认带锚的形态。
+    """
+    line = (
+        '{"type":"system","subtype":"thinking_tokens","estimated_tokens":21,'
+        '"uuid":"0c5c8aab-45d6-402c-a2fd-0475fd9bb0bc","usage":{"input_tokens":401,"x":402}}'
+    )
+    assert not looks_like_auth_failure(line * 3)
+    # 真的 402 / 401 仍然认得出来，哪怕同一段里也有 uuid 和计数
+    assert looks_like_auth_failure(line + ' {"result":"API Error: 402 Insufficient Balance"}')
+    assert looks_like_auth_failure(line + " Error code: 401 - {'error': ...}")
+
+
 def test_claude_code_402_is_recognised_too() -> None:
     """两个端点的说法不一样，但都要认出来。
 
