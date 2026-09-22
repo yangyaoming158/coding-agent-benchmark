@@ -318,10 +318,37 @@ def _validated_vote(
     errors: list[str],
 ) -> AttributionVerdict | None:
     for validation_attempt in range(VALIDATION_ATTEMPTS):
+        # temperature=0 时原样重问会再次得到同一份坏证据。第二、三次补一条
+        # 明确的纠错指令；原始材料不变，证据仍须经下方逐字校验。
+        retry_messages = list(messages)
+        if validation_attempt == 1:
+            retry_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "上次回答未通过结构或证据校验。只返回完整 JSON。"
+                        "evidence.quote 必须从 source 段逐字复制连续原文，建议只引用一行。"
+                        "这次不要引用 patch；请从 features 或 test_log 中"
+                        "复制直接支持结论的短句，保留原有空格与标点。"
+                    ),
+                }
+            )
+        elif validation_attempt == 2:
+            retry_messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "前两次回答未通过校验。evidence.source 不得为 patch；"
+                        "从 issue、features 或 test_log 复制一段不超过 80 字符的连续原文，"
+                        "逐字保留空格、引号和标点。只返回完整 JSON，理由写一句话。"
+                    ),
+                }
+            )
         try:
             response = client.complete(
-                messages,
+                retry_messages,
                 temperature=0.0,
+                max_tokens=4096,
                 json_mode=True,
                 cache_salt={
                     "purpose": "failure_attribution",
