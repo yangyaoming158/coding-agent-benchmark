@@ -26,6 +26,7 @@ from app.domain.enums import (
     ArtifactKind,
     ArtifactOwnerType,
     AttributionStage,
+    AttributionStatus,
     CostSource,
     HumanReviewAction,
     InfraOutcome,
@@ -762,6 +763,7 @@ def _failures(
     heatmap: Counter[tuple[str, str]] = Counter()
     attributed = 0
     llm_count = 0
+    needs_human = 0
     cases: list[FailureCase] = []
     for (
         task_run,
@@ -780,6 +782,8 @@ def _failures(
             heatmap[(label, category)] += 1
         if attribution is not None and attribution.stage is AttributionStage.LLM:
             llm_count += 1
+        if attribution is not None and attribution.status is AttributionStatus.NEEDS_HUMAN:
+            needs_human += 1
         if len(cases) < top_n:
             patch_url, log_url, trajectory_url = links[task_run.id]
             cases.append(
@@ -815,6 +819,8 @@ def _failures(
         total_failures=len(rows),
         attributed_failures=attributed,
         unattributed_failures=len(rows) - attributed,
+        needs_human_failures=needs_human,
+        llm_attributed_failures=llm_count,
         category_counts=dict(sorted(categories.items())),
         heatmap=[
             FailureCell(agent_label=label, category=category, count=count)
@@ -827,6 +833,22 @@ def _failures(
         kappa=kappa_state,
         kappa_value=kappa,
     )
+
+
+def failure_summary(
+    session: Session,
+    run_ids: Sequence[int],
+    *,
+    base_url: str = "http://localhost:8000",
+    top_n: int = 10,
+) -> FailureSummary:
+    """失败分析（E7-T6 的 `/api/analysis` 用）。
+
+    和报告 JSON 的 `failures` 段是**同一个函数算出来的**：类别分布、Agent × 类别热力图、
+    Top 案例、规则分不出的条数、抽检准确率 / κ。页面和报告口径不一致时，错的一定是
+    调用方传的 run_ids，不是算法。查询条数固定 4 条，不随题数增长。
+    """
+    return _failures(session, run_ids, base_url=base_url, top_n=top_n)
 
 
 def _combined_agents(
@@ -955,4 +977,4 @@ def build_report(
     )
 
 
-__all__ = ["ReportInputError", "build_report"]
+__all__ = ["ReportInputError", "build_report", "failure_summary"]

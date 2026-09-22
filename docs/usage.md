@@ -336,6 +336,8 @@ python -m cli.experiment retry-failed --run 158    # 只补"没有结论"的题�
 curl -s "http://localhost:8000/api/leaderboard?set=benchmark-cn-v1"                    # 不给 set 取最新已发布的那一版
 curl -s "http://localhost:8000/api/leaderboard?set=benchmark-cn-v1&version=v2&metric=cost"       # metric: resolve_rate（默认）/ cost / duration
 curl -s "http://localhost:8000/api/leaderboard?set=swebench-verified-subset&facet=repository"    # facet: difficulty / language / repository
+curl -s "http://localhost:8000/api/analysis?set=benchmark-cn-v1&version=v2"                      # 失败分析：该版排行榜准入实验的归因分布 / 热力图 / Top 案例
+curl -s "http://localhost:8000/api/analysis?run=157&run=160"                                     # 或指定实验号（看被排除的那些）
 ```
 
 响应里带 `eligibility`（准入规则原文）和 `excluded_runs`（被排除的实验和理由）。准入六条：实验状态 `COMPLETED`、`dirty=false`、没被人工排除、配置是启用的、不是哨兵、跑满了整份快照。
@@ -378,6 +380,7 @@ python -m cli.report generate --run 158 --run 159 --run 161 --run 165 --run 167 
 | `/runs/[id]` | 一次实验：实时进度、按结论分组的逐题网格、汇总，**取消 / 重试失败项** |
 | `/task-runs/[id]` | 一次执行：判定三字段、补丁 diff（原样 / 标准化两份对比）、逐条用例、日志搜索、轨迹时间线、失败归因（§8.1） |
 | `/leaderboard` | 排行榜：数据集下拉、多指标排序、成本-解决率散点、分面矩阵、准入规则和被排除的实验 |
+| `/analysis` | 失败分析：该版排行榜准入实验的归因分布堆叠柱、Agent × 类别热力图、失败案例表（每行进单次执行页）；"还没结论"的失败单独一格，NEEDS_HUMAN 黄标；`?run=…&run=…` 看指定实验 |
 | `/review` | 人工盲检工作台（§8.2） |
 
 "某个 Agent 在某道题上为什么失败"三次点击：排行榜点参赛者 → 实验的逐题网格点一格 → 单次执行页。

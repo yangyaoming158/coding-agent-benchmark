@@ -267,6 +267,11 @@ class FailureSummary(ReportModel):
     total_failures: int
     attributed_failures: int
     unattributed_failures: int
+    #: 自动归因给出了类别但自己标了 NEEDS_HUMAN（可信度不够，要进人工队列）的条数。
+    #: 它们**包含在** attributed_failures 和 category_counts 里，页面上要单独标出来。
+    needs_human_failures: int = 0
+    #: 由 LLM 层给出结论的条数（其余是规则层 / 人工）。
+    llm_attributed_failures: int = 0
     category_counts: dict[str, int]
     heatmap: list[FailureCell]
     top_cases: list[FailureCase]
