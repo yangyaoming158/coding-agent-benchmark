@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { href: "/leaderboard", label: "排行榜" },
   { href: "/analysis", label: "失败分析" },
   { href: "/review", label: "人工复核" },
+  { href: "/reports", label: "报告" },
 ] as const;
 
 /** 当前项高亮。`/` 要精确匹配，否则所有路径都算命中首页。 */

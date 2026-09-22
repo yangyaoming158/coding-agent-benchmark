@@ -49,6 +49,8 @@ export type AgentPage = Schemas["Page_AgentSummary_"];
 export type AgentConfigPage = Schemas["Page_AgentConfigSummary_"];
 export type BenchmarkSetPage = Schemas["Page_BenchmarkSetSummary_"];
 export type TaskPage = Schemas["Page_TaskSummary_"];
+export type ReportBatch = Schemas["ReportBatchResponse"];
+export type ReportPage = Schemas["Page_ReportBatchResponse_"];
 
 // —— 各端点的查询参数（照抄后端 OpenAPI 里的定义，别自己发明字段）——
 
@@ -127,6 +129,11 @@ export interface TasksParams {
   offset?: number;
 }
 
+export interface ReportsParams {
+  limit?: number;
+  offset?: number;
+}
+
 /** 查询 key 工厂。层级：资源 → 参数，便于按前缀失效。 */
 export const queryKeys = {
   health: ["health"] as const,
@@ -150,6 +157,7 @@ export const queryKeys = {
     ["benchmark-set", slug, version ?? null] as const,
   tasks: (params: TasksParams = {}) => ["tasks", params] as const,
   task: (taskId: string) => ["task", taskId] as const,
+  reports: (params: ReportsParams = {}) => ["reports", params] as const,
 };
 
 /** 拼查询串；空值（undefined / null / ""）直接丢掉，不产出 `?set=` 这种空参数。数组展开成重复参数（`run=1&run=2`）。 */
@@ -383,6 +391,18 @@ export function useTasks(
   return useQuery({
     queryKey: queryKeys.tasks(params),
     queryFn: () => apiGet<TaskPage>(withQuery("/api/tasks", params)),
+    ...options,
+  });
+}
+
+/** 生成过的报告列表；不轮询——报告是命令行手动生成的，不会在页面开着的时候自己冒出来。 */
+export function useReports(
+  params: ReportsParams = {},
+  options?: QueryOpts<ReportPage>,
+) {
+  return useQuery({
+    queryKey: queryKeys.reports(params),
+    queryFn: () => apiGet<ReportPage>(withQuery("/api/reports", params)),
     ...options,
   });
 }

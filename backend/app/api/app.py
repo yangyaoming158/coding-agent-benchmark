@@ -33,6 +33,7 @@ from app.api import (
     benchmark_sets,
     health,
     leaderboard,
+    reports,
     reviews,
     runs,
     task_runs,
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
     app.include_router(leaderboard.router)
     app.include_router(analysis.router)
     app.include_router(reviews.router)
+    app.include_router(reports.router)
 
     get_logger(__name__).info(
         "API 已装配",
