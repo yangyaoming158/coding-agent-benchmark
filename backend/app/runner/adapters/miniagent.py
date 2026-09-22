@@ -12,6 +12,7 @@ from typing import Any
 from app.domain.cost import estimate_cost_usd
 from app.domain.enums import CostSource
 from app.runner.adapters.cli_text import shared_failure
+from app.runner.adapters.network import agent_network
 from app.runner.adapters.prompt import build_task_prompt
 from app.runner.patch import capture_workspace_diff
 from app.runner.protocol import (
@@ -32,7 +33,6 @@ from app.sandbox.container import (
     BindMount,
     ContainerResult,
     ContainerSpec,
-    NetworkMode,
     Stage,
     agent_limits,
     get_docker_client,
@@ -130,6 +130,7 @@ class MiniAgentRunner:
                 "key_env", "DEEPSEEK_API_KEY" if is_deepseek else "OPENAI_API_KEY"
             ),
         }
+        network, network_name = agent_network(task, config)
         spec = ContainerSpec(
             image=config.image or str(self.params.get("image", DEFAULT_IMAGE)),
             command=[
@@ -141,7 +142,9 @@ class MiniAgentRunner:
             ],
             timeout_s=max(1, task.constraints.remaining_ms() // 1000),
             stage=Stage.AGENT,
-            network=NetworkMode.BRIDGE if task.constraints.allow_network else NetworkMode.NONE,
+            # 只能经出站白名单代理联网（E2-T4，`adapters/network.py`）
+            network=network,
+            network_name=network_name,
             mounts=(
                 BindMount.workspace(Path(workspace.path)),
                 BindMount(RUNTIME_FILE, "/opt/miniagent.py", read_only=True),

@@ -238,7 +238,19 @@ docker image inspect bench-agent:py311-aider --format '{{.Id}}'
 
 ## 5. 建实验
 
-前提三条：数据集版本已经存在（发布过的，或 Golden 那版草稿）；Worker 在跑；工作区干净。
+前提四条：数据集版本已经存在（发布过的，或 Golden 那版草稿）；Worker 在跑；工作区干净；**出网笼子关着**。
+
+第四条是 2026-09-22 加的（E2-T4）：Agent 容器只能经白名单代理访问大模型 API，其它域名、直连 IP 一律不通。
+跑真实 AI 之前先起代理并验收，五条全 ✅ 再建实验：
+
+```bash
+python -m cli.egress up       # 建 internal 网络 bench-egress + 起代理容器，名单读 .env 的 SANDBOX_EGRESS_ALLOW
+python -m cli.egress check    # 在 Agent 同款网络里跑五条 curl：github 域名 / 直连 IP 都不通，api.deepseek.com 通
+python -m cli.egress logs     # 代理的 ALLOW / DENY 记录；查"AI 有没有碰过 github"先翻这里
+```
+
+没起代理就建实验的话，Agent 容器起不来，那一题记 `HARNESS_ERROR`——故意不退回直连。
+哨兵实验（oracle / noop / mock）不起 Agent 容器，不需要这一步。
 
 ```bash
 python -m cli.experiment start --agent oracle --set golden --name 试一下                          # 哨兵，不花钱

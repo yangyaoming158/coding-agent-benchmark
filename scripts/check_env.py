@@ -133,6 +133,35 @@ def check_compose() -> None:
     )
 
 
+def check_egress() -> None:
+    """Agent 容器的出网笼子（E2-T4）在不在：internal 网络 + 代理容器。
+
+    只查存在性，不跑五条探针——那是 `python -m cli.egress check` 的事，要起容器。
+    """
+    code, out = run_cmd(
+        ["docker", "network", "inspect", "bench-egress", "--format", "{{.Internal}}"]
+    )
+    internal = code == 0 and out.strip() == "true"
+    actual = "不存在" if code != 0 else ("internal" if internal else f"Internal={out.strip()}")
+    check(
+        "出站白名单网络 bench-egress 存在且是 internal",
+        internal,
+        actual,
+        "python -m cli.egress up；Agent 容器接不上这个网络会记 HARNESS_ERROR，不会退回直连",
+        warn_only=True,
+    )
+    code, out = run_cmd(
+        ["docker", "inspect", "bench-egress-proxy", "--format", "{{.State.Running}}"]
+    )
+    check(
+        "出站代理容器 bench-egress-proxy 在跑",
+        code == 0 and out.strip() == "true",
+        "运行中" if code == 0 and out.strip() == "true" else "没在跑",
+        "python -m cli.egress up，然后 python -m cli.egress check 五条全绿再跑实验",
+        warn_only=True,
+    )
+
+
 def check_git() -> None:
     """git 命令行的版本。评测的工作区物化全靠它（协议 C-43）。"""
     if shutil.which("git") is None:
@@ -286,6 +315,7 @@ def main() -> int:
         check("Docker daemon 可用", False, out.splitlines()[0] if out else "连不上")
 
     check_compose()
+    check_egress()
     check_git()
     check_golden_image()
     check_base_image()

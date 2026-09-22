@@ -184,12 +184,19 @@ class NetworkMode(StrEnum):
     NONE 对应 `--network none`。协议 C-31 规定测试阶段必须断网：联网的测试可能去
     PyPI 装包（结果就不可复现了），被测代码也可能直接从网上取到正确答案。
 
-    BRIDGE 是 docker 默认桥接，能连整个互联网，暂时给 Agent 阶段用。
-    E2-T4 会加一个只放行 LLM API 的模式，那时 Agent 阶段改用它。
+    BRIDGE 是 docker 默认桥接，能连整个互联网。**Agent 阶段不该再用它**：
+    2026-09-22 查实 claude-code 在这个模式下 `curl` 到了上游修复的 diff
+    （`05-sandbox.md` §10.5）。留着只为契约测试和没配出站网络的开发机。
+
+    EGRESS 是 E2-T4 的出站白名单模式：容器接在一个 `internal` 的 docker 网络上，
+    自己没有出网的路，只能通过同一网络上的代理容器访问名单里的域名。
+    用这个模式必须在 `ContainerSpec.network_name` 里给网络名，
+    环境变量里给 `HTTP_PROXY` / `HTTPS_PROXY`（`Settings.agent_env_for()` 会填）。
     """
 
     NONE = "none"
     BRIDGE = "bridge"
+    EGRESS = "egress"
 
 
 class Stage(StrEnum):
@@ -302,6 +309,10 @@ class ContainerSpec:
     stage: Stage = Stage.TEST
     limits: ResourceLimits = ResourceLimits()
     network: NetworkMode = NetworkMode.NONE
+    #: `network is EGRESS` 时接哪个 docker 网络（`app.sandbox.egress.EGRESS_NETWORK`）。
+    #: 其它模式忽略。没给就起不了容器——故意的：宁可整次评测记 HARNESS_ERROR，
+    #: 也不能悄悄退回 BRIDGE 让被测 AI 直连互联网。
+    network_name: str | None = None
     mounts: tuple[BindMount, ...] = ()
     #: 容器里的工作目录。挂了工作区就填 `WORKSPACE_TARGET`；
     #: 不填的话用镜像自己的默认值 —— 填一个镜像里不存在的目录，容器会起不来。
@@ -325,6 +336,8 @@ class ContainerSpec:
             raise ValueError(f"stop_grace_s 不能是负数，收到 {self.stop_grace_s}")
         if not self.command:
             raise ValueError("command 不能为空")
+        if self.network is NetworkMode.EGRESS and not self.network_name:
+            raise ValueError("network=EGRESS 必须给 network_name（出站白名单网络的名字）")
 
 
 @dataclass(frozen=True, slots=True)
@@ -593,6 +606,14 @@ def inspect_image(image: str, *, client: Any = None) -> ImageInfo:
 # ══════════════════════════════════════════════════════════════
 
 
+def _network_mode(spec: ContainerSpec) -> str:
+    if spec.network is NetworkMode.EGRESS:
+        if not spec.network_name:  # __post_init__ 已经拦过，这里是给类型检查看的
+            raise SandboxError("network=EGRESS 没有 network_name")
+        return spec.network_name
+    return spec.network.value
+
+
 def _create_kwargs(spec: ContainerSpec) -> dict[str, Any]:
     """把 `ContainerSpec` 翻译成 docker SDK 的参数。
 
@@ -619,7 +640,8 @@ def _create_kwargs(spec: ContainerSpec) -> dict[str, Any]:
         "labels": labels,
         "environment": dict(spec.env),
         "user": spec.user or default_container_user(),
-        "network_mode": spec.network.value,
+        # EGRESS 模式下 network_mode 就是那个 internal 网络的名字；docker 接受网络名
+        "network_mode": _network_mode(spec),
         # 内存和 swap 设成同一个值 = 禁用 swap，理由见 ResourceLimits.memory_mb
         "mem_limit": f"{limits.memory_mb}m",
         "memswap_limit": f"{limits.memory_mb}m",

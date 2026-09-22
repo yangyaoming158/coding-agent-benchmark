@@ -36,6 +36,13 @@ from app.domain.enums import ArtifactBackend
 #: 层级：config.py → infrastructure → app → backend → 仓库根。
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
+#: 出站白名单网络和代理容器的默认名字（E2-T4）。真正建它们的是 `app.sandbox.egress`，
+#: 这里只放名字：`Settings` 在 infrastructure 层，不能反过来 import sandbox。
+EGRESS_NETWORK_DEFAULT = "bench-egress"
+EGRESS_PROXY_CONTAINER = "bench-egress-proxy"
+EGRESS_PROXY_PORT = 3128
+EGRESS_PROXY_URL_DEFAULT = f"http://{EGRESS_PROXY_CONTAINER}:{EGRESS_PROXY_PORT}"
+
 #: 数据库默认连接串。
 #:
 #: 端口用 5433 不用 5432：这台开发机上还有别的项目在用 Postgres，
@@ -248,8 +255,20 @@ class Settings(BaseSettings):
 
     # ── 其他外部服务 ──
     github_token: SecretStr | None = None
-    #: 沙箱出网代理。地址是 WSL 网关，`wsl --shutdown` 之后可能变，不要写死在代码里。
+    #: Agent 容器要走的 HTTP(S) 代理。**留空就用出站白名单代理**（下面三项）；
+    #: 只有在故意让 Agent 走别的代理时才设它，那时白名单形同虚设，结果不能进排行榜。
     sandbox_http_proxy: str | None = None
+    #: 出站白名单网络（E2-T4）：Agent 容器接的 `internal` docker 网络的名字。
+    #: 网络和代理容器由 `python -m cli.egress up` 建。**设成空字符串就退回默认桥接**，
+    #: 那等于让被测 AI 直连整个互联网（2026-09-22 查实 claude-code 会去下载上游修复），
+    #: 只准在开发机调试时这么干。
+    sandbox_egress_network: str | None = EGRESS_NETWORK_DEFAULT
+    #: 白名单里的域名，逗号分隔；子域名自动包含。只放大模型 API 的域名，
+    #: **不要放 github.com / pypi.org**——前者能搜到原 PR，后者能装到修好的新版本。
+    sandbox_egress_allow: str = "api.deepseek.com"
+    #: 代理容器自己的上游（`host:port`）。名单里有境外域名时才需要；
+    #: 国内的 DeepSeek / 通义直连即可。
+    sandbox_egress_upstream: str | None = None
     admin_token: SecretStr | None = None
 
     # ── 盲检期间藏起机器归因（E6-T3 / E7-T3）──
@@ -286,6 +305,8 @@ class Settings(BaseSettings):
         "llm_http_proxy",
         "github_token",
         "sandbox_http_proxy",
+        "sandbox_egress_network",
+        "sandbox_egress_upstream",
         "admin_token",
         mode="before",
     )(_blank_to_none)
@@ -349,13 +370,30 @@ class Settings(BaseSettings):
                 if secret is not None:
                     env[var] = secret.get_secret_value()
                 break
-        if self.sandbox_http_proxy:
+        proxy = self.agent_proxy_url()
+        if proxy:
             # 大小写两套都给：curl 只认小写，requests/httpx 两套都认。
             # 少哪一套都会有工具绕过代理直连，表现是"大部分请求走代理、个别超时"
             for name in ("HTTP_PROXY", "HTTPS_PROXY"):
-                env[name] = self.sandbox_http_proxy
-                env[name.lower()] = self.sandbox_http_proxy
+                env[name] = proxy
+                env[name.lower()] = proxy
+            # docker 客户端配置（~/.docker/config.json 的 proxies）会往每个容器注一份
+            # 自己的 NO_PROXY；这里显式清空，免得名单外的某个域名被它放行直连
+            env["NO_PROXY"] = ""
+            env["no_proxy"] = ""
         return env
+
+    def agent_proxy_url(self) -> str | None:
+        """Agent 容器该走的代理地址。
+
+        显式配了 `sandbox_http_proxy` 就用它；否则开着出站白名单网络时就是
+        代理容器在那个网络里的名字。两个都没有就返回 None——Agent 直连。
+        """
+        if self.sandbox_http_proxy:
+            return self.sandbox_http_proxy
+        if self.sandbox_egress_network:
+            return EGRESS_PROXY_URL_DEFAULT
+        return None
 
     def secret_values(self) -> list[str]:
         """当前配置里所有非空的密钥明文。
