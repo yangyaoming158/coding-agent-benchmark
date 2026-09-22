@@ -137,6 +137,7 @@ def test_high_confidence_needs_one_deterministic_call() -> None:
     assert result.verdict.category is FailureCategory.F3_INCOMPLETE_FIX
     assert len(client.calls) == 1
     assert client.calls[0]["temperature"] == 0.0
+    assert client.calls[0]["max_tokens"] == 4096
     assert client.calls[0]["json_mode"] is True
     salt = client.calls[0]["cache_salt"]
     assert isinstance(salt, Mapping)
@@ -193,6 +194,26 @@ def test_invalid_json_is_retried_then_a_valid_answer_is_used() -> None:
     assert isinstance(second_salt, Mapping)
     assert first_salt["validation_attempt"] == 0
     assert second_salt["validation_attempt"] == 1
+    second_messages = client.calls[1]["messages"]
+    assert isinstance(second_messages, list)
+    assert "逐字" in second_messages[-1]["content"]
+
+
+def test_invalid_patch_quote_gets_a_changed_retry_prompt() -> None:
+    bad = answer()
+    bad["evidence"] = [{"source": "patch", "quote": "handlers.append(handler) without diff prefix"}]
+    client = FakeClient([bad, answer()])
+
+    result = attribute_failure(make_input(), client)
+
+    assert result.status is AttributionStatus.OK
+    assert len(client.calls) == 2
+    first_messages = client.calls[0]["messages"]
+    second_messages = client.calls[1]["messages"]
+    assert isinstance(first_messages, list)
+    assert isinstance(second_messages, list)
+    assert len(second_messages) == len(first_messages) + 1
+    assert "不要引用 patch" in second_messages[-1]["content"]
 
 
 def test_three_invalid_answers_fail_without_inventing_a_category() -> None:

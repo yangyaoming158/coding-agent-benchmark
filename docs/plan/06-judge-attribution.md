@@ -500,6 +500,41 @@ E6-T1 曾把 `ANALYZING` 留给本卡，但真接历史数据时发现不能这�
 
 本卡没有改冻结协议、数据库枚举、迁移、后端 API 或前端，也没有调真实模型。
 
+## 六、真实模型回填（2026-09-21）
+
+用户授权后，先调用 DeepSeek `GET /user/balance`，余额 ¥11.52；只选最终两轮
+12 个实验（#158/#159/#161/#165/#167/#169、#162/#163/#164/#166/#168/#170）
+的单次执行，不扫全库的历史实验。按 `classify()` 的 `NEEDS_LLM` 重新计算，
+恰有 **177 条**，与交接记录一致。
+
+首条真跑发现 `deepseek-flash` 默认开思考，而 `LLMClient.complete()` 的默认输出上限
+只有 1024 token；连续三份 JSON 都在中途截断，未落库。修正后，对 Flash 的
+JSON 请求明确发送 `thinking={"type":"disabled"}`，归因调用上限设为 4096。
+十条试跑又发现：模型经常引用补丁代码却漏掉 diff 的 `+`/`-` 和缩进。
+原来的三次结构重试复用同一提示，在 `temperature=0` 下会重复同一错误；
+现在第二、三次追加纠错提示，要求从 `features` / `test_log` / `issue` 复制
+短的连续原文。`parse_verdict()` 的逐字比对没有放松。
+
+批量回填分成 10、20、50、50、46 条，失败题单独重跑，最后只读核对：
+
+| 核对项 | 实测 |
+|:---|---:|
+| 规则层 `NEEDS_LLM` 候选 | 177 |
+| `failure_attributions(stage=LLM, judge_model=deepseek/deepseek-flash)` | 177 |
+| `status=OK` / 缺行 | 177 / 0 |
+| F1 / F2 / F3 / F4 / F5 | 11 / 22 / 31 / 88 / 25 |
+| 提示词指纹不符 / 证据逐字比对不符 | 0 / 0 |
+| DeepSeek 余额变化 | ¥11.52 → ¥10.86，差额约 ¥0.66 |
+
+`tests/unit/test_llm_client.py` 和 `tests/unit/test_attribution_llm.py` 共 39 条离线测试通过；
+`make check` 完整门禁为 2135 passed、2 skipped、98 deselected，集成测试实际运行。
+重生成两轮对比报告：#55～#57（自建题）和 #58～#60（官方题），每轮均含
+HTML / Markdown / JSON。两份 JSON 的 `schema_version=2.0`、
+`failures.llm_attribution.available=true`、`unattributed_failures=0`；
+`review_accuracy` 与 `kappa` 仍标为不可用。
+这些是**机器预测**，不是归因准确率；MET-04 仍需两名人工盲检者标注 50 例，
+再由 E6-T4 计算准确率与 κ。
+
 ---
 
 # 12.8 抽检队列与盲检落地实录（2026-09-20，E6-T3）

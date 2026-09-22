@@ -299,6 +299,22 @@ def test_json_mode_is_requested_when_asked(tmp_path: Path, monkeypatch: pytest.M
     assert calls[0]["body"]["response_format"] == {"type": "json_object"}
 
 
+def test_flash_json_disables_thinking_without_changing_plain_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = fake_posts(monkeypatch, [FakeResponse(200, ok_payload())])
+    judge = LLMClient(
+        model="deepseek/deepseek-flash",
+        api_key=FAKE_KEY,
+        base_url="https://api.deepseek.com",
+        cache_root=tmp_path,
+    )
+    judge.complete([{"role": "user", "content": "x"}], json_mode=True)
+    judge.complete([{"role": "user", "content": "x"}], json_mode=False)
+    assert calls[0]["body"]["thinking"] == {"type": "disabled"}
+    assert "thinking" not in calls[1]["body"]
+
+
 def test_an_empty_choices_list_is_an_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """内容审核拦下时 `choices` 会是空的。当成空回答会让它长得像"模型无话可说"。"""
     fake_posts(monkeypatch, [FakeResponse(200, {"choices": []})])

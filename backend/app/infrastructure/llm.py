@@ -328,6 +328,10 @@ class LLMClient:
         }
         if json_mode:
             body["response_format"] = {"type": "json_object"}
+            # Flash 默认开启思考，既会吞掉 JSON 的输出额度，也让 temperature=0 失效。
+            # 结构化分类只需要最终 JSON；请求体进入缓存键，旧的截断回答不会复用。
+            if strip_provider(self.model) == "deepseek-flash":
+                body["thinking"] = {"type": "disabled"}
 
         if self.ttl_s < 0:
             return self._call(body, cached=False)

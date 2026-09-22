@@ -355,10 +355,10 @@ python -m cli.experiment include --run 157      # 撤销
 python -m cli.report generate --run 158 --run 159 --run 161 --run 165 --run 167 --run 169 --title "benchmark-cn-v1@v2 两轮" --base-url http://localhost:8000
 ```
 
-一条命令对一个或多个**同数据集、同协议版本**的实验生成 HTML、Markdown、JSON 三份（同一份中间结构渲染出来的），登记到 `artifacts` 和 `report_records`，
+一条命令对一个或多个**同协议版本**的实验生成 HTML、Markdown、JSON 三份（同一份中间结构渲染出来的），登记到 `artifacts` 和 `report_records`。跨数据集时，报告按来源分列并标明每道题所属的发布版；各数据集的解决率分别统计。
 文件落在 `var/artifacts/runs/<第一个实验号>/reports/<时间戳>/`。内容：严格 / 有效解决率、轮间极差、逐题翻转率、难度 / 语言 / 仓库分面、
 平台故障与重试、成本（三种来源分开，缺的不显示成 `$0`）、失败分类、Agent × 类别、Top-N 失败案例（`--top-n`，默认带补丁 / 日志 / 轨迹链接，链接的根地址用 `--base-url`）。
-没做完的事（LLM 归因、盲检准确率、κ）报告里**主动写"未做"**，不留空。
+缺失项（例如尚未完成的盲检准确率、κ）报告里**主动写明**，不留空。最终两轮实验的 177 条 LLM 归因已于 2026-09-21 回填，两轮报告记录 #55～#60 已重新生成。
 
 两个辅助命令：`python -m cli.experiment manifest --run 158`（可复现性清单：镜像 digest、harness 的 git sha、数据集摘要、环境变量白名单；给两个 `--run` 就是比对），
 `python -m cli.experiment timing --run 158`（各阶段耗时 P50 / P95、makespan 投影）。
@@ -411,11 +411,11 @@ git pull && make compose-build && make compose-up      # compose-build 会分别
 python -m cli.attribute rules                        # 规则层：F6 回归 / F7 空补丁 / F8 超时 / N1 平台故障，确定性、不花钱；不给参数扫全库、判过的跳过
 python -m cli.attribute rules --run-id 4321 --redo   # --run-id 是**单次执行**的 id，不是实验号；--redo 连判过的也重判；--dry-run 只看分布
 python -m cli.attribute features --run-id 4321       # 看一次执行的结构化特征（改了哪些文件、失败用例的报错怎么变的）
-python -m cli.attribute llm --limit 1 --dry-run      # 大模型归因 F1～F5：先 --dry-run 看会处理哪些、prompt 指纹
-python -m cli.attribute llm --limit 1                # **花钱**。首次付费试跑建议 --limit 1；--model 缺省读 .env 的 JUDGE_MODEL
+python -m cli.attribute llm --model deepseek/deepseek-flash --limit 1 --dry-run  # 大模型归因 F1～F5：只看候选和 prompt 指纹，不花钱
+python -m cli.attribute llm --model deepseek/deepseek-flash --limit 1            # **花钱**。首次付费试跑建议 --limit 1；--run-id 是单次执行 ID
 ```
 
-规则层已经跑过全库（859 条，覆盖 75% 的失败）；剩下 177 道规则分不出的要 LLM 归因或人工。**LLM 归因的代码做完了但没跑过真模型**，跑之前先看余额、先问负责人。
+规则层已跑过全库（859 条，覆盖 75% 的失败）。最终两轮实验中规则层留下的 177 条已于 2026-09-21 用 `deepseek-flash` 真实归因并落库；模型结果仍需 MET-04 人工盲检。再次付费运行前先看余额、先问负责人。不给 `--run-id` 会扫描全库，可能处理其他历史实验。
 
 ### 8.2 人工抽检（盲检）
 
