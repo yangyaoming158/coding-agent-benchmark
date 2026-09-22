@@ -22,6 +22,7 @@ import type { components } from "./api-types";
 type Schemas = components["schemas"];
 
 // —— 类型再导出：页面只 import 这一个文件就够，不用记 api-types 里的编码命名 ——
+export type AnalysisResponse = Schemas["AnalysisResponse"];
 export type RunSummary = Schemas["RunSummary"];
 export type RunDetail = Schemas["RunDetail"];
 export type TaskRunSummary = Schemas["TaskRunSummary"];
@@ -85,6 +86,15 @@ export interface TaskRunTestsParams {
  */
 export type ArtifactTextKind = Schemas["ArtifactKind"] | Schemas["AgentPatchKind"];
 
+export interface AnalysisParams {
+  /** 数据集 slug：这一版上所有排行榜准入的实验 */
+  set?: string;
+  version?: string;
+  /** 实验号，和 set 二选一 */
+  run?: number[];
+  top_n?: number;
+}
+
 export interface LeaderboardParams {
   /** 数据集 slug。不给就取最新已发布的那一版 */
   set?: string;
@@ -131,6 +141,7 @@ export const queryKeys = {
     ["task-run", taskRunId, "artifact", kind] as const,
   leaderboard: (params: LeaderboardParams = {}) =>
     ["leaderboard", params] as const,
+  analysis: (params: AnalysisParams = {}) => ["analysis", params] as const,
   agents: ["agents"] as const,
   agentConfigs: ["agent-configs"] as const,
   benchmarkSets: (params: BenchmarkSetsParams = {}) =>
@@ -141,11 +152,13 @@ export const queryKeys = {
   task: (taskId: string) => ["task", taskId] as const,
 };
 
-/** 拼查询串；空值（undefined / null / ""）直接丢掉，不产出 `?set=` 这种空参数。 */
+/** 拼查询串；空值（undefined / null / ""）直接丢掉，不产出 `?set=` 这种空参数。数组展开成重复参数（`run=1&run=2`）。 */
 function withQuery<T extends object>(path: string, params: T): string {
   const search = new URLSearchParams();
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined && value !== null && value !== "") {
+    if (Array.isArray(value)) {
+      for (const item of value) search.append(key, String(item));
+    } else if (value !== undefined && value !== null && value !== "") {
       search.set(key, String(value));
     }
   }
@@ -296,6 +309,17 @@ export function useLeaderboard(
     queryKey: queryKeys.leaderboard(params),
     queryFn: () =>
       apiGet<LeaderboardResponse>(withQuery("/api/leaderboard", params)),
+    ...options,
+  });
+}
+
+export function useAnalysis(
+  params: AnalysisParams = {},
+  options?: QueryOpts<AnalysisResponse>,
+) {
+  return useQuery({
+    queryKey: queryKeys.analysis(params),
+    queryFn: () => apiGet<AnalysisResponse>(withQuery("/api/analysis", params)),
     ...options,
   });
 }

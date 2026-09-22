@@ -268,6 +268,7 @@ Agent 容器走桥接网络、环境变量按白名单注入（`AGENT_ENV_ALLOWL
 | 实验 | `GET /api/runs`、`GET /api/runs/{id}`、`GET /api/runs/{id}/task-runs`、**`POST /api/runs`**、**`POST /api/runs/{id}/cancel`**、**`POST /api/runs/{id}/retry-failed`** | ✔ |
 | 单次执行 | `GET /api/task-runs/{id}`（带 `failure_attribution`；`BENCH_BLIND_REVIEW=true` 时置空、标 `attribution_withheld`，盲检期间用）、`GET /api/task-runs/{id}/tests`、`GET /api/task-runs/{id}/artifacts/{kind}`（流式返回制品；kind 收制品种类和 `AGENT_RAW` / `AGENT_NORMALIZED` 两套枚举） | |
 | 排行榜 | `GET /api/leaderboard`（`set` / `version` / `metric` / `facet`；响应带准入规则原文和被排除实验） | |
+| 失败分析 | `GET /api/analysis`（`set`+`version` 取该版排行榜准入的实验，或 `run=…&run=…`；`failures` 段和报告 JSON 同一个函数 `app/report/aggregate.failure_summary()`；盲检开关开着时逐案例答案置空） | |
 | 人工复核 | `GET /api/review/queue`、`GET /api/review/{task_run_id}`、**`POST /api/review/{task_run_id}`** | ✔（GET 也要令牌） |
 
 认证是单一管理员令牌（`X-Bench-Token` 头），写操作都要；`/api/review/*` 的 GET 也要，因为复核详情含官方补丁摘要。
