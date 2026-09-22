@@ -239,6 +239,20 @@ def test_claude_code_disables_web_tools_as_one_comma_joined_argument() -> None:
     assert set(DISALLOWED_TOOLS) == {"WebFetch", "WebSearch"}
 
 
+# ── 代理容器不能被孤儿回收删掉 ────────────────────────────────
+
+
+def test_proxy_labels_override_the_image_owner_label() -> None:
+    """`bench-base` 镜像里烤着 `bench.owner=coding-agent-benchmark`，容器会继承；
+    不覆盖的话 Worker 一启动 `reap_orphans()` 就把代理删了（2026-09-22 实测）。"""
+    from app.sandbox.container import BENCH_LABEL, BENCH_LABEL_VALUE
+
+    labels = egress.proxy_labels("bench-egress")
+    assert BENCH_LABEL in labels
+    assert labels[BENCH_LABEL] != BENCH_LABEL_VALUE
+    assert labels[egress.ROLE_LABEL] == egress.ROLE_PROXY
+
+
 # ── 探针输出解析 ────────────────────────────────────────────
 
 
