@@ -28,6 +28,7 @@ from app.attribution.review_service import (
     create_review_batch,
     list_review_queue,
     load_review_batch,
+    review_metrics,
     review_progress,
     submit_review,
 )
@@ -56,6 +57,7 @@ from app.infrastructure.models.evaluation import (
     PatchArtifact,
     TestResult,
 )
+from app.report.models import Availability
 from app.storage import create_artifact_store, key_from_uri
 
 router = APIRouter(
@@ -141,6 +143,25 @@ class ReviewProgressResponse(BaseModel):
     final_category: FailureCategory | None
 
 
+class ConfusionCellResponse(BaseModel):
+    """混淆矩阵一格：自动归因判了什么类别、人工判了什么类别、出现几次。"""
+
+    automatic_category: str
+    human_category: str
+    count: int
+
+
+class ReviewMetricsResponse(BaseModel):
+    """人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。"""
+
+    sample_count: int
+    accuracy: Availability
+    accuracy_value: float | None
+    kappa: Availability
+    kappa_value: float | None
+    confusion_matrix: list[ConfusionCellResponse]
+
+
 class ReviewCaseResponse(BaseModel):
     """盲检一屏三栏需要的全部证据。"""
 
@@ -204,6 +225,38 @@ def get_review_queue(
             ReviewQueueItemResponse.model_validate(item, from_attributes=True) for item in items
         ],
         pending_count=len(items),
+    )
+
+
+@router.get("/metrics", response_model=ReviewMetricsResponse, responses=ERROR_RESPONSES)
+def get_review_metrics(
+    session: SessionDep,
+    batch_id: Annotated[str | None, Query(max_length=100)] = None,
+) -> ReviewMetricsResponse:
+    """人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。
+
+    不给 ``batch_id`` 就统计全库已入库的标注；给了就只看那一批。口径全在
+    ``app.attribution.review_service.review_metrics``，这里只拼装响应。
+    """
+    metrics = review_metrics(session, batch_id=batch_id)
+    return ReviewMetricsResponse(
+        sample_count=metrics.sample_count,
+        accuracy=Availability(
+            available=metrics.accuracy is not None, reason=metrics.accuracy_unavailable_reason
+        ),
+        accuracy_value=metrics.accuracy,
+        kappa=Availability(
+            available=metrics.kappa is not None, reason=metrics.kappa_unavailable_reason
+        ),
+        kappa_value=metrics.kappa,
+        confusion_matrix=[
+            ConfusionCellResponse(
+                automatic_category=cell.automatic_category,
+                human_category=cell.human_category,
+                count=cell.count,
+            )
+            for cell in metrics.confusion_matrix
+        ],
     )
 
 

@@ -5,14 +5,18 @@ from collections import Counter
 import pytest
 
 from app.attribution.review import (
+    ConfusionCell,
     HumanLabel,
+    LabelledReview,
     ReviewCandidate,
     ReviewPhase,
     batch_digest,
+    compute_review_metrics,
     label_from_review,
     make_batch_spec,
     parse_batch_id,
     resolve_labels,
+    review_label,
     stratified_sample,
 )
 from app.domain.enums import FailureCategory, HumanReviewAction
@@ -130,3 +134,89 @@ def test_persisted_actions_restore_the_human_label(
     )
 
     assert (label.category if label is not None else None) is expected
+
+
+@pytest.mark.parametrize(
+    ("action", "corrected", "expected"),
+    [
+        (HumanReviewAction.ACCEPT, None, "F1_REQUIREMENT_MISUNDERSTANDING"),
+        (HumanReviewAction.CORRECT, FailureCategory.F4_INCORRECT_LOGIC, "F4_INCORRECT_LOGIC"),
+        (HumanReviewAction.MARK_TASK_DEFECT, None, "N2_TASK_DEFECT"),
+        (HumanReviewAction.CORRECT, None, None),  # 改判但没给类别，算不出人工类别
+        (HumanReviewAction.COMMENT, None, None),
+    ],
+)
+def test_review_label_matches_e6_t4_report_semantics(
+    action: HumanReviewAction,
+    corrected: FailureCategory | None,
+    expected: str | None,
+) -> None:
+    """`review_label` 是原来报告口径里的私有函数，只是挪了地方（每条单独计，不做仲裁）。"""
+    assert (
+        review_label(
+            action=action, corrected_category=corrected, automatic="F1_REQUIREMENT_MISUNDERSTANDING"
+        )
+        == expected
+    )
+
+
+def test_compute_review_metrics_reports_unavailable_without_any_labelled_review() -> None:
+    metrics = compute_review_metrics([])
+
+    assert metrics.sample_count == 0
+    assert metrics.accuracy is None
+    assert metrics.accuracy_unavailable_reason is not None
+    assert metrics.kappa is None
+    assert metrics.kappa_unavailable_reason is not None
+    assert metrics.confusion_matrix == ()
+
+
+def test_compute_review_metrics_accuracy_and_confusion_matrix_without_double_labelling() -> None:
+    f1, f4 = "F1_REQUIREMENT_MISUNDERSTANDING", "F4_INCORRECT_LOGIC"
+    labelled = [
+        LabelledReview(1, "alice", f1, f1),
+        LabelledReview(2, "alice", f4, f1),
+        LabelledReview(3, "alice", f4, f4),
+    ]
+
+    metrics = compute_review_metrics(labelled)
+
+    assert metrics.sample_count == 3
+    assert metrics.accuracy == pytest.approx(2 / 3)
+    assert metrics.kappa is None
+    assert metrics.kappa_unavailable_reason == "没有同一案例的双人标注，无法计算 κ"
+    assert set(metrics.confusion_matrix) == {
+        ConfusionCell("F1_REQUIREMENT_MISUNDERSTANDING", "F1_REQUIREMENT_MISUNDERSTANDING", 1),
+        ConfusionCell("F1_REQUIREMENT_MISUNDERSTANDING", "F4_INCORRECT_LOGIC", 1),
+        ConfusionCell("F4_INCORRECT_LOGIC", "F4_INCORRECT_LOGIC", 1),
+    }
+
+
+def test_compute_review_metrics_kappa_from_double_labelled_cases() -> None:
+    # 4 个案例都由两人标注：3 个一致（F1×2、F4、N2 各一次一致），1 个不一致——
+    # 用最朴素的方式手算期望值，回归测试用，不是"背下 Cohen's kappa 公式"。
+    f1, f4, n2 = (
+        "F1_REQUIREMENT_MISUNDERSTANDING",
+        "F4_INCORRECT_LOGIC",
+        "N2_TASK_DEFECT",
+    )
+    labelled = [
+        LabelledReview(1, "alice", f1, f1),
+        LabelledReview(1, "bob", f1, f1),
+        LabelledReview(2, "alice", f4, f4),
+        LabelledReview(2, "bob", f4, f4),
+        LabelledReview(3, "alice", n2, f1),
+        LabelledReview(3, "bob", n2, f1),
+        LabelledReview(4, "alice", f1, f4),
+        LabelledReview(4, "bob", f4, f4),
+    ]
+
+    metrics = compute_review_metrics(labelled)
+
+    observed = 3 / 4  # 4 对里 3 对一致
+    # alice: f1 f4 n2 f1 → f1:2 f4:1 n2:1；bob: f1 f4 n2 f4 → f1:1 f4:2 n2:1
+    expected_chance = (2 / 4 * 1 / 4) + (1 / 4 * 2 / 4) + (1 / 4 * 1 / 4)
+    expected_kappa = (observed - expected_chance) / (1 - expected_chance)
+
+    assert metrics.kappa == pytest.approx(expected_kappa)
+    assert metrics.kappa_unavailable_reason is None

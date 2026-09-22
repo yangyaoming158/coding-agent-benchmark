@@ -400,6 +400,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/review/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Review Metrics
+         * @description 人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。
+         *
+         *     不给 ``batch_id`` 就统计全库已入库的标注；给了就只看那一批。口径全在
+         *     ``app.attribution.review_service.review_metrics``，这里只拼装响应。
+         */
+        get: operations["get_review_metrics_api_review_metrics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/review/{task_run_id}": {
         parameters: {
             query?: never;
@@ -709,6 +732,18 @@ export interface components {
         CompositionCell: {
             /** Value */
             value: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * ConfusionCellResponse
+         * @description 混淆矩阵一格：自动归因判了什么类别、人工判了什么类别、出现几次。
+         */
+        ConfusionCellResponse: {
+            /** Automatic Category */
+            automatic_category: string;
+            /** Human Category */
+            human_category: string;
             /** Count */
             count: number;
         };
@@ -1282,6 +1317,22 @@ export interface components {
             progress: components["schemas"]["ReviewProgressResponse"];
             own_selected_category?: components["schemas"]["FailureCategory"] | null;
             automatic_attribution?: components["schemas"]["AutomaticAttributionResponse"] | null;
+        };
+        /**
+         * ReviewMetricsResponse
+         * @description 人工盲检的质量指标（E6-T4）：准确率、Cohen's κ、混淆矩阵。
+         */
+        ReviewMetricsResponse: {
+            /** Sample Count */
+            sample_count: number;
+            accuracy: components["schemas"]["Availability"];
+            /** Accuracy Value */
+            accuracy_value: number | null;
+            kappa: components["schemas"]["Availability"];
+            /** Kappa Value */
+            kappa_value: number | null;
+            /** Confusion Matrix */
+            confusion_matrix: components["schemas"]["ConfusionCellResponse"][];
         };
         /** ReviewPatchSummary */
         ReviewPatchSummary: {
@@ -2709,6 +2760,75 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReviewQueueResponse"];
+                };
+            };
+            /** @description 请求有问题 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 缺少或写错了 X-Bench-Token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 当前状态下做不了这件事 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    get_review_metrics_api_review_metrics_get: {
+        parameters: {
+            query?: {
+                batch_id?: string | null;
+            };
+            header?: {
+                "X-Bench-Token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewMetricsResponse"];
                 };
             };
             /** @description 请求有问题 */

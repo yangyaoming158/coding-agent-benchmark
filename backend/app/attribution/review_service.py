@@ -20,15 +20,19 @@ from sqlalchemy.orm import Session
 from app.attribution.review import (
     DEFAULT_SAMPLE_SIZE,
     HumanLabel,
+    LabelledReview,
     ReviewBatchSpec,
     ReviewCandidate,
+    ReviewMetrics,
     ReviewPhase,
     ReviewResolution,
     batch_digest,
+    compute_review_metrics,
     label_from_review,
     make_batch_spec,
     parse_batch_id,
     resolve_labels,
+    review_label,
     stratified_sample,
 )
 from app.domain.enums import (
@@ -499,6 +503,64 @@ def category_distribution(batch: ReviewBatch) -> dict[str, int]:
     return dict(sorted(Counter(item.category.value for item in batch.candidates).items()))
 
 
+def labelled_reviews(
+    session: Session,
+    *,
+    run_ids: Sequence[int] | None = None,
+    batch_id: str | None = None,
+) -> list[LabelledReview]:
+    """查出能推出确定人工类别的标注（COMMENT 和缺类别的 CORRECT 不算）。
+
+    ``run_ids`` 给实验报告用（E6-T4 前就有的口径，按 ``evaluation_run_id`` 过滤）；
+    ``batch_id`` 给抽检质量看板用（不挂在某次实验下，按抽检批次过滤）。两个都不给
+    就统计全库，两个都给则同时满足。
+    """
+    stmt = (
+        sa.select(HumanReview, FailureAttribution.category)
+        .join(
+            FailureAttribution,
+            FailureAttribution.evaluation_task_run_id == HumanReview.evaluation_task_run_id,
+        )
+        .order_by(HumanReview.evaluation_task_run_id, HumanReview.reviewed_at, HumanReview.id)
+    )
+    if run_ids is not None:
+        stmt = stmt.join(
+            EvaluationTaskRun, EvaluationTaskRun.id == HumanReview.evaluation_task_run_id
+        ).where(EvaluationTaskRun.evaluation_run_id.in_(list(run_ids)))
+    if batch_id is not None:
+        stmt = stmt.where(HumanReview.sample_batch_id == batch_id)
+    rows = session.execute(stmt).all()
+    labelled: list[LabelledReview] = []
+    for review, automatic_category in rows:
+        automatic = automatic_category.value
+        human = review_label(
+            action=review.action,
+            corrected_category=review.corrected_category,
+            automatic=automatic,
+        )
+        if human is None:
+            continue
+        labelled.append(
+            LabelledReview(
+                task_run_id=review.evaluation_task_run_id,
+                reviewer=review.reviewer,
+                human_category=human,
+                automatic_category=automatic,
+            )
+        )
+    return labelled
+
+
+def review_metrics(
+    session: Session,
+    *,
+    run_ids: Sequence[int] | None = None,
+    batch_id: str | None = None,
+) -> ReviewMetrics:
+    """查库 + 算指标的入口；口径全在 :func:`compute_review_metrics` 这个纯函数里。"""
+    return compute_review_metrics(labelled_reviews(session, run_ids=run_ids, batch_id=batch_id))
+
+
 __all__ = [
     "AutomaticAttribution",
     "ReviewBatch",
@@ -510,8 +572,10 @@ __all__ = [
     "candidate_of",
     "category_distribution",
     "create_review_batch",
+    "labelled_reviews",
     "list_review_queue",
     "load_review_batch",
+    "review_metrics",
     "review_progress",
     "submit_review",
 ]
