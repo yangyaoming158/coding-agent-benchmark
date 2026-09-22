@@ -447,6 +447,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/reports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reports
+         * @description 列出生成过的报告，按生成时间倒序，最新的在最前面。
+         */
+        get: operations["list_reports_api_reports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/reports/{report_record_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download Report
+         * @description 下载某一份报告制品。每个 `report_record_id` 已经唯一对应一种格式。
+         */
+        get: operations["download_report_api_reports__report_record_id__download_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1164,6 +1204,17 @@ export interface components {
             /** Offset */
             offset: number;
         };
+        /** Page[ReportBatchResponse] */
+        Page_ReportBatchResponse_: {
+            /** Items */
+            items: components["schemas"]["ReportBatchResponse"][];
+            /** Total */
+            total: number;
+            /** Limit */
+            limit: number;
+            /** Offset */
+            offset: number;
+        };
         /** Page[RunSummary] */
         Page_RunSummary_: {
             /** Items */
@@ -1240,6 +1291,44 @@ export interface components {
             /** Applies Cleanly */
             applies_cleanly: boolean | null;
         };
+        /** ReportArtifactLink */
+        ReportArtifactLink: {
+            format: components["schemas"]["ReportFormat"];
+            /** Report Record Id */
+            report_record_id: number;
+        };
+        /**
+         * ReportBatchResponse
+         * @description 一批报告（同一次生成的最多三种格式）。
+         */
+        ReportBatchResponse: {
+            /** Id */
+            id: number;
+            scope: components["schemas"]["ReportScope"];
+            /** Run Ids */
+            run_ids: number[];
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /** Dataset Labels */
+            dataset_labels: string[];
+            /** Formats */
+            formats: components["schemas"]["ReportArtifactLink"][];
+        };
+        /**
+         * ReportFormat
+         * @description 报告格式。
+         * @enum {string}
+         */
+        ReportFormat: "HTML" | "MARKDOWN" | "JSON";
+        /**
+         * ReportScope
+         * @description 报告覆盖范围：单次实验，还是多次实验横向对比。
+         * @enum {string}
+         */
+        ReportScope: "SINGLE_RUN" | "COMPARISON";
         /**
          * RetryResponse
          * @description 补跑的结果。
@@ -3005,6 +3094,97 @@ export interface operations {
             };
             /** @description 当前状态下做不了这件事 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    list_reports_api_reports_get: {
+        parameters: {
+            query?: {
+                /** @description 最多返回多少行 */
+                limit?: number;
+                /** @description 跳过多少行 */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_ReportBatchResponse_"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description 参数不合法 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    download_report_api_reports__report_record_id__download_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                report_record_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description 报告内容（流式） */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                    "*/*": unknown;
+                };
+            };
+            /** @description 重定向到签名 URL */
+            302: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 资源不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
