@@ -70,7 +70,15 @@ AUTH_MARKERS: tuple[str, ...] = (
 #: aider 的进度条命中过：`142/142 [00:00<00:00, 401.79it/s]` 里的 `401`
 #: 两侧分别是 `,` 和 `.`，`\b401\b` 照样匹配，于是一次**本来只是余额不足**的运行
 #: 被判成鉴权失败。`\b` 把小数点当词边界，而吞吐量天生带小数。
-AUTH_STATUS_RE = re.compile(r"(?<![\d.])40[12](?![\d.])")
+#:
+#: **2026-09-22 改成只认带前缀的形态**，和下面的 `EXTERNAL_SERVICE_RE` 同一条纪律：
+#: aider / openai SDK 的 `Error code: 401 - {...}`（挤掉空白是 `errorcode:401-`）、
+#: Claude Code 的 `API Error: 402 Insufficient Balance`（`apierror:402`）、`status=402` /
+#: `"api_error_status":402`。裸状态码加守卫又被
+#: 无辜命中了一次：Claude Code 的 stream-json 每个事件带一个 uuid，几万个里必有 `-402c-`
+#: 这样的段，`"input_tokens":401,` 这种计数也躲不掉 —— 笼内重跑四轮 33 次正常运行被判成
+#: 鉴权失败、白重试一次。几 MB 的日志里裸状态码没有可靠的边界，只能靠锚。
+AUTH_STATUS_RE = re.compile(r"(apierror:|errorcode:|status\"?[:=])40[12](?![\d.])")
 
 
 def unwrap(text: str) -> str:

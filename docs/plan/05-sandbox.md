@@ -158,6 +158,22 @@ API 调用经代理成功（代理日志 `ALLOW api.deepseek.com:443`），模�
 配置三项：`SANDBOX_EGRESS_NETWORK`（默认 `bench-egress`，空 = 退回直连、只准调试）、`SANDBOX_EGRESS_ALLOW`（默认 `api.deepseek.com`）、
 `SANDBOX_EGRESS_UPSTREAM`（名单有境外域名时给代理容器配的上游）。单测 21 条（真 socket 打真代理，不 mock），`make check` 2156 passed。
 
+**2026-09-22 晚：笼内重跑 claude-code 四轮（#171–#174）。** 高峰价，两轮共 ¥43.6。cn-v1 58.5% / 48.8%（原 75.6% / 78.0%），
+swebench 73.3% / 80.0%（原 86.7% / 90.7%）；平台故障 0，全部 `dirty=false`（harness `9de2d4f`）。代理日志四轮累计
+`DENY github.com` 2 次、`raw.githubusercontent.com` 10 次、`pypi.org` 1084 次、`registry.npmjs.org` 1 次，`ALLOW api.deepseek.com` 397 次——
+它每一轮都试过去拿源码/装包，每一次都被拦在门外。两轮报告重生成为 #61～#63（cn-v1）、#64～#66（swebench）。
+掉的幅度（12～23 pp）就是"能抄原修复"值多少分。
+
+笼子起来之后撞到的两个坑，都不在笼子本身：
+
+1. **代理容器被 Worker 的孤儿回收删掉**（#141）。`bench-base` 镜像里烤着 `bench.owner=coding-agent-benchmark`，容器继承镜像标签，
+   `reap_orphans()` 的等值过滤把它当评测容器杀了。修法是代理容器显式把 `bench.owner` 覆盖成另一个值。教训：**镜像标签会传给容器**，
+   "不打标签"不等于"没有标签"。
+2. **33 次正常运行被判成 `AGENT_AUTH_ERROR`**。两个原因叠加：claude-code 的 `thinking_tokens` 系统事件一题刷两万行、3.9 MB，撞上 4 MiB 的
+   stdout 上限，末尾的 `result` 事件被截掉；然后 `AUTH_STATUS_RE` 的裸 `40[12]` 在几万个 uuid（`-402c-`）和 `"input_tokens":401,` 里必然命中。
+   全部自动重试救回，但白花约 ¥8、成本列 33 次报不出。修法：截断改成"留开头 + 留最后 512 KiB"（`result` 在最后一行），
+   状态码只认带锚的 `apierror:` / `errorcode:` / `status=` 形态——和 E3-T9 给 `EXTERNAL_SERVICE_RE` 定的"每一条都带锚"是同一条纪律。
+
 ## 10.6 Docker 客户端与 Day-0 阻塞
 - 平台通过 **docker SDK for Python** 操作本机 daemon（`/var/run/docker.sock`）。
 - API 服务与 Worker 用 docker compose 起；**Worker 需要挂载 docker.sock**（DooD 模式，非 DinD）。这引入宿主机权限暴露——在单机实训环境可接受，但必须在部署文档中明示，并把 Worker 容器限制为非公开端口。

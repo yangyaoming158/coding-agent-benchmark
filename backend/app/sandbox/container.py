@@ -489,26 +489,46 @@ def parse_docker_time(raw: str) -> datetime | None:
     return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
 
 
-def _read_capped(chunks: Iterable[bytes], limit: int) -> tuple[str, bool]:
-    """把一串字节块拼成字符串，最多留 `limit` 个字节。
+#: 截断时保住的尾巴（字节）。Claude Code 的 stream-json 把最要紧的 `result` 事件放在**最后一行**，
+#: 只留开头的话，一次输出超过上限的正常运行就成了"没有 result 事件 → 崩在半路"
+#: （2026-09-22 实测：`thinking_tokens` 系统事件一题刷两万行、3.9 MB，四轮 33 次撞上限）。
+#: 尾巴一直滚动着存，内存有界；中间丢掉的那段用一行标记补上，逐行解析的调用方会把它当非 JSON 跳过。
+TAIL_KEEP_BYTES = 512 * 1024
+_TRUNCATION_MARK = b"\n[... bench: log truncated in the middle ...]\n"
+
+
+def _read_capped(
+    chunks: Iterable[bytes], limit: int, *, tail: int = TAIL_KEEP_BYTES
+) -> tuple[str, bool]:
+    """把一串字节块拼成字符串，最多留 `limit` 字节：开头 `limit - tail` 加**最后** `tail` 字节。
 
     返回 (文本, 是否被截断)。非法字节用替换字符兜住：容器可以输出任意字节，
     解码报错会让整次评测失败，而我们要的只是把日志存下来。
     """
-    parts: list[bytes] = []
-    remaining = limit
+    tail = min(tail, limit // 2)
+    head_limit = limit - tail
+    head: list[bytes] = []
+    head_size = 0
+    tail_buf = bytearray()
     truncated = False
     for chunk in chunks:
-        if remaining <= 0:
+        if not truncated:
+            if head_size + len(chunk) <= head_limit:
+                head.append(chunk)
+                head_size += len(chunk)
+                continue
+            keep = head_limit - head_size
+            head.append(chunk[:keep])
+            head_size = head_limit
             truncated = True
-            break
-        if len(chunk) > remaining:
-            parts.append(chunk[:remaining])
-            truncated = True
-            break
-        parts.append(chunk)
-        remaining -= len(chunk)
-    return b"".join(parts).decode("utf-8", errors="replace"), truncated
+            chunk = chunk[keep:]
+        tail_buf += chunk
+        if len(tail_buf) > tail:
+            del tail_buf[: len(tail_buf) - tail]
+    data = b"".join(head)
+    if truncated and tail > 0:
+        data += _TRUNCATION_MARK + bytes(tail_buf)
+    return data.decode("utf-8", errors="replace"), truncated
 
 
 # ══════════════════════════════════════════════════════════════
