@@ -16,7 +16,8 @@
     "check:dashboard": "node scripts/check-dashboard.mjs",
     "check:analysis": "node scripts/check-analysis.mjs",
     "check:review-metrics": "node scripts/check-review-metrics.mjs",
-    "check": "npm run -s check:display && npm run -s check:task-detail && npm run -s check:leaderboard && npm run -s check:tasks && npm run -s check:dashboard && npm run -s check:analysis && npm run -s check:review-metrics"
+    "check:agents": "node scripts/check-agents.mjs",
+    "check": "npm run -s check:display && npm run -s check:task-detail && npm run -s check:leaderboard && npm run -s check:tasks && npm run -s check:dashboard && npm run -s check:analysis && npm run -s check:review-metrics && npm run -s check:agents"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.102.8",

@@ -124,6 +124,7 @@
 | 可复现性 | `/runs/167` 往下拉到"可复现性清单" | 镜像 digest、harness 的 git sha `793862c`、数据集摘要、随机种子。同一份清单能重跑 |
 | 自研 Agent | `/agents` | MiniAgent：四个工具的 ReAct 循环，逐轮记 token 和成本；三个参赛者同一底座 |
 | 人工盲检 | `/review` | 标注者提交前看不到机器答案，提交后才对照；两人独立、不一致第三人裁。要管理员令牌（`.env` 的 `ADMIN_TOKEN`），演示时**当场粘**、不提前存 |
+| 失败按类别分布 | `/analysis?set=benchmark-cn-v1&version=v2` | 中文集 148 道失败全部归因（0 条分不出）；堆叠柱和热力图看 F7 空补丁 49 条、F4 逻辑错误 46 条明显最多，两类加起来占了三分之二 |
 | 报告 | `var/artifacts/runs/158/reports/<最新时间戳>/report.html` | 一条命令生成 HTML / Markdown / JSON：解决率、轮间极差、逐题翻转、分面、成本、失败分类、Top 失败案例 |
 
 ---
